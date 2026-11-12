@@ -77,6 +77,18 @@ namespace ShieldGate
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // Phải đăng ký trước khi tạo cửa sổ đầu tiên (kể cả hộp thiết lập),
+            // nếu không .NET ném InvalidOperationException và tiến trình thoát im lặng.
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += delegate(object sender, ThreadExceptionEventArgs e)
+            {
+                ReportError(e.Exception);
+            };
+            AppDomain.CurrentDomain.UnhandledException += delegate(object sender, UnhandledExceptionEventArgs e)
+            {
+                ReportError(e.ExceptionObject as Exception);
+            };
+
             bool created;
             using (Mutex mutex = new Mutex(true, UiMutexName, out created))
             {
@@ -110,16 +122,6 @@ namespace ShieldGate
                 }
 
                 Paths.Configure(string.IsNullOrEmpty(Bootstrap.Home) ? Bootstrap.DefaultHome : Bootstrap.Home);
-
-                Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-                Application.ThreadException += delegate(object sender, ThreadExceptionEventArgs e)
-                {
-                    ReportError(e.Exception);
-                };
-                AppDomain.CurrentDomain.UnhandledException += delegate(object sender, UnhandledExceptionEventArgs e)
-                {
-                    ReportError(e.ExceptionObject as Exception);
-                };
 
                 try
                 {

@@ -127,8 +127,11 @@ namespace ShieldGate
 
             _continue = new FlatButton();
             _continue.Kind = ButtonKind.Primary;
-            _continue.Bounds = Ui.Rect(ClientSize.Width - Ui.Px(32) - Ui.Px(150), ClientSize.Height - Ui.Px(66),
-                                       Ui.Px(150), Ui.Px(Theme.ControlHeight));
+            // ClientSize đã nhân tỉ lệ DPI, nên chỉ trừ phần lề đã nhân; không bọc Ui.Rect nữa.
+            _continue.Bounds = new Rectangle(
+                ClientSize.Width - Ui.Px(32) - Ui.Px(150),
+                ClientSize.Height - Ui.Px(28) - Ui.Px(Theme.ControlHeight),
+                Ui.Px(150), Ui.Px(Theme.ControlHeight));
             _continue.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             _continue.Click += delegate { Accept(); };
             Controls.Add(_continue);
