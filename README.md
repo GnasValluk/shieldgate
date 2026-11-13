@@ -9,7 +9,7 @@ ShieldGate là công cụ nhỏ để chặn kiểu lây đó và dọn những 
 - Kiểm tra một ổ USB và liệt kê shortcut, script, autorun có dấu hiệu độc hại.
 - Để bạn xem danh sách trước, bỏ chọn tệp muốn giữ, rồi mới cách ly. Tệp bị cách ly vẫn khôi phục được.
 - Tắt tự chạy của Windows, chặn tệp `autorun.inf`, và tùy chọn chặn Windows Script Host.
-- Chạy nền để kiểm tra USB ngay khi cắm vào, nếu bạn bật mục này.
+- Chạy nền để kiểm tra USB ngay khi cắm vào, nếu bạn bật mục này. Khi bảo vệ nền đang chạy, ShieldGate có biểu tượng trong khay hệ thống (vùng biểu tượng ẩn cạnh đồng hồ): nhấn đúp để mở ứng dụng, chuột phải để xem trạng thái.
 
 ## Chạy lần đầu
 

@@ -16,9 +16,12 @@ namespace ShieldGate
     internal static class AppInfo
     {
         public const string Name = "ShieldGate";
-        public const string Version = "7.1";
+        public const string Version = "7.2";
         public const string TaskName = "ShieldGate USB Guard";
+        public const string TrayTaskName = "ShieldGate Tray";
         public const string MutexName = "Global\\ShieldGate_USBGuard_7";
+        public const string UiMutexName = "Local\\ShieldGate_UI_7";
+        public const string TrayMutexName = "Local\\ShieldGate_Tray_7";
     }
 
     internal static class Paths

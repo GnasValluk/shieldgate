@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using Microsoft.Win32;
@@ -212,6 +213,37 @@ namespace ShieldGate
   </Actions>
 </Task>";
 
+        // Biểu tượng khay chạy trong phiên đăng nhập của người dùng, không phải SYSTEM,
+        // để người dùng thấy bảo vệ nền đang chạy.
+        private const string TrayTaskXml =
+@"<?xml version=""1.0"" encoding=""UTF-16""?>
+<Task version=""1.2"" xmlns=""http://schemas.microsoft.com/windows/2004/02/mit/task"">
+  <RegistrationInfo>
+    <Description>ShieldGate: shows a tray icon while background protection runs.</Description>
+  </RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled><Delay>PT5S</Delay></LogonTrigger></Triggers>
+  <Principals>
+    <Principal id=""Author""><UserId>{1}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure>
+  </Settings>
+  <Actions Context=""Author"">
+    <Exec><Command>{0}</Command><Arguments>--tray</Arguments></Exec>
+  </Actions>
+</Task>";
+
         private static string XmlEscape(string s)
         {
             return (s ?? "").Replace("&", "&amp;").Replace("<", "&lt;")
@@ -413,6 +445,78 @@ namespace ShieldGate
             return false;
         }
 
+        // -------------------------------------------------- biểu tượng khay
+
+        private static string CurrentUserSid()
+        {
+            try
+            {
+                using (WindowsIdentity id = WindowsIdentity.GetCurrent())
+                    return id.User == null ? "" : id.User.Value;
+            }
+            catch { return ""; }
+        }
+
+        public static bool TrayTaskExists()
+        {
+            if (!Native.IsAdmin()) return false;
+            string output;
+            return Native.Run("schtasks.exe", "/Query /TN \"" + AppInfo.TrayTaskName + "\"", 15000, out output) == 0;
+        }
+
+        private static bool RegisterTrayTask(out string output)
+        {
+            output = "";
+            string sid = CurrentUserSid();
+            if (sid.Length == 0) { output = "không xác định được tài khoản người dùng"; return false; }
+
+            string xml = TrayTaskXml.Replace("{0}", XmlEscape(Paths.GuardExe)).Replace("{1}", sid);
+            string xmlPath = Path.Combine(Paths.Root, "tray_task.xml");
+            try { File.WriteAllText(xmlPath, xml, new UnicodeEncoding(false, true)); }
+            catch (Exception e) { output = "không ghi được tệp tác vụ: " + e.Message; return false; }
+
+            return Native.Run("schtasks.exe",
+                "/Create /XML \"" + xmlPath + "\" /TN \"" + AppInfo.TrayTaskName + "\" /F",
+                30000, out output) == 0;
+        }
+
+        private static void StartTray()
+        {
+            string output;
+            if (!RegisterTrayTask(out output))
+            {
+                Log.Write("Không tạo được biểu tượng khay: " + (output ?? "").Trim(), "WARN");
+                return;
+            }
+            Native.Run("schtasks.exe", "/Run /TN \"" + AppInfo.TrayTaskName + "\"", 20000, out output);
+        }
+
+        private static void StopTray()
+        {
+            string output;
+            Native.Run("schtasks.exe", "/End /TN \"" + AppInfo.TrayTaskName + "\"", 20000, out output);
+            Native.Run("schtasks.exe", "/Delete /TN \"" + AppInfo.TrayTaskName + "\" /F", 20000, out output);
+        }
+
+        // Bảo đảm có biểu tượng khay khi bảo vệ nền đang chạy (kể cả bản cài từ trước).
+        public static void EnsureTray()
+        {
+            if (!Native.IsAdmin()) return;
+            if (HeartbeatAge() >= 30) return;
+
+            if (!TrayTaskExists())
+            {
+                string created;
+                if (!RegisterTrayTask(out created))
+                {
+                    Log.Write("Không tạo được biểu tượng khay: " + (created ?? "").Trim(), "WARN");
+                    return;
+                }
+            }
+            string output;
+            Native.Run("schtasks.exe", "/Run /TN \"" + AppInfo.TrayTaskName + "\"", 20000, out output);
+        }
+
         public static double HeartbeatAge()
         {
             try { return (DateTime.Now - File.GetLastWriteTime(Paths.Heartbeat)).TotalSeconds; }
@@ -495,6 +599,7 @@ namespace ShieldGate
             Native.Run("schtasks.exe", "/End /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
             bool deleted = Native.Run("schtasks.exe", "/Delete /TN \"" + AppInfo.TaskName + "\" /F",
                                       20000, out output) == 0;
+            StopTray();
             if (log != null) log(deleted ? S.Cli.TaskRemoved : S.Cli.TaskMissing);
 
             bool restored = RestoreFromSnapshot();
@@ -784,6 +889,7 @@ namespace ShieldGate
                         if (HeartbeatAge() < 20) break;
                         Thread.Sleep(600);
                     }
+                    StartTray();
                 }
             }
             else
@@ -791,6 +897,7 @@ namespace ShieldGate
                 try { File.WriteAllText(Paths.StopFlag, "stop"); } catch { }
                 Native.Run("schtasks.exe", "/End /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
                 Native.Run("schtasks.exe", "/Delete /TN \"" + AppInfo.TaskName + "\" /F", 20000, out output);
+                StopTray();
                 try { File.Delete(Paths.StopFlag); } catch { }
                 try { File.Delete(Paths.Heartbeat); } catch { }
             }

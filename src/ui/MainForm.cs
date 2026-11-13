@@ -60,17 +60,7 @@ namespace ShieldGate
 
         private static Icon MakeIcon()
         {
-            using (Bitmap bmp = new Bitmap(32, 32))
-            {
-                using (Graphics g = Graphics.FromImage(bmp))
-                {
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-                    g.Clear(Color.Transparent);
-                    Icons.DrawLogo(g, new RectangleF(2, 2, 28, 28), Theme.Accent);
-                }
-                IntPtr h = bmp.GetHicon();
-                return Icon.FromHandle(h);
-            }
+            return Icons.AppIcon();
         }
 
         // ---------------------------------------------------------- điều hướng

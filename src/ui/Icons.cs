@@ -186,5 +186,21 @@ namespace ShieldGate
                 g.SmoothingMode = oldMode;
             }
         }
+
+        // Biểu tượng ứng dụng (cửa sổ chính và khay hệ thống).
+        public static Icon AppIcon()
+        {
+            using (Bitmap bmp = new Bitmap(32, 32))
+            {
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.Clear(Color.Transparent);
+                    DrawLogo(g, new RectangleF(2, 2, 28, 28), Theme.Accent);
+                }
+                IntPtr h = bmp.GetHicon();
+                return Icon.FromHandle(h);
+            }
+        }
     }
 }

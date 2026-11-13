@@ -607,6 +607,32 @@ namespace ShieldGate
             public static string SettingsSaved { get { return T("thiết lập và nhật ký ghi đúng chỗ", "settings and log are written to the data folder"); } }
         }
 
+        // Biểu tượng khay hệ thống của bản chạy nền.
+        public static class Tray
+        {
+            public static string TooltipOn
+            {
+                get { return T("ShieldGate — đang bảo vệ máy", "ShieldGate — protecting this computer"); }
+            }
+            public static string TooltipOff
+            {
+                get { return T("ShieldGate — bảo vệ nền đã dừng", "ShieldGate — background protection has stopped"); }
+            }
+            public static string StatusOn { get { return T("Bảo vệ đang chạy", "Protection is running"); } }
+            public static string StatusOff { get { return T("Bảo vệ đã dừng", "Protection has stopped"); } }
+            public static string Open { get { return T("Mở ShieldGate", "Open ShieldGate"); } }
+            public static string Exit { get { return T("Ẩn biểu tượng", "Hide icon"); } }
+            public static string Balloon
+            {
+                get
+                {
+                    return T("Bảo vệ nền đang chạy. Nhấn đúp biểu tượng để mở ShieldGate.",
+                             "Background protection is running. Double-click the icon to open ShieldGate.");
+                }
+            }
+            public static string AlreadyOpen { get { return T("ShieldGate đang mở.", "ShieldGate is already open."); } }
+        }
+
         // Chỉ dùng cho dòng lệnh, không hiện trong cửa sổ.
         public static class Cli
         {

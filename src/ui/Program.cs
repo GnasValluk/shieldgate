@@ -10,7 +10,7 @@ namespace ShieldGate
 {
     internal static class Program
     {
-        private const string UiMutexName = "Local\\ShieldGate_UI_7";
+        private const string UiMutexName = AppInfo.UiMutexName;
 
         [STAThread]
         private static int Main(string[] args)
@@ -35,6 +35,7 @@ namespace ShieldGate
                 switch (command)
                 {
                     case "watch": return Guard.RunWatch();
+                    case "tray": return TrayApp.Run();
                     case "install": return Install(args);
                     case "uninstall": return Uninstall();
                     case "status": return Status();
@@ -122,6 +123,9 @@ namespace ShieldGate
                 }
 
                 Paths.Configure(string.IsNullOrEmpty(Bootstrap.Home) ? Bootstrap.DefaultHome : Bootstrap.Home);
+
+                // Bản cài cũ có thể chưa có biểu tượng khay: tạo lại nếu bảo vệ đang chạy.
+                try { Guard.EnsureTray(); } catch { }
 
                 try
                 {
