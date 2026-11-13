@@ -159,6 +159,12 @@ namespace ShieldGate
         // Logo: khiên đặc, một màu, không chữ.
         public static void DrawLogo(Graphics g, RectangleF box, Color color)
         {
+            DrawLogo(g, box, color, 1.6f);
+        }
+
+        // penWidth tính theo đơn vị lưới 20; icon nhỏ cần nét đậm hơn để không bị mảnh.
+        public static void DrawLogo(Graphics g, RectangleF box, Color color, float penWidth)
+        {
             float s = box.Width / 20f;
             SmoothingMode oldMode = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -168,7 +174,7 @@ namespace ShieldGate
                 using (SolidBrush b = new SolidBrush(color))
                     g.FillPath(b, sh);
 
-                using (Pen pen = new Pen(Color.White, 1.6f * s))
+                using (Pen pen = new Pen(Color.White, penWidth * s))
                 {
                     pen.StartCap = LineCap.Round;
                     pen.EndCap = LineCap.Round;
@@ -187,16 +193,44 @@ namespace ShieldGate
             }
         }
 
-        // Biểu tượng ứng dụng (cửa sổ chính và khay hệ thống).
+        // Biểu tượng cửa sổ: khiên có lề nhỏ.
         public static Icon AppIcon()
         {
-            using (Bitmap bmp = new Bitmap(32, 32))
+            return RenderIcon(32, 0.071f, 1.6f);
+        }
+
+        // Biểu tượng khay hệ thống: khiên phủ gần kín ô để không nhỏ hơn icon ứng dụng khác.
+        public static Icon TrayIcon(int size)
+        {
+            if (size < 16) size = 16;
+            if (size > 64) size = 64;
+            return RenderIcon(size, 0f, 2.1f);
+        }
+
+        private static Icon RenderIcon(int size, float paddingRatio, float penWidth)
+        {
+            using (Bitmap bmp = new Bitmap(size, size))
             {
                 using (Graphics g = Graphics.FromImage(bmp))
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.Clear(Color.Transparent);
-                    DrawLogo(g, new RectangleF(2, 2, 28, 28), Theme.Accent);
+
+                    RectangleF box;
+                    if (paddingRatio <= 0f)
+                    {
+                        // Khiên cao 16,4/20 lần hộp vẽ: nới hộp để khiên chiếm ~94% chiều cao ô.
+                        float outer = size * 1.145f;
+                        float offset = (size - outer) / 2f;
+                        box = new RectangleF(offset, offset, outer, outer);
+                    }
+                    else
+                    {
+                        float pad = size * paddingRatio;
+                        box = new RectangleF(pad, pad, size - pad * 2, size - pad * 2);
+                    }
+
+                    DrawLogo(g, box, Theme.Accent, penWidth);
                 }
                 IntPtr h = bmp.GetHicon();
                 return Icon.FromHandle(h);

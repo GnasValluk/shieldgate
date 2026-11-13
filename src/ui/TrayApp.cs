@@ -50,7 +50,7 @@ namespace ShieldGate
             });
 
             _icon = new NotifyIcon();
-            _icon.Icon = Icons.AppIcon();
+            _icon.Icon = Icons.TrayIcon(SystemInformation.SmallIconSize.Width);
             _icon.ContextMenu = menu;
             _icon.Text = S.Tray.StatusOn;
             _icon.DoubleClick += delegate { OpenUi(); };
