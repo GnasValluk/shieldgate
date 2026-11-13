@@ -2,6 +2,7 @@
 // Mọi thay đổi registry đều được sao lưu trước khi ghi; tắt bảo vệ trả lại đúng cấu hình cũ.
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
@@ -236,6 +237,43 @@ namespace ShieldGate
             catch { return false; }
         }
 
+        // Hai tệp trùng nội dung thì không cần chép đè lên bản đang cài.
+        private static bool SameFile(string a, string b)
+        {
+            try
+            {
+                if (new FileInfo(a).Length != new FileInfo(b).Length) return false;
+                return string.Equals(Native.Sha256(a), Native.Sha256(b), StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
+        // Đợi tiến trình nền nhả tệp sau khi dừng tác vụ, tránh lỗi "tệp đang được dùng".
+        private static void WaitGuardExit(int timeoutMs)
+        {
+            DateTime end = DateTime.Now.AddMilliseconds(timeoutMs);
+            while (DateTime.Now < end)
+            {
+                bool found = false;
+                try
+                {
+                    foreach (Process p in Process.GetProcessesByName("ShieldGate"))
+                    {
+                        try
+                        {
+                            if (!IsSamePath(p.MainModule.FileName, Paths.GuardExe)) continue;
+                            found = true;
+                            p.WaitForExit(200);
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+                if (!found) return;
+                Thread.Sleep(150);
+            }
+        }
+
         // Thư mục chứa bản chạy nền: chỉ quản trị và SYSTEM được ghi.
         // Không khoá được thì vẫn chạy, nhưng ghi cảnh báo vào nhật ký.
         private static void HardenBinDir()
@@ -260,31 +298,72 @@ namespace ShieldGate
 
             if (!IsSamePath(self, Paths.GuardExe))
             {
-                HardenBinDir();
-                bool copied = false;
-                for (int i = 0; i < 3 && !copied; i++)
+                if (File.Exists(Paths.GuardExe) && SameFile(self, Paths.GuardExe))
                 {
-                    try { File.Copy(self, Paths.GuardExe, true); copied = true; }
-                    catch (Exception e)
-                    {
-                        problem = e.Message;
-                        // Bản nền đang chạy giữ tệp: dừng tác vụ rồi thử lại.
-                        if (i == 0) StopGuardProcess();
-                        Thread.Sleep(500);
-                    }
+                    // Bản đã cài trùng bản đang chạy: giữ nguyên, không chép đè.
                 }
-                if (!copied) return false;
+                else
+                {
+                    HardenBinDir();
+                    bool copied = false;
+                    for (int i = 0; i < 3 && !copied; i++)
+                    {
+                        try { File.Copy(self, Paths.GuardExe, true); copied = true; }
+                        catch (Exception e)
+                        {
+                            problem = e.Message;
+                            // Bản nền đang chạy giữ tệp: dừng tác vụ, đợi nhả tệp rồi thử lại.
+                            if (i == 0)
+                            {
+                                StopGuardProcess();
+                                WaitGuardExit(5000);
+                            }
+                            Thread.Sleep(500);
+                        }
+                    }
+                    if (!copied) { problem = "không chép được bản chạy nền: " + problem; return false; }
+                }
             }
 
             string hash = Native.Sha256(Paths.GuardExe);
             if (hash.Length == 0) { problem = "không đọc được tệp đã cài"; return false; }
+
+            // Tệp vân tay có thể còn thuộc tính chỉ-đọc từ bản cũ: ghi đè sẽ bị từ chối.
+            // Nếu nội dung đã đúng thì không ghi lại; nếu cần ghi thì bỏ thuộc tính trước.
+            string current = "";
             try
             {
-                File.WriteAllText(Paths.GuardHash, hash + "\r\n", new UTF8Encoding(false));
-                File.SetAttributes(Paths.GuardHash, FileAttributes.Hidden | FileAttributes.System);
+                if (File.Exists(Paths.GuardHash))
+                    current = File.ReadAllText(Paths.GuardHash).Trim();
             }
-            catch (Exception e) { problem = e.Message; return false; }
-            return true;
+            catch { }
+
+            if (string.Equals(current, hash, StringComparison.OrdinalIgnoreCase))
+            {
+                try { File.SetAttributes(Paths.GuardHash, FileAttributes.Hidden | FileAttributes.System); }
+                catch { }
+                return true;
+            }
+
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    try { File.SetAttributes(Paths.GuardHash, FileAttributes.Normal); }
+                    catch { }
+                    File.WriteAllText(Paths.GuardHash, hash + "\r\n", new UTF8Encoding(false));
+                    File.SetAttributes(Paths.GuardHash, FileAttributes.Hidden | FileAttributes.System);
+                    return true;
+                }
+                catch (Exception e)
+                {
+                    problem = e.Message;
+                    try { File.Delete(Paths.GuardHash); } catch { }
+                    Thread.Sleep(200);
+                }
+            }
+            problem = "không ghi được dấu vân tay bản chạy nền: " + problem;
+            return false;
         }
 
         private static void StopGuardProcess()
@@ -314,10 +393,24 @@ namespace ShieldGate
             string xml = TaskXml.Replace("{0}", XmlEscape(Paths.GuardExe)).Replace("{1}", "--watch");
             string xmlPath = Path.Combine(Paths.Root, "guard_task.xml");
             try { File.WriteAllText(xmlPath, xml, new UnicodeEncoding(false, true)); }
-            catch (Exception e) { output = e.Message; return false; }
-            return Native.Run("schtasks.exe",
+            catch (Exception e) { output = "không ghi được tệp tác vụ: " + e.Message; return false; }
+
+            int code = Native.Run("schtasks.exe",
                 "/Create /XML \"" + xmlPath + "\" /TN \"" + AppInfo.TaskName + "\" /F",
-                30000, out output) == 0;
+                30000, out output);
+            if (code == 0) return true;
+
+            // Một số máy không nhận tệp XML (khác biệt quyền tài khoản SYSTEM):
+            // thử tạo bằng tham số dòng lệnh rồi mới báo lỗi.
+            string xmlError = output;
+            string simple = "/Create /TN \"" + AppInfo.TaskName + "\" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR \"\\\""
+                            + Paths.GuardExe + "\\\" --watch\" /F";
+            int simpleCode = Native.Run("schtasks.exe", simple, 30000, out output);
+            if (simpleCode == 0) return true;
+
+            output = "XML(" + code + "): " + (xmlError ?? "").Trim()
+                     + " | SIMPLE(" + simpleCode + "): " + (output ?? "").Trim();
+            return false;
         }
 
         public static double HeartbeatAge()
@@ -679,6 +772,8 @@ namespace ShieldGate
             {
                 bool created = RegisterTask(out output);
                 ok &= created;
+                if (!created)
+                    Log.Write("Không tạo được tác vụ bảo vệ: " + (output ?? "").Trim(), "ERROR");
                 if (created)
                 {
                     try { File.Delete(Paths.StopFlag); } catch { }
