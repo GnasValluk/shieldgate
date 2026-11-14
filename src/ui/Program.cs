@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -25,7 +26,9 @@ namespace ShieldGate
 
             if (command.Length > 0)
             {
-                AttachConsole();
+                // Chỉ gắn vào console của tiến trình cha khi stdout chưa bị
+                // chuyển hướng; AttachConsole sẽ ghi đè handle chuyển hướng.
+                if (!HasStdOut()) AttachConsole();
                 try { Console.OutputEncoding = Encoding.UTF8; } catch { }
                 try { Console.Title = S.Cli.ConsoleTitle; } catch { }
             }
@@ -161,6 +164,13 @@ namespace ShieldGate
         {
             try { Native.AttachConsole(-1); }
             catch { }
+        }
+
+        // True khi stdout đã là tệp hoặc pipe do tiến trình gọi truyền vào.
+        private static bool HasStdOut()
+        {
+            try { return Console.OpenStandardOutput() != Stream.Null; }
+            catch { return false; }
         }
 
         private static int Install(string[] args)
