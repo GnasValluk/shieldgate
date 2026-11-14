@@ -197,12 +197,12 @@ namespace ShieldGate
                 {
                     File.Copy(Paths.LogFile, d.FileName, true);
                     _notice.SetMessage(S.Log.Exported(d.FileName), false);
-                    Log.Write("Xuất nhật ký: " + d.FileName);
+                    Log.Write(S.Log.LogExported(d.FileName));
                 }
                 catch (Exception e)
                 {
                     _notice.SetMessage(S.Err.Locked(d.FileName), true);
-                    Log.Write("Không xuất được nhật ký: " + e.Message, "ERROR");
+                    Log.Write(S.Log.LogExportFailed(e.Message), "ERROR");
                 }
             }
         }

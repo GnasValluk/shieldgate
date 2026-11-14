@@ -335,7 +335,7 @@ namespace ShieldGate
                 {
                     ok = 0; fail = fixable.Count;
                     error = e.Message;
-                    Log.Write("Lỗi khi sửa máy: " + e.Message, "ERROR");
+                    Log.Write(S.Log.PcFixError(e.Message), "ERROR");
                 }
                 if (IsDisposed || !IsHandleCreated) return;
                 try
@@ -540,7 +540,7 @@ namespace ShieldGate
 
             string text = S.Restore.Done(restored, skipped);
             if (missing > 0) text += " " + S.Restore.Missing(missing);
-            Log.Write("Khôi phục " + restored + " tệp từ " + b.Name + " (thiếu " + missing + ")");
+            Log.Write(S.Log.RestoreBatch(restored, b.Name, missing));
             RefreshBatches();
             _result.Text = text;
         }

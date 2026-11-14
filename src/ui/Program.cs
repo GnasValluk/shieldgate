@@ -47,12 +47,12 @@ namespace ShieldGate
                         Console.WriteLine(S.Cli.UnknownArg);
                         Console.WriteLine(S.Cli.ScanUsage);
                         Console.WriteLine(S.Cli.Usage);
-                        return 2;
+                        return 1;
                 }
             }
             catch (Exception e)
             {
-                try { Log.Write("Command line error: " + e, "ERROR"); } catch { }
+                try { Log.Write(S.Log.CommandLineError(e.ToString()), "ERROR"); } catch { }
                 Console.WriteLine(S.Err.Unknown + " " + e.Message);
                 return 1;
             }
@@ -129,7 +129,7 @@ namespace ShieldGate
 
                 try
                 {
-                    Log.Write("Open ShieldGate " + AppInfo.Version + " (" + S.Language + ")");
+                    Log.Write(S.Log.Open(AppInfo.Version, S.Language));
                     Application.Run(new MainForm());
                 }
                 catch (Exception e)
@@ -145,7 +145,7 @@ namespace ShieldGate
 
         private static void ReportError(Exception e)
         {
-            try { Log.Write("Unhandled error: " + (e == null ? "?" : e.ToString()), "ERROR"); }
+            try { Log.Write(S.Log.UnhandledError(e == null ? "?" : e.ToString()), "ERROR"); }
             catch { }
             try
             {
@@ -199,7 +199,7 @@ namespace ShieldGate
             if (args.Length < 2 || args[1].Trim().Length < 2)
             {
                 Console.WriteLine(S.Cli.ScanUsage);
-                return 2;
+                return 1;
             }
 
             string root = args[1].Trim();
@@ -207,6 +207,7 @@ namespace ShieldGate
 
             UsbScanResult result = UsbScan.Detect(root, null, null);
             Console.WriteLine(S.Cli.ScanSummary(root, result.Files, result.Items.Count, result.Seconds));
+            if (result.Truncated) Console.WriteLine(S.Cli.ScanTruncated(result.Files));
             if (result.Items.Count == 0)
             {
                 Console.WriteLine(S.Cli.ScanClean);
@@ -215,7 +216,8 @@ namespace ShieldGate
 
             foreach (UsbItem item in result.Items)
                 Console.WriteLine(S.Cli.ScanItem(item.Rel, item.ReasonText));
-            return 0;
+            // Mã 2: tìm thấy mục cần xử lý, khác với lỗi chạy (1).
+            return 2;
         }
     }
 }

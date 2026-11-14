@@ -35,6 +35,7 @@ namespace ShieldGate
         private readonly NotifyIcon _icon;
         private readonly System.Windows.Forms.Timer _timer;
         private readonly MenuItem _status;
+        private DateTime _lastEvent = DateTime.MinValue;
 
         public TrayContext()
         {
@@ -54,10 +55,13 @@ namespace ShieldGate
             _icon.ContextMenu = menu;
             _icon.Text = S.Tray.StatusOn;
             _icon.DoubleClick += delegate { OpenUi(); };
+            _icon.BalloonTipClicked += delegate { OpenUi(); };
             _icon.BalloonTipTitle = AppInfo.Name;
             _icon.BalloonTipText = S.Tray.Balloon;
             _icon.Visible = true;
 
+            // Bỏ qua sự kiện cũ trước khi biểu tượng này xuất hiện.
+            _lastEvent = Settings.DriveEventTime;
             Refresh();
             try { _icon.ShowBalloonTip(5000); }
             catch { }
@@ -75,6 +79,31 @@ namespace ShieldGate
             if (tooltip.Length > 63) tooltip = tooltip.Substring(0, 63);
             _icon.Text = tooltip;
             _status.Text = running ? S.Tray.StatusOn : S.Tray.StatusOff;
+            CheckDriveEvent();
+        }
+
+        // Bảo vệ nền ghi sự kiện vào settings.txt. Chỉ báo một lần cho mỗi mốc thời gian.
+        private void CheckDriveEvent()
+        {
+            DateTime when = Settings.DriveEventTime;
+            if (when == DateTime.MinValue || when == _lastEvent) return;
+            _lastEvent = when;
+
+            int cleaned = Settings.DriveEventCleaned;
+            int review = Settings.DriveEventReview;
+            string drive = Settings.DriveEventDrive;
+            string text;
+            if (cleaned > 0 && review > 0) text = S.Tray.CleanedReview(drive, cleaned, review);
+            else if (cleaned > 0) text = S.Tray.Cleaned(drive, cleaned);
+            else if (review > 0) text = S.Tray.Attention(review);
+            else return;
+
+            try
+            {
+                _icon.BalloonTipText = text;
+                _icon.ShowBalloonTip(8000);
+            }
+            catch { }
         }
 
         private static bool UiRunning()

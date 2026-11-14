@@ -25,7 +25,7 @@ namespace ShieldGate
             Environment.SetEnvironmentVariable("SHIELDGATE_HOME", root);
 
             int passed = 0;
-            int total = 10;
+            int total = 15;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -122,9 +122,87 @@ namespace ShieldGate
             bool settingsOk = Settings.DriveScanFiles("Z:\\") == 123
                            && Settings.DriveScanFound("Z:\\") == 4
                            && Settings.DriveScanTime("Z:\\") > DateTime.Now.AddMinutes(-5);
-            Log.Write("Tự kiểm tra chạy trên " + usb);
+            Log.Write(S.Log.SelfTest(usb));
             settingsOk = settingsOk && File.Exists(Paths.SettingsFile) && File.Exists(Paths.LogFile);
             check(S.Selftest.SettingsSaved, settingsOk);
+
+            // 11. Tiến trình khác ghi thêm khóa thì lần ghi sau không xoá mất.
+            bool merged = false;
+            try
+            {
+                File.AppendAllText(Paths.SettingsFile, "other.process=1\r\n", new UTF8Encoding(false));
+                Settings.Set("selftest.after", "2");
+                merged = Settings.Get("other.process", "") == "1"
+                      && Settings.Get("selftest.after", "") == "2"
+                      && Settings.DriveScanFiles("Z:\\") == 123;
+            }
+            catch { }
+            check(S.Selftest.SettingsMerge, merged);
+
+            // 12. Lựa chọn bảo vệ được lưu và đọc lại đúng.
+            bool configOk = false;
+            try
+            {
+                Guard.SaveConfig(false, true, true);
+                GuardConfig cfg = Guard.LoadConfig();
+                configOk = !cfg.Autorun && cfg.Ini && cfg.Wsh;
+            }
+            catch { }
+            check(S.Selftest.GuardConfig, configOk);
+
+            // 13. Bản cách ly bị sửa thì không được ghi trả về ổ.
+            bool refused = false;
+            string tamper = Path.Combine(usb, "tamper.txt");
+            string tamperBatch = "";
+            try
+            {
+                File.WriteAllText(tamper, "ban goc", new UTF8Encoding(false));
+                tamperBatch = Quarantine.NewBatch("test", "");
+                string qerr;
+                bool added = Quarantine.Add(tamper, usb, tamperBatch, "test", out qerr);
+                bool edited = false;
+                if (added)
+                {
+                    string[] qfiles = Directory.GetFiles(Path.Combine(tamperBatch, "files"),
+                                                         "*.sgq", SearchOption.AllDirectories);
+                    if (qfiles.Length == 1)
+                    {
+                        File.AppendAllText(qfiles[0], "x", new UTF8Encoding(false));
+                        edited = true;
+                    }
+                }
+                int tr, ts, tm;
+                Quarantine.RestoreBatch(tamperBatch, out tr, out ts, out tm);
+                refused = added && edited && tr == 0 && tm == 1 && !File.Exists(tamper);
+            }
+            catch { }
+            if (tamperBatch.Length > 0) Quarantine.RemoveBatch(tamperBatch);
+            check(S.Selftest.TamperRefused, refused);
+
+            // 14. Chạm giới hạn số tệp thì báo đã cắt, không im lặng.
+            bool truncated = false;
+            try
+            {
+                WalkStats stats = new WalkStats();
+                int walked = 0;
+                foreach (TreeItem t in Tree.Walk(usb, stats, 2, 60)) walked++;
+                truncated = stats.Truncated && walked <= 2;
+            }
+            catch { }
+            check(S.Selftest.Truncation, truncated);
+
+            // 15. Nhật ký đổi theo ngôn ngữ, không lẫn câu tiếng Việt khi chọn English.
+            bool logEnglish = false;
+            try
+            {
+                S.SetLanguage(Bootstrap.LanguageEn);
+                logEnglish = S.Log.Title == "Log"
+                          && S.Log.Quarantined("a", "b").StartsWith("Quarantined", StringComparison.Ordinal)
+                          && S.Log.WatchStopped.IndexOf("dừng", StringComparison.Ordinal) < 0;
+            }
+            catch { }
+            finally { S.SetLanguage(Bootstrap.LanguageVi); }
+            check(S.Selftest.LogLanguage, logEnglish);
 
             try { Directory.Delete(root, true); }
             catch { }

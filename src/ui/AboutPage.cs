@@ -12,9 +12,9 @@ namespace ShieldGate
     {
         private readonly Label _title, _name, _version, _license;
         private readonly LogoView _logo;
-        private readonly LinkText _update, _openData;
+        private readonly LinkText _openData;
         private readonly Label _sourceLabel, _dataLabel;
-        private readonly Label _sourceNote, _updateNote, _dataPath, _hashLabel, _noNetwork;
+        private readonly Label _sourceNote, _dataPath, _hashLabel, _noNetwork;
         private readonly TextBox _hash;
         private readonly Panel _hashBox;
         private int _sepY;
@@ -43,19 +43,6 @@ namespace ShieldGate
 
             _sourceNote = MakeLabel(S.About.SourceSoon, Theme.Body, Theme.InkMuted);
             Controls.Add(_sourceNote);
-
-            _update = MakeLink(S.About.Update, "refresh");
-            _update.IconSize = 13;
-            _update.Click += delegate
-            {
-                _updateNote.Text = S.About.UpdateSoon;
-                _updateNote.Visible = true;
-            };
-            Controls.Add(_update);
-
-            _updateNote = MakeLabel("", Theme.Small, Theme.InkMuted);
-            _updateNote.Visible = false;
-            Controls.Add(_updateNote);
 
             _dataLabel = MakeLabel(S.About.Data, Theme.Section, Theme.Ink);
             Controls.Add(_dataLabel);
@@ -166,12 +153,8 @@ namespace ShieldGate
             int y = Ui.Px(184);
             _sourceLabel.Bounds = new Rectangle(pad, y, Ui.Px(280), Ui.Px(20));
             _sourceNote.Bounds = new Rectangle(pad, y + Ui.Px(26), width, Ui.Px(22));
-            _update.Bounds = new Rectangle(pad, y + Ui.Px(56),
-                Ui.Measure(S.About.Update, Theme.Small).Width + Ui.Px(24), Ui.Px(22));
-            _updateNote.Bounds = new Rectangle(pad + _update.Width + Ui.Px(14), y + Ui.Px(56),
-                width - _update.Width - Ui.Px(14), Ui.Px(22));
 
-            y += Ui.Px(96);
+            y += Ui.Px(72);
             _dataLabel.Bounds = new Rectangle(pad, y, Ui.Px(280), Ui.Px(20));
             _dataPath.Bounds = new Rectangle(pad, y + Ui.Px(26), width, Ui.Px(24));
             _openData.Bounds = new Rectangle(pad, y + Ui.Px(56),

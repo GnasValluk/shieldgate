@@ -122,6 +122,7 @@ namespace ShieldGate
 
         private void UpdateState()
         {
+            int attention = Attention(_findings);
             if (_scanning)
             {
                 _primaryMode = PrimaryMode.Cancel;
@@ -133,14 +134,14 @@ namespace ShieldGate
                 _primary.Kind = ButtonKind.Secondary;
                 _secondary.Visible = false;
             }
-            else if (_findings.Count > 0)
+            else if (attention > 0)
             {
                 _primaryMode = PrimaryMode.ShowFindings;
                 _stateIcon.IconName = "alert";
                 _stateIcon.IconColor = Theme.Warn;
-                _stateTitle.Text = S.Overview.StateAttentionFiles(_findings.Count);
-                _stateSub.Text = S.Overview.SubAttention(_findings.Count);
-                _primary.Text = S.Overview.ActionSeeFiles(_findings.Count);
+                _stateTitle.Text = S.Overview.StateAttentionFiles(attention);
+                _stateSub.Text = S.Overview.SubAttention(attention);
+                _primary.Text = S.Overview.ActionSeeFiles(attention);
                 _primary.Kind = ButtonKind.Primary;
                 _secondary.Visible = true;
             }
@@ -234,7 +235,7 @@ namespace ShieldGate
                 }
                 catch (Exception e)
                 {
-                    Log.Write("Lỗi khi kiểm tra máy: " + e.Message, "ERROR");
+                    Log.Write(S.Log.PcScanError(e.Message), "ERROR");
                     found = new List<PcItem>();
                 }
                 if (IsDisposed || !IsHandleCreated) return;
@@ -258,14 +259,15 @@ namespace ShieldGate
             if (!cancelled)
             {
                 _findings = found;
-                Settings.SetPcScan(0, found.Count);
-                if (found.Count > 0) Log.Write("Kiểm tra máy: " + found.Count + " mục đáng ngờ");
-                else Log.Write("Kiểm tra máy: không phát hiện gì");
+                int attention = Attention(found);
+                Settings.SetPcScan(0, attention);
+                if (found.Count > 0) Log.Write(S.Log.PcScanFound(found.Count));
+                else Log.Write(S.Log.PcScanClean);
             }
 
             UpdateState();
             RefreshAsync();
-            if (!cancelled && found.Count > 0) ShowFindings();
+            if (!cancelled && Attention(found) > 0) ShowFindings();
         }
 
         private void ShowFindings()
@@ -277,9 +279,19 @@ namespace ShieldGate
                 else f.ShowDialog();
                 _findings = new List<PcItem>(f.Remaining);
             }
-            Settings.SetPcScan(0, _findings.Count);
+            Settings.SetPcScan(0, Attention(_findings));
             UpdateState();
             RefreshAsync();
+        }
+
+        // Chỉ đếm mục sửa được. Mục chỉ để tham khảo (Defender) không cần người dùng xử lý.
+        private static int Attention(IList<PcItem> items)
+        {
+            int n = 0;
+            if (items != null)
+                foreach (PcItem item in items)
+                    if (item.Fixable) n++;
+            return n;
         }
 
         // ----------------------------------------------------------- làm mới nền

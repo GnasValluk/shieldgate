@@ -178,7 +178,7 @@ namespace ShieldGate
             {
                 bool ok = false;
                 try { ok = Guard.Configure(autorun, ini, wsh, guard, null); }
-                catch (Exception e) { Log.Write("Lỗi khi áp dụng bảo vệ: " + e.Message, "ERROR"); }
+                catch (Exception e) { Log.Write(S.Log.ProtectionApplyError(e.Message), "ERROR"); }
                 if (IsDisposed || !IsHandleCreated) return;
                 try { BeginInvoke((MethodInvoker)delegate { FinishApply(ok); }); }
                 catch { }

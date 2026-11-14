@@ -25,19 +25,14 @@ namespace ShieldGate
 
         // Ba thiết lập chính đang có hiệu lực: chặn autorun, chặn autorun.inf, chạy nền.
         public bool FullyProtected { get { return Autorun && Ini && Running; } }
+    }
 
-        public int EnabledCount
-        {
-            get
-            {
-                int n = 0;
-                if (Autorun) n++;
-                if (Ini) n++;
-                if (Wsh) n++;
-                if (Running) n++;
-                return n;
-            }
-        }
+    // Lựa chọn người dùng đã đặt, để bảo vệ nền chỉ áp đúng phần đang bật.
+    internal sealed class GuardConfig
+    {
+        public bool Autorun = true;
+        public bool Ini = true;
+        public bool Wsh;
     }
 
     internal static class Guard
@@ -82,6 +77,74 @@ namespace ShieldGate
             {
                 ok &= Reg.Write(RegistryHive.LocalMachine, WshPath, "Enabled", 1, RegistryValueKind.DWord);
                 ok &= Reg.Write(RegistryHive.LocalMachine, WshPath32, "Enabled", 1, RegistryValueKind.DWord);
+            }
+            return ok;
+        }
+
+        // ------------------------------------------------- lựa chọn đã lưu
+
+        public static GuardConfig LoadConfig()
+        {
+            GuardConfig c = new GuardConfig();
+            try
+            {
+                if (!File.Exists(Paths.GuardConfig)) return c;
+                foreach (string raw in File.ReadAllLines(Paths.GuardConfig))
+                {
+                    string line = raw.Trim();
+                    int eq = line.IndexOf('=');
+                    if (eq <= 0) continue;
+                    string key = line.Substring(0, eq).Trim();
+                    bool on = line.Substring(eq + 1).Trim() == "1";
+                    if (string.Equals(key, "autorun", StringComparison.OrdinalIgnoreCase)) c.Autorun = on;
+                    else if (string.Equals(key, "ini", StringComparison.OrdinalIgnoreCase)) c.Ini = on;
+                    else if (string.Equals(key, "wsh", StringComparison.OrdinalIgnoreCase)) c.Wsh = on;
+                }
+            }
+            catch { }
+            return c;
+        }
+
+        public static void SaveConfig(bool autorun, bool ini, bool wsh)
+        {
+            try
+            {
+                Paths.EnsureDirs();
+                File.WriteAllText(Paths.GuardConfig,
+                    "autorun=" + (autorun ? "1" : "0") + "\r\n" +
+                    "ini=" + (ini ? "1" : "0") + "\r\n" +
+                    "wsh=" + (wsh ? "1" : "0") + "\r\n",
+                    new UTF8Encoding(false));
+            }
+            catch (Exception e)
+            {
+                Log.Write(S.Log.ConfigSaveFailed(e.Message), "ERROR");
+            }
+        }
+
+        // Chỉ áp phần người dùng đang bật. Phần đã tắt do Configure trả về
+        // giá trị gốc một lần và không bị vòng lặp nền bật lại.
+        public static bool ApplyConfig(GuardConfig c)
+        {
+            if (c == null) return true;
+            bool ok = true;
+            if (c.Autorun)
+            {
+                ok &= Reg.Write(RegistryHive.LocalMachine, ExplorerHklm, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
+                ok &= Reg.Write(RegistryHive.LocalMachine, ExplorerHklm, "NoAutorun", 1, RegistryValueKind.DWord);
+                ok &= Reg.Write(RegistryHive.LocalMachine, AutoplayHklm, "DisableAutoplay", 1, RegistryValueKind.DWord);
+                ok &= Reg.Write(RegistryHive.CurrentUser, ExplorerHkcu, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
+                ok &= Reg.Write(RegistryHive.CurrentUser, AutoplayHkcu, "DisableAutoplay", 1, RegistryValueKind.DWord);
+            }
+            if (c.Ini)
+            {
+                ok &= Reg.Write(RegistryHive.LocalMachine, IniPath, "", "@SYS:DoesNotExist",
+                                RegistryValueKind.String);
+            }
+            if (c.Wsh)
+            {
+                ok &= Reg.Write(RegistryHive.LocalMachine, WshPath, "Enabled", 0, RegistryValueKind.DWord);
+                ok &= Reg.Write(RegistryHive.LocalMachine, WshPath32, "Enabled", 0, RegistryValueKind.DWord);
             }
             return ok;
         }
@@ -307,21 +370,6 @@ namespace ShieldGate
         }
 
         // Thư mục chứa bản chạy nền: chỉ quản trị và SYSTEM được ghi.
-        // Không khoá được thì vẫn chạy, nhưng ghi cảnh báo vào nhật ký.
-        private static void HardenBinDir()
-        {
-            try
-            {
-                Paths.EnsureDirs();
-                string output;
-                Native.Run("icacls.exe", "\"" + Paths.BinDir + "\" /inheritance:r " +
-                    "/grant:r \"*S-1-5-18:(OI)(CI)F\" \"*S-1-5-32-544:(OI)(CI)F\" " +
-                    "\"*S-1-5-32-545:(OI)(CI)RX\"",
-                    20000, out output);
-            }
-            catch { }
-        }
-
         private static bool PinBinary(out string problem)
         {
             problem = "";
@@ -336,7 +384,7 @@ namespace ShieldGate
                 }
                 else
                 {
-                    HardenBinDir();
+                    Paths.HardenRoot();
                     bool copied = false;
                     for (int i = 0; i < 3 && !copied; i++)
                     {
@@ -423,14 +471,18 @@ namespace ShieldGate
             output = "";
             if (!PinBinary(out output)) return false;
             string xml = TaskXml.Replace("{0}", XmlEscape(Paths.GuardExe)).Replace("{1}", "--watch");
-            string xmlPath = Path.Combine(Paths.Root, "guard_task.xml");
+            string xmlPath = Path.Combine(Paths.BinDir, "guard_task.xml");
             try { File.WriteAllText(xmlPath, xml, new UnicodeEncoding(false, true)); }
             catch (Exception e) { output = "không ghi được tệp tác vụ: " + e.Message; return false; }
 
             int code = Native.Run("schtasks.exe",
                 "/Create /XML \"" + xmlPath + "\" /TN \"" + AppInfo.TaskName + "\" /F",
                 30000, out output);
-            if (code == 0) return true;
+            if (code == 0)
+            {
+                try { File.Delete(xmlPath); } catch { }
+                return true;
+            }
 
             // Một số máy không nhận tệp XML (khác biệt quyền tài khoản SYSTEM):
             // thử tạo bằng tham số dòng lệnh rồi mới báo lỗi.
@@ -471,13 +523,15 @@ namespace ShieldGate
             if (sid.Length == 0) { output = "không xác định được tài khoản người dùng"; return false; }
 
             string xml = TrayTaskXml.Replace("{0}", XmlEscape(Paths.GuardExe)).Replace("{1}", sid);
-            string xmlPath = Path.Combine(Paths.Root, "tray_task.xml");
+            string xmlPath = Path.Combine(Paths.BinDir, "tray_task.xml");
             try { File.WriteAllText(xmlPath, xml, new UnicodeEncoding(false, true)); }
             catch (Exception e) { output = "không ghi được tệp tác vụ: " + e.Message; return false; }
 
-            return Native.Run("schtasks.exe",
+            bool made = Native.Run("schtasks.exe",
                 "/Create /XML \"" + xmlPath + "\" /TN \"" + AppInfo.TrayTaskName + "\" /F",
                 30000, out output) == 0;
+            try { File.Delete(xmlPath); } catch { }
+            return made;
         }
 
         private static void StartTray()
@@ -485,7 +539,7 @@ namespace ShieldGate
             string output;
             if (!RegisterTrayTask(out output))
             {
-                Log.Write("Không tạo được biểu tượng khay: " + (output ?? "").Trim(), "WARN");
+                Log.Write(S.Log.TrayCreateFailed((output ?? "").Trim()), "WARN");
                 return;
             }
             Native.Run("schtasks.exe", "/Run /TN \"" + AppInfo.TrayTaskName + "\"", 20000, out output);
@@ -509,7 +563,7 @@ namespace ShieldGate
                 string created;
                 if (!RegisterTrayTask(out created))
                 {
-                    Log.Write("Không tạo được biểu tượng khay: " + (created ?? "").Trim(), "WARN");
+                    Log.Write(S.Log.TrayCreateFailed((created ?? "").Trim()), "WARN");
                     return;
                 }
             }
@@ -543,6 +597,7 @@ namespace ShieldGate
                 return false;
             }
             Paths.EnsureDirs();
+            Paths.HardenRoot();
             RemoveLegacyTask();
             EnsureSnapshot();
             if (log != null) log(S.Cli.SnapshotSaved);
@@ -555,12 +610,13 @@ namespace ShieldGate
             {
                 if (log != null) log(S.Cli.PolicyPartial);
             }
+            SaveConfig(true, true, blockWsh);
 
             string output;
             bool taskOk = RegisterTask(out output);
             if (log != null) log(taskOk ? S.Cli.TaskCreated : S.Cli.TaskFailed);
             if (!taskOk && output != null && output.Trim().Length > 0)
-                Log.Write("Không tạo được tác vụ: " + output.Trim(), "ERROR");
+                Log.Write(S.Log.TaskCreateFailed(output.Trim()), "ERROR");
 
             try { File.Delete(Paths.StopFlag); }
             catch { }
@@ -576,7 +632,7 @@ namespace ShieldGate
                 if (log != null) log(alive ? S.Cli.GuardStarted : S.Cli.GuardStarting);
             }
 
-            Log.Write("Bật bảo vệ (chặn script=" + blockWsh + ", tác vụ=" + taskOk + ")");
+            Log.Write(S.Log.ProtectionOn(blockWsh, taskOk));
             return taskOk;
         }
 
@@ -607,13 +663,14 @@ namespace ShieldGate
 
             try { File.Delete(Paths.StopFlag); } catch { }
             try { File.Delete(Paths.Heartbeat); } catch { }
+            try { File.Delete(Paths.GuardConfig); } catch { }
             if (!IsSamePath(SelfPath(), Paths.GuardExe))
             {
                 try { File.Delete(Paths.GuardExe); } catch { }
                 try { File.Delete(Paths.GuardHash); } catch { }
             }
             if (log != null) log(S.Cli.ProtectOffDone);
-            Log.Write("Tắt bảo vệ");
+            Log.Write(S.Log.ProtectionOff);
             return true;
         }
 
@@ -674,7 +731,7 @@ namespace ShieldGate
                     "Thư mục này do ShieldGate tạo để chặn virus ghi tệp autorun.inf.\r\n" +
                     "Không xoá thư mục này nếu vẫn dùng USB trên máy tính khác.\r\n",
                     new UTF8Encoding(true));
-                Log.Write("Chặn autorun: " + drive);
+                Log.Write(S.Log.AutorunBlocked(drive));
                 return true;
             }
             catch (Exception e)
@@ -694,7 +751,7 @@ namespace ShieldGate
                 mutex = new Mutex(false, AppInfo.MutexName);
                 if (!mutex.WaitOne(0))
                 {
-                    Log.Write("Bảo vệ nền đã chạy ở tiến trình khác, thoát.", "WARN");
+                    Log.Write(S.Log.WatchAlreadyRunning, "WARN");
                     return 0;
                 }
             }
@@ -704,18 +761,18 @@ namespace ShieldGate
             {
                 if (!Native.IsAdmin())
                 {
-                    Log.Write("Bảo vệ nền cần quyền quản trị, thoát.", "ERROR");
+                    Log.Write(S.Log.WatchNeedsAdmin, "ERROR");
                     return 1;
                 }
                 if (IsSamePath(SelfPath(), Paths.GuardExe) && !VerifyGuardBinary())
                 {
-                    Log.Write("Tệp chạy nền không khớp dấu vết đã cài. Không chạy.", "ERROR");
+                    Log.Write(S.Log.WatchFingerprintMismatch, "ERROR");
                     return 2;
                 }
 
                 Paths.EnsureDirs();
                 try { File.Delete(Paths.StopFlag); } catch { }
-                Log.Write("Bảo vệ nền bắt đầu (v" + AppInfo.Version + ")");
+                Log.Write(S.Log.WatchStarted(AppInfo.Version));
                 WriteHeartbeat();
 
                 HashSet<string> known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -731,7 +788,8 @@ namespace ShieldGate
                         DateTime now = DateTime.Now;
                         if ((now - lastPolicy).TotalSeconds >= 60)
                         {
-                            ApplyMachinePolicy(null);
+                            // Chỉ áp phần người dùng đang bật; công tắc đã tắt phải ở yên.
+                            ApplyConfig(LoadConfig());
                             lastPolicy = now;
                         }
                         if ((now - lastBeat).TotalSeconds >= 4)
@@ -754,7 +812,7 @@ namespace ShieldGate
                             Thread t = new Thread(delegate()
                             {
                                 try { ScanAndClean(volume); }
-                                catch (Exception e) { Log.Write("Lỗi khi xử lý " + volume + ": " + e.Message, "ERROR"); }
+                                catch (Exception e) { Log.Write(S.Log.VolumeError(volume, e.Message), "ERROR"); }
                                 finally { lock (scanning) scanning.Remove(volume); }
                             });
                             t.IsBackground = true;
@@ -762,11 +820,11 @@ namespace ShieldGate
                         }
                         known.RemoveWhere(delegate(string v) { return !drives.Contains(v); });
                     }
-                    catch (Exception e) { Log.Write("Lỗi bảo vệ nền: " + e.Message, "ERROR"); }
+                    catch (Exception e) { Log.Write(S.Log.WatchLoopError(e.Message), "ERROR"); }
                     Thread.Sleep(2000);
                 }
 
-                Log.Write("Bảo vệ nền dừng theo yêu cầu");
+                Log.Write(S.Log.WatchStopped);
                 try { File.Delete(Paths.StopFlag); } catch { }
                 try { mutex.ReleaseMutex(); } catch { }
                 return 0;
@@ -780,19 +838,32 @@ namespace ShieldGate
         private static void ScanAndClean(string volume)
         {
             UsbScanResult scan = UsbScan.Detect(volume, null, null);
+            if (scan.Truncated)
+                Log.Write(S.Log.WatchScanTruncated(volume), "WARN");
+
+            // Chỉ tự cách ly dấu hiệu mạnh. Mục yếu để người dùng xem, tránh xoá nhầm.
+            List<UsbItem> auto = new List<UsbItem>();
+            int review = 0;
+            foreach (UsbItem it in scan.Items)
+            {
+                if (it.High) auto.Add(it);
+                else review++;
+            }
+
             int done = 0, failed = 0, stopped = 0;
             string batch = "";
-            if (scan.Items.Count > 0)
+            if (auto.Count > 0)
             {
-                UsbScan.Apply(scan, scan.Items, out failed, out batch, out stopped, null);
-                done = scan.Items.Count - failed;
+                UsbScan.Apply(scan, auto, out failed, out batch, out stopped, null);
+                done = auto.Count - failed;
+                review += failed;
             }
             int unhidden = 0;
             if (done > 0) unhidden = UsbScan.Unhide(volume, null);
-            Settings.SetDriveScan(volume, scan.Files, scan.Items.Count);
-            Log.Write("Tự động kiểm tra " + volume + ": " + scan.Files + " tệp, "
-                      + scan.Items.Count + " mục, cách ly " + done
-                      + ", bỏ ẩn " + unhidden + ", dừng tiến trình " + stopped);
+            Settings.SetDriveScan(volume, scan.Files, review);
+            Settings.SetDriveEvent(volume, done, review);
+            Log.Write(S.Log.AutoScan(volume, scan.Files, scan.Items.Count, done,
+                                      review, unhidden, stopped));
         }
 
         public static bool StartWatchNow()
@@ -845,6 +916,7 @@ namespace ShieldGate
                 return false;
             }
             Paths.EnsureDirs();
+            Paths.HardenRoot();
             EnsureSnapshot();
             bool ok = true;
 
@@ -878,7 +950,7 @@ namespace ShieldGate
                 bool created = RegisterTask(out output);
                 ok &= created;
                 if (!created)
-                    Log.Write("Không tạo được tác vụ bảo vệ: " + (output ?? "").Trim(), "ERROR");
+                    Log.Write(S.Log.GuardTaskCreateFailed((output ?? "").Trim()), "ERROR");
                 if (created)
                 {
                     try { File.Delete(Paths.StopFlag); } catch { }
@@ -902,8 +974,8 @@ namespace ShieldGate
                 try { File.Delete(Paths.Heartbeat); } catch { }
             }
 
-            Log.Write("Thiết lập bảo vệ: chặn tự chạy=" + autorun + ", chặn autorun.inf=" + ini
-                      + ", chặn script=" + wsh + ", chạy nền=" + guardOn + " (ok=" + ok + ")");
+            SaveConfig(autorun, ini, wsh);
+            Log.Write(S.Log.SettingsApplied(autorun, ini, wsh, guardOn, ok));
             if (log != null) log(ok ? S.Cli.Configured : S.Cli.ConfigurePartial);
             return ok;
         }

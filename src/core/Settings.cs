@@ -1,21 +1,36 @@
 // ShieldGate - thiết lập nhỏ: lần kiểm tra gần nhất của máy và từng ổ.
 // Tệp key=value trong thư mục dữ liệu. Không chứa thông tin cá nhân.
+// Giao diện và bảo vệ nền cùng ghi tệp này: mỗi lần ghi phải nạp lại bản trên đĩa
+// và khoá liên tiến trình, nếu không bên này sẽ xoá thay đổi của bên kia.
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace ShieldGate
 {
     internal static class Settings
     {
+        private const string MutexName = @"Global\ShieldGate_Settings_1";
         private static readonly object Gate = new object();
         private static Dictionary<string, string> _map;
+        private static DateTime _stamp = DateTime.MinValue;
 
-        private static Dictionary<string, string> Map()
+        private static DateTime Stamp()
         {
-            if (_map != null) return _map;
-            _map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                return File.Exists(Paths.SettingsFile)
+                    ? File.GetLastWriteTimeUtc(Paths.SettingsFile)
+                    : DateTime.MinValue;
+            }
+            catch { return DateTime.MinValue; }
+        }
+
+        private static Dictionary<string, string> Load()
+        {
+            Dictionary<string, string> map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             try
             {
                 if (File.Exists(Paths.SettingsFile))
@@ -26,11 +41,18 @@ namespace ShieldGate
                         if (line.Length == 0 || line[0] == '#') continue;
                         int eq = line.IndexOf('=');
                         if (eq <= 0) continue;
-                        _map[line.Substring(0, eq)] = line.Substring(eq + 1);
+                        map[line.Substring(0, eq)] = line.Substring(eq + 1);
                     }
                 }
             }
             catch { }
+            _stamp = Stamp();
+            return map;
+        }
+
+        private static Dictionary<string, string> Map()
+        {
+            if (_map == null || Stamp() != _stamp) _map = Load();
             return _map;
         }
 
@@ -45,11 +67,38 @@ namespace ShieldGate
 
         public static void Set(string key, string value)
         {
+            Dictionary<string, string> one = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            one[key] = value;
+            SetMany(one);
+        }
+
+        public static void SetMany(IDictionary<string, string> values)
+        {
             lock (Gate)
             {
-                Map()[key] = (value ?? "").Replace("\r", " ").Replace("\n", " ");
-                Flush();
+                Mutex gate = null;
+                try { gate = new Mutex(false, MutexName); }
+                catch { }
+                try
+                {
+                    try { if (gate != null) gate.WaitOne(5000); } catch { }
+                    _map = Load();
+                    foreach (KeyValuePair<string, string> kv in values)
+                        _map[kv.Key] = Clean(kv.Value);
+                    Flush();
+                    _stamp = Stamp();
+                }
+                finally
+                {
+                    try { if (gate != null) gate.ReleaseMutex(); } catch { }
+                    if (gate != null) { try { gate.Dispose(); } catch { } }
+                }
             }
+        }
+
+        private static string Clean(string value)
+        {
+            return (value ?? "").Replace("\r", " ").Replace("\n", " ");
         }
 
         private static void Flush()
@@ -57,15 +106,23 @@ namespace ShieldGate
             try
             {
                 Paths.EnsureDirs();
-                List<string> keys = new List<string>(Map().Keys);
+                List<string> keys = new List<string>(_map.Keys);
                 keys.Sort(StringComparer.OrdinalIgnoreCase);
                 StringBuilder sb = new StringBuilder();
                 sb.Append("# ShieldGate - settings\r\n");
-                foreach (string k in keys) sb.Append(k).Append('=').Append(Map()[k]).Append("\r\n");
+                foreach (string k in keys) sb.Append(k).Append('=').Append(_map[k]).Append("\r\n");
                 string tmp = Paths.SettingsFile + ".tmp";
                 File.WriteAllText(tmp, sb.ToString(), new UTF8Encoding(false));
-                if (File.Exists(Paths.SettingsFile)) File.Delete(Paths.SettingsFile);
-                File.Move(tmp, Paths.SettingsFile);
+                if (File.Exists(Paths.SettingsFile))
+                {
+                    try { File.Replace(tmp, Paths.SettingsFile, null); }
+                    catch
+                    {
+                        File.Delete(Paths.SettingsFile);
+                        File.Move(tmp, Paths.SettingsFile);
+                    }
+                }
+                else File.Move(tmp, Paths.SettingsFile);
             }
             catch { }
         }
@@ -86,9 +143,11 @@ namespace ShieldGate
 
         public static void SetPcScan(int files, int found)
         {
-            Set("pc.time", DateTime.Now.ToString("o"));
-            Set("pc.files", files.ToString());
-            Set("pc.found", found.ToString());
+            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            v["pc.time"] = DateTime.Now.ToString("o");
+            v["pc.files"] = files.ToString();
+            v["pc.found"] = found.ToString();
+            SetMany(v);
         }
 
         // --------------------------------------------------------------- ổ USB
@@ -97,9 +156,11 @@ namespace ShieldGate
         {
             string letter = Letter(drive);
             if (letter.Length == 0) return;
-            Set("usb." + letter + ".time", DateTime.Now.ToString("o"));
-            Set("usb." + letter + ".files", files.ToString());
-            Set("usb." + letter + ".found", found.ToString());
+            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            v["usb." + letter + ".time"] = DateTime.Now.ToString("o");
+            v["usb." + letter + ".files"] = files.ToString();
+            v["usb." + letter + ".found"] = found.ToString();
+            SetMany(v);
         }
 
         public static DateTime DriveScanTime(string drive)
@@ -111,6 +172,30 @@ namespace ShieldGate
 
         public static int DriveScanFiles(string drive) { return Int("usb." + Letter(drive) + ".files"); }
         public static int DriveScanFound(string drive) { return Int("usb." + Letter(drive) + ".found"); }
+
+        // Sự kiện gần nhất của bảo vệ nền, để biểu tượng khay báo cho người dùng.
+        public static void SetDriveEvent(string drive, int cleaned, int review)
+        {
+            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            v["event.time"] = DateTime.Now.ToString("o");
+            v["event.drive"] = drive ?? "";
+            v["event.cleaned"] = cleaned.ToString();
+            v["event.review"] = review.ToString();
+            SetMany(v);
+        }
+
+        public static DateTime DriveEventTime
+        {
+            get
+            {
+                DateTime t;
+                return DateTime.TryParse(Get("event.time", ""), out t) ? t : DateTime.MinValue;
+            }
+        }
+
+        public static string DriveEventDrive { get { return Get("event.drive", ""); } }
+        public static int DriveEventCleaned { get { return Int("event.cleaned"); } }
+        public static int DriveEventReview { get { return Int("event.review"); } }
 
         private static int Int(string key)
         {

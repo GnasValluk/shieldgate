@@ -16,12 +16,12 @@ namespace ShieldGate
     internal static class AppInfo
     {
         public const string Name = "ShieldGate";
-        public const string Version = "7.3";
+        public const string Version = "1.0";
         public const string TaskName = "ShieldGate USB Guard";
         public const string TrayTaskName = "ShieldGate Tray";
-        public const string MutexName = "Global\\ShieldGate_USBGuard_7";
-        public const string UiMutexName = "Local\\ShieldGate_UI_7";
-        public const string TrayMutexName = "Local\\ShieldGate_Tray_7";
+        public const string MutexName = "Global\\ShieldGate_USBGuard_1";
+        public const string UiMutexName = "Local\\ShieldGate_UI_1";
+        public const string TrayMutexName = "Local\\ShieldGate_Tray_1";
     }
 
     internal static class Paths
@@ -39,6 +39,7 @@ namespace ShieldGate
         public static string SettingsFile;
         public static string PolicyBackup;
         public static string LastScan;
+        public static string GuardConfig;
         public static string SystemDrive;
 
         static Paths()
@@ -86,7 +87,43 @@ namespace ShieldGate
             SettingsFile = Path.Combine(Root, "settings.txt");
             PolicyBackup = Path.Combine(BakDir, "immunize.txt");
             LastScan = Path.Combine(Root, "last_scan.txt");
+            GuardConfig = Path.Combine(Root, "guard.cfg");
             EnsureDirs();
+        }
+
+        private static bool _hardened;
+
+        // Thư mục dữ liệu chứa bản sao lưu cấu hình, tệp tác vụ và tệp cách ly.
+        // Nếu người dùng thường tạo được thư mục này trước, họ có thể thay nội dung
+        // mà chương trình đọc bằng quyền quản trị. Khoá lại: chỉ SYSTEM và quản trị ghi.
+        public static void HardenRoot()
+        {
+            if (_hardened) return;
+            _hardened = true;
+            if (!Native.IsAdmin()) return;
+            try
+            {
+                EnsureDirs();
+                string ignored;
+                Grant(Root, true, out ignored);
+                Grant(BinDir, false, out ignored);
+                Grant(BakDir, false, out ignored);
+                // Tệp cách ly là mẫu virus sống: người dùng thường không cần đọc.
+                Grant(QuarDir, false, out ignored);
+            }
+            catch { }
+        }
+
+        private static void Grant(string dir, bool usersRead, out string output)
+        {
+            // /reset trước để xoá ACE cũ (bản 7.x từng cấp Users quyền đọc bin).
+            Native.Run("icacls.exe", "\"" + dir + "\" /setowner \"*S-1-5-32-544\" /reset",
+                       20000, out output);
+            string args = "\"" + dir + "\" /setowner \"*S-1-5-32-544\" /inheritance:r " +
+                          "/grant:r \"*S-1-5-18:(OI)(CI)F\" \"*S-1-5-32-544:(OI)(CI)F\"";
+            if (usersRead) args += " \"*S-1-5-32-545:(OI)(CI)RX\"";
+            else args += " /remove:g \"*S-1-5-32-545\"";
+            Native.Run("icacls.exe", args, 20000, out output);
         }
 
         public static void EnsureDirs()
@@ -112,13 +149,29 @@ namespace ShieldGate
                     Paths.EnsureDirs();
                     try
                     {
-                        if (File.Exists(Paths.LogFile) && new FileInfo(Paths.LogFile).Length > 5 * 1024 * 1024)
-                            File.Copy(Paths.LogFile, Paths.LogFile + ".1", true);
+                        FileInfo fi = new FileInfo(Paths.LogFile);
+                        // Cắt tệp sau khi sao lưu, nếu không tệp phình mãi và
+                        // mỗi dòng sau mốc 5 MB lại copy toàn bộ tệp một lần.
+                        if (fi.Exists && fi.Length > 5 * 1024 * 1024)
+                        {
+                            try { File.Copy(Paths.LogFile, Paths.LogFile + ".1", true); } catch { }
+                            try
+                            {
+                                using (FileStream cut = new FileStream(Paths.LogFile, FileMode.Truncate,
+                                                                       FileAccess.Write, FileShare.ReadWrite))
+                                { }
+                            }
+                            catch { }
+                        }
                     }
                     catch { }
                     string line = string.Format("{0} [{1}] {2}\r\n",
                         DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), level, message);
-                    File.AppendAllText(Paths.LogFile, line, new UTF8Encoding(true));
+                    // Cho tiến trình khác (giao diện, bảo vệ nền) cùng ghi.
+                    using (FileStream fs = new FileStream(Paths.LogFile, FileMode.Append,
+                                                          FileAccess.Write, FileShare.ReadWrite))
+                    using (StreamWriter w = new StreamWriter(fs, new UTF8Encoding(true)))
+                        w.Write(line);
                 }
             }
             catch { }
@@ -168,13 +221,6 @@ namespace ShieldGate
             return Drives(DriveType.Removable);
         }
 
-        public static List<string> ScanDrives()
-        {
-            List<string> all = Drives(DriveType.Removable);
-            all.AddRange(Drives(DriveType.Fixed));
-            return all;
-        }
-
         private static List<string> Drives(DriveType type)
         {
             List<string> outList = new List<string>();
@@ -219,8 +265,10 @@ namespace ShieldGate
                     if (!p.WaitForExit(timeoutMs))
                     {
                         try { p.Kill(); } catch { }
+                        // Không chờ vô hạn: nếu Kill bị từ chối (AV, tiến trình SYSTEM)
+                        // thì trả về lỗi thay vì treo giao diện.
+                        try { p.WaitForExit(2000); } catch { }
                     }
-                    p.WaitForExit();
                     output = sb.ToString();
                     return p.HasExited ? p.ExitCode : -1;
                 }
@@ -260,6 +308,11 @@ namespace ShieldGate
         public string Rel;
     }
 
+    internal sealed class WalkStats
+    {
+        public bool Truncated;
+    }
+
     internal static class Tree
     {
         public static readonly HashSet<string> SkipNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -268,7 +321,8 @@ namespace ShieldGate
             ".Spotlight-V100", ".fseventsd"
         };
 
-        public static IEnumerable<TreeItem> Walk(string root, int maxFiles = 150000, int maxSeconds = 300)
+        public static IEnumerable<TreeItem> Walk(string root, WalkStats stats = null,
+                                                 int maxFiles = 150000, int maxSeconds = 300)
         {
             DateTime start = DateTime.UtcNow;
             Stack<KeyValuePair<string, int>> stack = new Stack<KeyValuePair<string, int>>();
@@ -276,14 +330,22 @@ namespace ShieldGate
             int count = 0;
             while (stack.Count > 0)
             {
-                if ((DateTime.UtcNow - start).TotalSeconds > maxSeconds) yield break;
+                if ((DateTime.UtcNow - start).TotalSeconds > maxSeconds)
+                {
+                    if (stats != null) stats.Truncated = true;
+                    yield break;
+                }
                 KeyValuePair<string, int> cur = stack.Pop();
                 string[] entries;
                 try { entries = Directory.GetFileSystemEntries(cur.Key); }
                 catch { continue; }
                 foreach (string full in entries)
                 {
-                    if (++count > maxFiles) yield break;
+                    if (++count > maxFiles)
+                    {
+                        if (stats != null) stats.Truncated = true;
+                        yield break;
+                    }
                     string name = System.IO.Path.GetFileName(full);
                     if (SkipNames.Contains(name)) continue;
                     FileAttributes attrs;
@@ -321,6 +383,7 @@ namespace ShieldGate
         public static string NewBatch(string prefix, string note)
         {
             Paths.EnsureDirs();
+            Paths.HardenRoot();
             string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string dir = System.IO.Path.Combine(Paths.QuarDir, prefix + "_" + stamp);
             int i = 1;
@@ -382,6 +445,8 @@ namespace ShieldGate
             catch (Exception e)
             {
                 error = e.Message;
+                // Nếu nguồn vẫn còn thì bản sao trong vùng cách ly là mồ côi.
+                try { if (File.Exists(path) && File.Exists(dest)) File.Delete(dest); } catch { }
                 return false;
             }
 
@@ -397,7 +462,7 @@ namespace ShieldGate
                                    row + "\r\n", new UTF8Encoding(true));
             }
             catch { }
-            Log.Write("Cach ly: " + path + " | " + reason, "WARN");
+            Log.Write(S.Log.Quarantined(path, reason), "WARN");
             return true;
         }
 
@@ -422,13 +487,13 @@ namespace ShieldGate
                 try
                 {
                     List<string[]> rows = CsvFile.Read(mf);
+                    int si = CsvFile.Index(rows[0], "Size");
                     for (int r = 1; r < rows.Count; r++)
                     {
                         b.Count++;
                         long sz;
-                        int idx = CsvFile.Index(rows[0], "Size");
-                        if (idx >= 0 && idx < rows[r].Length &&
-                            long.TryParse(rows[r][idx], out sz)) b.Size += sz;
+                        if (si >= 0 && si < rows[r].Length &&
+                            long.TryParse(rows[r][si], out sz)) b.Size += sz;
                     }
                     int ti = CsvFile.Index(rows[0], "Time");
                     if (rows.Count > 1 && ti >= 0 && ti < rows[1].Length)
@@ -462,6 +527,7 @@ namespace ShieldGate
             if (rows.Count < 2) return;
             int iOrig = CsvFile.Index(rows[0], "OriginalPath");
             int iQuar = CsvFile.Index(rows[0], "QuarantinePath");
+            int iSha = CsvFile.Index(rows[0], "SHA256");
             if (iOrig < 0 || iQuar < 0) return;
             for (int r = 1; r < rows.Count; r++)
             {
@@ -471,13 +537,24 @@ namespace ShieldGate
                 if (string.IsNullOrEmpty(dest) || string.IsNullOrEmpty(src)) continue;
                 if (!File.Exists(src)) { missing++; continue; }
                 if (File.Exists(dest)) { skipped++; continue; }
+                // Bản cách ly bị sửa hoặc hỏng thì không ghi trả về ổ.
+                if (iSha >= 0 && iSha < row.Length && row[iSha].Length > 0)
+                {
+                    string now = Native.Sha256(src);
+                    if (now.Length > 0 && !string.Equals(now, row[iSha], StringComparison.OrdinalIgnoreCase))
+                    {
+                        Log.Write(S.Log.QuarantineChanged(src), "WARN");
+                        missing++;
+                        continue;
+                    }
+                }
                 try
                 {
                     string parent = System.IO.Path.GetDirectoryName(dest);
                     if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
                     File.Copy(src, dest, false);
                     restored++;
-                    Log.Write("Phuc hoi: " + dest);
+                    Log.Write(S.Log.Restored(dest));
                 }
                 catch { missing++; }
             }

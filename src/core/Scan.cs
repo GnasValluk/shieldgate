@@ -20,6 +20,8 @@ namespace ShieldGate
         public UsbKind Kind;
         public List<string> Codes = new List<string>();
         public long Size;
+        // Dấu hiệu đủ mạnh để bảo vệ nền tự cách ly mà không hỏi.
+        public bool High;
 
         public string ReasonText { get { return S.Reason.Text(Codes); } }
     }
@@ -33,6 +35,7 @@ namespace ShieldGate
         public int Files;
         public double Seconds;
         public bool Cancelled;
+        public bool Truncated;
         public int Shortcuts;
         public int Scripts;
         public int Autoruns;
@@ -88,7 +91,7 @@ namespace ShieldGate
                             {
                                 using (Process p = Process.GetProcessById(pid)) p.Kill();
                                 killed++;
-                                Log.Write("Dừng tiến trình " + pid + " chạy từ " + root, "WARN");
+                                Log.Write(S.Log.ProcessStopped(pid, root), "WARN");
                             }
                             catch { }
                         }
@@ -110,8 +113,9 @@ namespace ShieldGate
             result.Root = root;
             result.Drive = root.Length >= 2 ? root.Substring(0, 2) : root;
             int seen = 0;
+            WalkStats stats = new WalkStats();
 
-            foreach (TreeItem f in Tree.Walk(root))
+            foreach (TreeItem f in Tree.Walk(root, stats))
             {
                 if (cancelled != null && cancelled())
                 {
@@ -141,6 +145,7 @@ namespace ShieldGate
                     {
                         item = MakeItem(f, UsbKind.Shortcut);
                         item.Codes.AddRange(why);
+                        item.High = Strong(why);
                     }
                 }
                 else if (isScript)
@@ -150,6 +155,7 @@ namespace ShieldGate
                     {
                         item = MakeItem(f, UsbKind.Script);
                         item.Codes.AddRange(why);
+                        item.High = why.Contains("encoded-vbscript");
                     }
                 }
                 else if (isAutorun)
@@ -158,12 +164,14 @@ namespace ShieldGate
                     {
                         item = MakeItem(f, UsbKind.Autorun);
                         item.Codes.Add("autorun-payload");
+                        item.High = true;
                     }
                 }
                 else if (isRootExe)
                 {
                     item = MakeItem(f, UsbKind.RootExe);
                     item.Codes.Add("hidden-root-exe");
+                    item.High = true;
                 }
                 else if (f.Depth == 0 && (ext == ".exe" || ext == ".com" || ext == ".pif" || ext == ".scr"))
                 {
@@ -183,9 +191,23 @@ namespace ShieldGate
             }
 
             result.Files = seen;
+            result.Truncated = stats.Truncated;
             result.Seconds = Math.Round((DateTime.UtcNow - started).TotalSeconds, 1);
             if (progress != null) progress(seen, null);
             return result;
+        }
+
+        // Shortcut trỏ tới công cụ hệ thống hoặc mạo danh thư mục bị ẩn:
+        // đây là hai dấu hiệu mạnh nhất của virus shortcut.
+        private static bool Strong(List<string> why)
+        {
+            foreach (string r in why)
+            {
+                if (r.StartsWith("target=", StringComparison.OrdinalIgnoreCase)) return true;
+                if (r.StartsWith("args=", StringComparison.OrdinalIgnoreCase)) return true;
+                if (r == "shadows-hidden-folder") return true;
+            }
+            return false;
         }
 
         private static UsbItem MakeItem(TreeItem f, UsbKind kind)
@@ -215,11 +237,11 @@ namespace ShieldGate
                 else
                 {
                     failed++;
-                    Log.Write("Không cách ly được " + it.Path + ": " + err, "ERROR");
+                    Log.Write(S.Log.QuarantineFailed(it.Path, err), "ERROR");
                 }
                 if (progress != null) progress(i + 1);
             }
-            Log.Write("Cách ly " + done + " tệp từ " + scan.Root + " (lỗi " + failed + ")");
+            Log.Write(S.Log.QuarantineSummary(done, scan.Root, failed));
             return done;
         }
 
@@ -247,7 +269,7 @@ namespace ShieldGate
                 }
                 catch { }
             }
-            if (count > 0) Log.Write("Bỏ thuộc tính ẩn cho " + count + " mục trên " + root);
+            if (count > 0) Log.Write(S.Log.Unhidden(count, root));
             return count;
         }
 
@@ -265,18 +287,6 @@ namespace ShieldGate
         public static string DriveFileSystem(string root)
         {
             try { return new DriveInfo(root.Substring(0, 1)).DriveFormat; }
-            catch { return ""; }
-        }
-
-        public static string DriveSize(string root)
-        {
-            try
-            {
-                DriveInfo d = new DriveInfo(root.Substring(0, 1));
-                if (!d.IsReady) return "";
-                double free = d.AvailableFreeSpace / 1048576.0;
-                return string.Format("{0:0},{1} GB", d.TotalSize / 1073741824.0, 0);
-            }
             catch { return ""; }
         }
     }
@@ -404,7 +414,8 @@ namespace ShieldGate
                 string cmd = Convert.ToString(val);
                 if (string.IsNullOrWhiteSpace(cmd)) continue;
                 ShieldGate.CommandCheck v = ShieldGate.Detect.CommandVerdict(Environment.ExpandEnvironmentVariables(cmd));
-                PcItem i = New(PcKind.MountPoint, v != null && v.High, child, cmd);
+                if (v == null) continue;
+                PcItem i = New(PcKind.MountPoint, v.High, child, cmd);
                 i.Data["hive"] = RegistryHive.CurrentUser;
                 i.Data["path"] = mp + "\\" + child;
                 list.Add(i);
@@ -641,7 +652,7 @@ namespace ShieldGate
                 }
                 catch (Exception e) { ok = false; err = e.Message; }
 
-                if (ok) { okCount++; Log.Write("Đã sửa: " + f.Kind + " " + f.Arg1, "WARN"); }
+                if (ok) { okCount++; Log.Write(S.Log.PcFixed(f.Kind.ToString(), f.Arg1), "WARN"); }
                 else failCount++;
                 if (done != null) done(f, ok, err);
             }

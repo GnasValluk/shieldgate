@@ -250,10 +250,11 @@ namespace ShieldGate
             if (string.IsNullOrWhiteSpace(cmd)) return null;
             CommandCheck c = new CommandCheck();
             foreach (string[] p in HighPatterns)
-                if (Regex.IsMatch(cmd, p[0], RegexOptions.IgnoreCase)) c.Reasons.Add(p[1]);
-            c.High = false;
-            foreach (string[] p in HighPatterns)
-                if (Regex.IsMatch(cmd, p[0], RegexOptions.IgnoreCase)) c.High = true;
+                if (Regex.IsMatch(cmd, p[0], RegexOptions.IgnoreCase))
+                {
+                    c.Reasons.Add(p[1]);
+                    c.High = true;
+                }
             List<string> med = new List<string>();
             foreach (string[] p in MedPatterns)
                 if (Regex.IsMatch(cmd, p[0], RegexOptions.IgnoreCase)) med.Add(p[1]);

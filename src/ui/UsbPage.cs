@@ -14,7 +14,7 @@ namespace ShieldGate
 
         private readonly SelectBox _drive;
         private readonly List<string> _driveRoots = new List<string>();
-        private readonly LinkText _refresh, _vaccine, _selectAll, _selectNone, _undo, _log;
+        private readonly LinkText _refresh, _vaccine, _unhide, _selectAll, _selectNone, _undo, _log;
         private readonly FlatButton _scan, _apply, _cancel;
         private readonly Notice _notice;
         private readonly Spinner _spinner;
@@ -28,7 +28,7 @@ namespace ShieldGate
         private string _batch = "";
         private string _scanDrive = "";
         private int _doneCount, _failedCount, _unhidden, _cleanFiles;
-        private bool _scanning, _applying, _loading;
+        private bool _scanning, _applying, _unhiding, _loading;
         private volatile bool _cancelFlag;
         private volatile int _progressFiles;
         private volatile string _progressPath = "";
@@ -65,8 +65,13 @@ namespace ShieldGate
             _vaccine.Click += delegate { DoVaccinate(); };
             Controls.Add(_vaccine);
 
+            _unhide = MakeLink(S.Usb.Unhide, "");
+            _unhide.Click += delegate { DoUnhide(); };
+            Controls.Add(_unhide);
+
             _tips = new ToolTip();
             _tips.SetToolTip(_vaccine, S.Usb.VaccineHint);
+            _tips.SetToolTip(_unhide, S.Usb.UnhideHint);
             _tips.SetToolTip(_refresh, S.Usb.Refresh);
 
             _notice = new Notice();
@@ -136,7 +141,7 @@ namespace ShieldGate
             LayoutPage();
         }
 
-        public override bool Busy { get { return _scanning || _applying; } }
+        public override bool Busy { get { return _scanning || _applying || _unhiding; } }
 
         public override void CancelWork()
         {
@@ -145,7 +150,7 @@ namespace ShieldGate
 
         public override void OnShown()
         {
-            if (_scanning || _applying) return;
+            if (_scanning || _applying || _unhiding) return;
             RefreshDrives();
         }
 
@@ -159,7 +164,7 @@ namespace ShieldGate
 
         private void RefreshDrives()
         {
-            if (_scanning || _applying) return;
+            if (_scanning || _applying || _unhiding) return;
 
             string keep = SelectedDrive();
             List<string> drives;
@@ -242,11 +247,15 @@ namespace ShieldGate
 
             _cancel.Visible = state == UsbState.Scanning;
             _scan.Visible = state != UsbState.NoDrive && state != UsbState.Scanning;
-            _scan.Enabled = hasDrive && !_applying;
+            _scan.Enabled = hasDrive && !_applying && !_unhiding;
             _vaccine.Visible = hasDrive && state != UsbState.NoDrive && state != UsbState.Scanning;
-            _vaccine.Enabled = !_applying;
-            _drive.Enabled = !_scanning && !_applying;
-            _refresh.Enabled = !_scanning && !_applying;
+            _vaccine.Enabled = !_applying && !_unhiding;
+            bool canUnhide = hasDrive &&
+                (state == UsbState.Idle || state == UsbState.Clean);
+            _unhide.Visible = canUnhide;
+            _unhide.Enabled = canUnhide && !_unhiding;
+            _drive.Enabled = !_scanning && !_applying && !_unhiding;
+            _refresh.Enabled = !_scanning && !_applying && !_unhiding;
 
             bool results = state == UsbState.Results;
             _resultsTitle.Visible = results;
@@ -329,7 +338,7 @@ namespace ShieldGate
         private void StartScan()
         {
             string drive = SelectedDrive();
-            if (drive == null || _scanning || _applying) return;
+            if (drive == null || _scanning || _applying || _unhiding) return;
             if (!Directory.Exists(drive))
             {
                 _notice.SetMessage(S.Err.Unplugged(drive), true);
@@ -363,7 +372,7 @@ namespace ShieldGate
                 }
                 catch (Exception e)
                 {
-                    Log.Write("Lỗi khi kiểm tra " + drive + ": " + e.Message, "ERROR");
+                    Log.Write(S.Log.UsbScanError(drive, e.Message), "ERROR");
                 }
                 if (IsDisposed || !IsHandleCreated) return;
                 try
@@ -404,8 +413,15 @@ namespace ShieldGate
 
             _result = result;
             Settings.SetDriveScan(drive, result.Files, result.Items.Count);
-            Log.Write("Kiểm tra " + drive + ": " + result.Files + " tệp, phát hiện "
-                      + result.Items.Count + " mục trong " + result.Seconds + " giây");
+            Log.Write(S.Log.UsbScanDone(drive, result.Files, result.Items.Count, result.Seconds));
+
+            List<string> warnings = new List<string>();
+            if (result.Truncated) warnings.Add(S.Usb.Truncated(result.Files));
+            int rootExe = 0;
+            foreach (UsbItem item in result.Items)
+                if (item.Kind == UsbKind.RootExe) rootExe++;
+            if (rootExe > 0) warnings.Add(S.Usb.RootExeWarning(rootExe));
+            if (warnings.Count > 0) _notice.SetMessage(string.Join(" ", warnings.ToArray()), true);
 
             if (result.Items.Count == 0)
             {
@@ -423,7 +439,7 @@ namespace ShieldGate
 
         private void DoApply()
         {
-            if (_result == null || _applying) return;
+            if (_result == null || _applying || _unhiding) return;
             List<UsbItem> selected = _list.CheckedItems();
             if (selected.Count == 0) return;
 
@@ -456,7 +472,7 @@ namespace ShieldGate
                 }
                 catch (Exception e)
                 {
-                    Log.Write("Lỗi khi cách ly: " + e.Message, "ERROR");
+                    Log.Write(S.Log.QuarantineError(e.Message), "ERROR");
                     failed = selected.Count;
                 }
                 if (IsDisposed || !IsHandleCreated) return;
@@ -510,7 +526,7 @@ namespace ShieldGate
             }
             catch (Exception e)
             {
-                Log.Write("Lỗi khi hoàn tác: " + e.Message, "ERROR");
+                Log.Write(S.Log.UndoError(e.Message), "ERROR");
                 restored = 0; skipped = 0; missing = _doneCount;
             }
 
@@ -524,13 +540,50 @@ namespace ShieldGate
         private void DoVaccinate()
         {
             string drive = SelectedDrive();
-            if (drive == null) return;
+            if (drive == null || _scanning || _applying || _unhiding) return;
             bool existed;
             string error;
             if (Guard.Vaccinate(drive, out existed, out error))
                 _notice.SetMessage(existed ? S.Usb.VaccineExists : S.Usb.VaccineDone(drive), false);
             else
                 _notice.SetMessage(error, true);
+        }
+
+        // Hiện lại tệp và thư mục bị virus đặt thuộc tính ẩn. Không hoàn tác
+        // tự động: người dùng chủ động bấm lại thao tác này khi cần.
+        private void DoUnhide()
+        {
+            string drive = SelectedDrive();
+            if (drive == null || _scanning || _applying || _unhiding) return;
+            if (!ConfirmDialog.Ask(FindForm(), S.Dlg.UnhideTitle, S.Dlg.UnhideBody,
+                                   S.Dlg.UnhideOk, S.Dlg.Cancel, ButtonKind.Secondary, false))
+                return;
+
+            _unhiding = true;
+            _cancelFlag = false;
+            _notice.ClearMessage();
+            ShowState(_state);
+
+            Thread t = new Thread(delegate()
+            {
+                int count = 0;
+                try { count = UsbScan.Unhide(drive, delegate { return _cancelFlag; }); }
+                catch (Exception e) { Log.Write(S.Log.UnhideError(e.Message), "ERROR"); }
+                if (IsDisposed || !IsHandleCreated) return;
+                _unhiding = false;
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        _unhiding = false;
+                        _notice.SetMessage(count > 0 ? S.Usb.Unhidden(count) : S.Usb.UnhiddenNone, false);
+                        ShowState(_state);
+                    });
+                }
+                catch { }
+            });
+            t.IsBackground = true;
+            t.Start();
         }
 
         // ----------------------------------------------------------------- bố cục
@@ -560,6 +613,8 @@ namespace ShieldGate
                 TextWidth(S.Usb.Scan, Theme.BodyStrong), Ui.Px(Theme.ControlHeight));
             _vaccine.Bounds = new Rectangle(_scan.Right + Ui.Px(24), Ui.Px(119),
                 Ui.Measure(S.Usb.Vaccine, Theme.Small).Width + Ui.Px(24), Ui.Px(22));
+            _unhide.Bounds = new Rectangle(_vaccine.Right + Ui.Px(16), Ui.Px(119),
+                Ui.Measure(S.Usb.Unhide, Theme.Small).Width + Ui.Px(4), Ui.Px(22));
 
             _notice.Bounds = new Rectangle(pad, Ui.Px(158), width, Ui.Px(38));
 
