@@ -238,10 +238,7 @@ namespace ShieldGate
             int pad = Ui.Px(Theme.PagePad);
             Ui.HLine(g, pad, Width - pad, 0, Theme.LineSoft);
             Ui.TextLeft(g, S.Footer.Line(AppInfo.Version), Theme.Tiny, Theme.InkFaint,
-                new Rectangle(pad, 0, (int)((Width - pad * 2) * 0.62), Height));
-            Ui.TextRight(g, S.Footer.Privacy, Theme.Tiny, Theme.InkFaint,
-                new Rectangle(pad + (int)((Width - pad * 2) * 0.62), 0,
-                              (int)((Width - pad * 2) * 0.38), Height));
+                new Rectangle(pad, 0, Width - pad * 2, Height));
         }
     }
 

@@ -241,7 +241,11 @@ namespace ShieldGate
 
         private static int Uninstall()
         {
-            return Guard.Uninstall(Console.WriteLine) ? 0 : 1;
+            bool clean;
+            bool ok = Uninstaller.Run(out clean);
+            if (!ok) return 1;
+            Console.WriteLine(clean ? S.Cli.UninstallDone : S.Cli.UninstallPending);
+            return 0;
         }
 
         private static int Status()
@@ -252,6 +256,7 @@ namespace ShieldGate
             Console.WriteLine(S.Cli.StatusAutorun(st.Autorun));
             Console.WriteLine(S.Cli.StatusIni(st.Ini));
             Console.WriteLine(S.Cli.StatusWsh(st.Wsh));
+            Console.WriteLine(S.Cli.StatusRegistry(st.Registry));
             Console.WriteLine(S.Cli.StatusGuard(st.Running));
             Console.WriteLine(S.Cli.StatusAdmin(st.Admin));
             Console.WriteLine(S.Cli.StatusQuarantine(st.QuarantineFiles, st.QuarantineBatches));

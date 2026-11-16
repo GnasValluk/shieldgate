@@ -1,4 +1,4 @@
-// ShieldGate - màn hình Nhật ký: xem, lọc lỗi, xuất tệp.
+// ShieldGate - màn hình Nhật ký: chia nhóm, chia trang để không nạp cả tệp một lượt.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -11,14 +11,21 @@ namespace ShieldGate
 {
     internal sealed class LogPage : PageBase
     {
-        private const int MaxLines = 2000;
+        // Mỗi trang chỉ vẽ vài trăm dòng: cuộn mượt, không nhiễu, không đơ máy.
+        private const int PageSize = 250;
+        // Chỉ đọc phần cuối tệp nhật ký (tệp có thể tới 5 MB).
+        private const int MaxReadBytes = 2 * 1024 * 1024;
 
-        private readonly Label _title;
+        private readonly Label _title, _pageLabel;
         private readonly Segment _filter;
-        private readonly LinkText _refresh, _export, _open;
+        private readonly LinkText _refresh, _export, _open, _newer, _older;
         private readonly Panel _box;
         private readonly RichTextBox _text;
         private readonly Notice _notice;
+
+        private List<string> _raw = new List<string>();
+        private List<string> _shown = new List<string>();
+        private int _page;   // 0 = trang mới nhất
 
         public LogPage()
         {
@@ -28,8 +35,12 @@ namespace ShieldGate
             Controls.Add(_title);
 
             _filter = new Segment();
-            _filter.Options = new string[] { S.Log.All, S.Log.ErrorsOnly };
-            _filter.SelectedChanged += delegate { LoadLog(); };
+            _filter.Options = new string[] { S.Log.All, S.Log.Warnings, S.Log.ErrorsOnly };
+            _filter.SelectedChanged += delegate
+            {
+                _page = 0;
+                ApplyFilter();
+            };
             Controls.Add(_filter);
 
             _refresh = MakeLink(S.Log.Refresh, "refresh");
@@ -69,6 +80,18 @@ namespace ShieldGate
             _open.Click += delegate { OpenLogFolder(); };
             Controls.Add(_open);
 
+            _newer = MakeLink(S.Log.Newer, "");
+            _newer.Click += delegate { GoPage(-1); };
+            Controls.Add(_newer);
+
+            _older = MakeLink(S.Log.Older, "");
+            _older.Click += delegate { GoPage(1); };
+            Controls.Add(_older);
+
+            _pageLabel = MakeLabel("", Theme.Small, Theme.InkMuted);
+            _pageLabel.TextAlign = ContentAlignment.MiddleRight;
+            Controls.Add(_pageLabel);
+
             LoadLog();
             LayoutPage();
         }
@@ -83,61 +106,139 @@ namespace ShieldGate
         private void LoadLog()
         {
             _notice.ClearMessage();
+            _raw = ReadTail(Paths.LogFile, MaxReadBytes);
+            _page = 0;
+            ApplyFilter();
+        }
 
-            string[] all = new string[0];
-            try
+        // Lọc theo mức: tất cả / cảnh báo / lỗi. Giữ nguyên danh sách đã đọc,
+        // chỉ lọc lại trong bộ nhớ nên đổi bộ lọc không cần đọc tệp lần nữa.
+        private void ApplyFilter()
+        {
+            _shown = new List<string>();
+            int mode = _filter.SelectedIndex;
+            foreach (string line in _raw)
             {
-                if (File.Exists(Paths.LogFile))
-                    all = File.ReadAllLines(Paths.LogFile, Encoding.UTF8);
+                if (mode == 1 && !HasLevel(line, "[WARN]")) continue;
+                if (mode == 2 && !HasLevel(line, "[ERROR]")) continue;
+                _shown.Add(line);
             }
-            catch
-            {
-                all = new string[0];
-            }
+            RenderPage();
+        }
 
-            bool errorsOnly = _filter.SelectedIndex == 1;
-            List<string> pick = new List<string>();
-            foreach (string raw in all)
-            {
-                if (raw == null) continue;
-                string line = raw.TrimEnd('\r', '\n');
-                if (line.Length == 0) continue;
-                if (errorsOnly && line.IndexOf("[ERROR]", StringComparison.OrdinalIgnoreCase) < 0)
-                    continue;
-                pick.Add(line);
-            }
+        private static bool HasLevel(string line, string tag)
+        {
+            return line.IndexOf(tag, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
 
-            int skip = Math.Max(0, pick.Count - MaxLines);
-            StringBuilder sb = new StringBuilder();
-            for (int i = skip; i < pick.Count; i++)
-            {
-                if (sb.Length > 0) sb.Append('\n');
-                sb.Append(pick[i]);
-            }
+        private void GoPage(int delta)
+        {
+            _page += delta;
+            RenderPage();
+        }
+
+        private void RenderPage()
+        {
+            int total = _shown.Count;
+            int pages = Math.Max(1, (total + PageSize - 1) / PageSize);
+            if (_page > pages - 1) _page = pages - 1;
+            if (_page < 0) _page = 0;
+
+            int end = total - _page * PageSize;
+            int start = Math.Max(0, end - PageSize);
+            int count = Math.Max(0, end - start);
 
             _text.SuspendLayout();
             _text.Clear();
-            if (sb.Length == 0)
+            if (count == 0)
             {
                 _text.SelectionColor = Theme.InkMuted;
-                _text.Text = errorsOnly ? S.Log.NoErrors : S.Log.Empty;
+                _text.Text = EmptyText();
                 _text.SelectionStart = 0;
+                _text.SelectionLength = 0;
             }
             else
             {
+                StringBuilder sb = new StringBuilder();
+                for (int i = start; i < end; i++)
+                {
+                    if (sb.Length > 0) sb.Append('\n');
+                    sb.Append(_shown[i]);
+                }
                 _text.Text = sb.ToString();
-                PaintLevels(skip);
+                PaintLevels();
                 _text.SelectionStart = _text.TextLength;
                 _text.SelectionLength = 0;
                 _text.ScrollToCaret();
             }
             _text.ResumeLayout();
 
-            _export.Enabled = all.Length > 0;
+            _pageLabel.Text = count == 0 ? S.Log.PageEmpty : S.Log.Page(_page + 1, pages, count);
+            _newer.Visible = count > 0 && pages > 1;
+            _older.Visible = _newer.Visible;
+            _newer.Enabled = _page > 0;
+            _older.Enabled = _page < pages - 1;
+            _export.Enabled = _raw.Count > 0;
+
+            LayoutPage();
         }
 
-        // Tô màu ngày giờ, mức và nội dung theo từng dòng.
-        private void PaintLevels(int firstShown)
+        private string EmptyText()
+        {
+            if (_filter.SelectedIndex == 1) return S.Log.NoWarnings;
+            if (_filter.SelectedIndex == 2) return S.Log.NoErrors;
+            return S.Log.Empty;
+        }
+
+        // Chỉ đọc phần cuối tệp: nhật ký dài không làm chậm màn hình.
+        private static List<string> ReadTail(string path, int maxBytes)
+        {
+            List<string> list = new List<string>();
+            try
+            {
+                if (!File.Exists(path)) return list;
+                using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    long length = fs.Length;
+                    long start = Math.Max(0, length - maxBytes);
+                    fs.Seek(start, SeekOrigin.Begin);
+
+                    byte[] buffer = new byte[length - start];
+                    int read = 0;
+                    while (read < buffer.Length)
+                    {
+                        int n = fs.Read(buffer, read, buffer.Length - read);
+                        if (n <= 0) break;
+                        read += n;
+                    }
+
+                    string text = Encoding.UTF8.GetString(buffer, 0, read);
+                    if (start > 0)
+                    {
+                        // Bỏ dòng đầu bị cắt giữa chừng.
+                        int cut = text.IndexOf('\n');
+                        if (cut >= 0) text = text.Substring(cut + 1);
+                        else text = "";
+                    }
+
+                    foreach (string raw in text.Split('\n'))
+                    {
+                        string line = raw.TrimEnd('\r');
+                        if (line.Length > 0 && line[0] == '\uFEFF') line = line.Substring(1);
+                        if (line.Length == 0) continue;
+                        list.Add(line);
+                    }
+                }
+            }
+            catch
+            {
+                list.Clear();
+            }
+            return list;
+        }
+
+        // Tô màu ngày giờ, mức và nội dung theo từng dòng của trang đang hiện.
+        private void PaintLevels()
         {
             string[] lines = _text.Text.Split('\n');
             int offset = 0;
@@ -235,7 +336,7 @@ namespace ShieldGate
 
             _title.Bounds = Ui.Rect(Theme.PagePad, 20, 320, 34);
 
-            _filter.Bounds = new Rectangle(pad, Ui.Px(62), Ui.Px(180), Ui.Px(30));
+            _filter.Bounds = new Rectangle(pad, Ui.Px(62), Ui.Px(320), Ui.Px(30));
 
             int exportW = Ui.Measure(S.Log.Export, Theme.Small).Width + Ui.Px(4);
             int refreshW = Ui.Measure(S.Log.Refresh, Theme.Small).Width + Ui.Px(24);
@@ -253,8 +354,17 @@ namespace ShieldGate
                 Math.Max(Ui.Px(60), _box.Width - Ui.Px(24)),
                 Math.Max(Ui.Px(80), _box.Height - Ui.Px(20)));
 
-            _open.Bounds = new Rectangle(pad, ClientSize.Height - Ui.Px(36),
+            int feetY = ClientSize.Height - Ui.Px(36);
+            _open.Bounds = new Rectangle(pad, feetY,
                 Ui.Measure(S.Log.OpenFolder, Theme.Small).Width + Ui.Px(4), Ui.Px(22));
+
+            int olderW = Ui.Measure(S.Log.Older, Theme.Small).Width + Ui.Px(4);
+            int newerW = Ui.Measure(S.Log.Newer, Theme.Small).Width + Ui.Px(4);
+            int labelW = Math.Max(Ui.Px(170), Ui.Measure(_pageLabel.Text, Theme.Small).Width + Ui.Px(8));
+
+            _older.Bounds = new Rectangle(right - olderW, feetY, olderW, Ui.Px(22));
+            _newer.Bounds = new Rectangle(_older.Left - Ui.Px(14) - newerW, feetY, newerW, Ui.Px(22));
+            _pageLabel.Bounds = new Rectangle(_newer.Left - Ui.Px(14) - labelW, feetY, labelW, Ui.Px(22));
         }
     }
 }

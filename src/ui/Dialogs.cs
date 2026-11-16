@@ -133,6 +133,7 @@ namespace ShieldGate
                 case PcKind.DriveExe: return S.Pc.DriveExe(item.Arg1);
                 case PcKind.WmiConsumer: return S.Pc.WmiConsumer(item.Arg1);
                 case PcKind.LnkAssoc: return S.Pc.LnkAssoc(item.Arg1);
+                case PcKind.RegHealth: return S.Pc.RegHealth(item.Arg1);
                 default: return S.Pc.Defender;
             }
         }
@@ -387,6 +388,8 @@ namespace ShieldGate
     {
         private readonly ListBox _list;
         private readonly FlatButton _restore;
+        private readonly FlatButton _clean;
+        private readonly LinkText _cleanAll;
         private readonly Label _result;
         private List<BatchInfo> _batches = new List<BatchInfo>();
 
@@ -399,8 +402,8 @@ namespace ShieldGate
             StartPosition = FormStartPosition.CenterParent;
             ShowIcon = false;
             MinimizeBox = false;
-            ClientSize = new Size(Ui.Px(680), Ui.Px(520));
-            MinimumSize = new Size(Ui.Px(560), Ui.Px(440));
+            ClientSize = new Size(Ui.Px(760), Ui.Px(540));
+            MinimumSize = new Size(Ui.Px(700), Ui.Px(460));
 
             Label title = new Label();
             title.Text = S.Restore.Title;
@@ -435,14 +438,24 @@ namespace ShieldGate
             _list.AccessibleName = S.Restore.Title;
             Controls.Add(_list);
 
+            int cleanAllW = Ui.Measure(S.Restore.CleanAll, Theme.Small).Width + Ui.Px(4);
+
             _result = new Label();
             _result.Font = Theme.Small;
             _result.ForeColor = Theme.InkMuted;
             _result.AutoSize = false;
             _result.Bounds = new Rectangle(Ui.Px(28), ClientSize.Height - Ui.Px(140),
-                ClientSize.Width - Ui.Px(56), Ui.Px(36));
+                Math.Max(Ui.Px(200), ClientSize.Width - Ui.Px(56) - cleanAllW - Ui.Px(16)), Ui.Px(36));
             _result.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             Controls.Add(_result);
+
+            _cleanAll = new LinkText();
+            _cleanAll.Text = S.Restore.CleanAll;
+            _cleanAll.Bounds = new Rectangle(ClientSize.Width - Ui.Px(28) - cleanAllW,
+                ClientSize.Height - Ui.Px(126), cleanAllW, Ui.Px(22));
+            _cleanAll.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            _cleanAll.Click += delegate { DoCleanAll(); };
+            Controls.Add(_cleanAll);
 
             LinkText open = new LinkText();
             open.Text = S.Restore.OpenFolder;
@@ -451,11 +464,18 @@ namespace ShieldGate
             open.Click += delegate { OpenQuarantine(); };
             Controls.Add(open);
 
+            int closeW = Ui.Px(96);
+            int restoreW = Ui.Measure(S.Restore.Action, Theme.BodyStrong).Width + Ui.Px(34);
+            int cleanW = Ui.Measure(S.Restore.Clean, Theme.BodyStrong).Width + Ui.Px(34);
+            int closeX = ClientSize.Width - Ui.Px(28) - closeW;
+            int restoreX = closeX - Ui.Px(12) - restoreW;
+            int cleanX = restoreX - Ui.Px(12) - cleanW;
+
             FlatButton close = new FlatButton();
             close.Text = S.Dlg.Close;
             close.Kind = ButtonKind.Secondary;
-            close.Bounds = new Rectangle(ClientSize.Width - Ui.Px(28) - Ui.Px(96),
-                ClientSize.Height - Ui.Px(68), Ui.Px(96), Ui.Px(Theme.ControlHeight));
+            close.Bounds = new Rectangle(closeX, ClientSize.Height - Ui.Px(68),
+                closeW, Ui.Px(Theme.ControlHeight));
             close.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             close.Click += delegate { Close(); };
             Controls.Add(close);
@@ -463,11 +483,20 @@ namespace ShieldGate
             _restore = new FlatButton();
             _restore.Kind = ButtonKind.Primary;
             _restore.Text = S.Restore.Action;
-            _restore.Bounds = new Rectangle(ClientSize.Width - Ui.Px(28) - Ui.Px(96) - Ui.Px(12) - Ui.Px(190),
-                ClientSize.Height - Ui.Px(68), Ui.Px(190), Ui.Px(Theme.ControlHeight));
+            _restore.Bounds = new Rectangle(restoreX, ClientSize.Height - Ui.Px(68),
+                restoreW, Ui.Px(Theme.ControlHeight));
             _restore.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             _restore.Click += delegate { DoRestore(); };
             Controls.Add(_restore);
+
+            _clean = new FlatButton();
+            _clean.Kind = ButtonKind.Danger;
+            _clean.Text = S.Restore.Clean;
+            _clean.Bounds = new Rectangle(cleanX, ClientSize.Height - Ui.Px(68),
+                cleanW, Ui.Px(Theme.ControlHeight));
+            _clean.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            _clean.Click += delegate { DoClean(); };
+            Controls.Add(_clean);
 
             RefreshBatches();
         }
@@ -502,7 +531,12 @@ namespace ShieldGate
 
         private void UpdateButtons()
         {
-            _restore.Enabled = Selected() != null;
+            bool has = Selected() != null;
+            _restore.Enabled = has;
+            _clean.Enabled = has;
+            bool any = _batches.Count > 0;
+            _cleanAll.Visible = any;
+            _cleanAll.Enabled = any;
         }
 
         private void DrawBatch(object sender, DrawItemEventArgs e)
@@ -551,6 +585,49 @@ namespace ShieldGate
             Log.Write(S.Log.RestoreBatch(restored, b.Name, missing));
             RefreshBatches();
             _result.Text = text;
+        }
+
+        // Xoá vĩnh viễn một lần cách ly đang chọn. Không thể hoàn tác.
+        private void DoClean()
+        {
+            BatchInfo b = Selected();
+            if (b == null)
+            {
+                _result.Text = S.Restore.NothingSelected;
+                return;
+            }
+            if (!ConfirmDialog.Ask(this, S.Dlg.CleanTitle(b.Count), S.Dlg.CleanBody,
+                                   S.Dlg.CleanOk, S.Dlg.Close, ButtonKind.Danger, false))
+                return;
+
+            bool ok = Quarantine.RemoveBatch(b.Path);
+            if (ok)
+            {
+                Log.Write(S.Log.QuarantineCleaned(b.Count, b.Name), "WARN");
+                RefreshBatches();
+                _result.Text = S.Restore.CleanDone(b.Count);
+            }
+            else
+            {
+                Log.Write(S.Log.QuarantineCleanError(b.Name), "ERROR");
+                _result.Text = S.Restore.CleanFailed;
+            }
+        }
+
+        // Dọn sạch toàn bộ vùng cách ly.
+        private void DoCleanAll()
+        {
+            if (_batches.Count == 0) return;
+            if (!ConfirmDialog.Ask(this, S.Dlg.CleanAllTitle, S.Dlg.CleanAllBody,
+                                   S.Dlg.CleanOk, S.Dlg.Close, ButtonKind.Danger, false))
+                return;
+
+            int batches, files;
+            int before = _batches.Count;
+            Quarantine.RemoveAll(out batches, out files);
+            Log.Write(S.Log.QuarantineCleanedAll(batches, files), "WARN");
+            RefreshBatches();
+            _result.Text = batches < before ? S.Restore.CleanFailed : S.Restore.CleanAllDone(batches, files);
         }
 
         private void OpenQuarantine()

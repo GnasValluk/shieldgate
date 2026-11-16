@@ -13,6 +13,7 @@ ShieldGate là công cụ nhỏ để chặn kiểu lây đó và dọn những 
 - Quét máy: ngoài script, còn bắt tệp chạy không chữ ký đặt thẳng trong AppData/Temp/ProgramData, tệp mạo danh tiến trình hệ thống (`svchost.exe`...) chạy ngoài thư mục Windows, mục khởi động trỏ vào thùng rác hoặc USB, shortcut/thư mục giả và dữ liệu bị ẩn ngay tại gốc các ổ, cùng đăng ký sự kiện WMI và liên kết `.lnk` bị virus sửa.
 - Có nút **Hiện tệp bị ẩn** để bỏ thuộc tính ẩn cho cả ổ, dùng khi virus đã giấu dữ liệu của bạn.
 - Tắt tự chạy của Windows, chặn tệp `autorun.inf`, và tùy chọn chặn Windows Script Host.
+- **Bảo vệ Registry**: tự kiểm tra và sửa các khoá File Explorer quan trọng nếu virus phá hoại — lệnh mở thư mục (`Folder\shell\open\command` và `DelegateExecute`), liên kết `.exe`, và thiết lập hiện tệp ẩn. Mỗi lần sửa đều được `reg export` sao lưu trước.
 - Chạy nền để kiểm tra USB ngay khi cắm vào, nếu bạn bật mục này. Bảo vệ nền chỉ tự cách ly dấu hiệu mạnh; mục yếu hơn để bạn xem lại, tránh xoá nhầm. Khi bảo vệ nền đang chạy, ShieldGate có biểu tượng trong khay hệ thống (vùng biểu tượng ẩn cạnh đồng hồ): nhấn đúp để mở ứng dụng, chuột phải để xem trạng thái, và bóng thông báo sẽ hiện khi vừa cách ly hoặc còn mục cần xem. Bảo vệ nền còn kiểm tra lại gốc các ổ di động mỗi 10 giây, nên shortcut và thư mục giả vừa được virus tạo ra sẽ bị dọn ngay cả khi không có sự kiện cắm USB mới.
 
 ## Chạy lần đầu
@@ -33,7 +34,7 @@ Lựa chọn được lưu ở `%LOCALAPPDATA%\ShieldGate\setup.ini`. Muốn ch�
 5. Nếu dữ liệu của bạn vẫn bị ẩn, bấm **Hiện tệp bị ẩn** ở mục **Xử lý USB**.
 6. Muốn lấy lại tệp đã cách ly, mở mục **Tổng quan** → **Khôi phục tệp**.
 
-Lần đầu dùng, nên mở **Bảo vệ** và bật ít nhất mục đầu tiên. Mục chặn Windows Script Host chỉ nên bật nếu máy không dùng phần mềm cần VBScript; nếu sau này có phần mềm trục trặc, tắt lại là Windows trở về cấu hình cũ.
+Lần đầu dùng, nên mở **Bảo vệ** và bật ít nhất mục đầu tiên và **Bảo vệ Registry**. Mục chặn Windows Script Host chỉ nên bật nếu máy không dùng phần mềm cần VBScript; nếu sau này có phần mềm trục trặc, tắt lại là Windows trở về cấu hình cũ. Riêng Registry đã sửa thì được giữ nguyên khi tắt, vì trả lại giá trị hỏng sẽ làm hỏng lại File Explorer.
 
 ## Mẫu virus shortcut đã phân tích
 
@@ -54,6 +55,7 @@ Nếu đã bấm nhầm shortcut hoặc chạy tệp trên máy, mở **Tổng q
 - Tiến trình có tên dạng số, chạy từ USB, hoặc chạy bản sao của gói payload; tiến trình mạo danh tên hệ thống.
 - Bản sao `Docusment`/payload trong AppData, Temp, ProgramData, Public, Desktop, Documents, Downloads, Pictures, Music, Videos.
 - Shortcut, thư mục giả, thư mục không tên và tệp chạy giả thư mục ở gốc các ổ.
+- **Registry của File Explorer**: lệnh mở thư mục và `DelegateExecute` (đúng trường hợp mất mã trong ảnh), liên kết `.exe`, thiết lập hiện tệp ẩn, cùng các policy khoá Folder Options, menu chuột phải, Task Manager và `regedit`. Mục nào bị hỏng sẽ hiện trong danh sách để bạn chọn sửa; khoá ghi đè trong `HKCU\Software\Classes` cũng được kiểm tra vì nó che khoá máy.
 
 Khi bấm **Sửa**, ShieldGate cách ly tệp/cả cây thư mục giả, xoá giá trị Run/Winlogon/MountPoints/`.lnk` độc hại, tắt tác vụ, xoá WMI consumer cùng binding, và dừng tiến trình liên quan. Mọi thao tác đều ghi nhật ký; tệp bị cách ly vẫn khôi phục được. Sau khi sửa, nên **Kiểm tra máy** lại để xác nhận sạch.
 
@@ -135,7 +137,7 @@ Bản PowerShell `legacy\4.8\ShieldGate_4.8.bat` vẫn được giữ nguyên. �
 
 - Mới có số liệu trên một mẫu virus shortcut thật (mẫu `GnasValluk`/`Docusment`), chưa phải bộ đo diện rộng. Ngưỡng phát hành là báo nhầm dưới 0,5% và bỏ sót dưới 5%; khi có thêm mẫu, kết quả sẽ nằm trong kho tài liệu.
 - Chương trình tập trung vào lây nhiễm qua USB và các dấu vết shortcut trên ổ. Nó không thay antivirus và không quét toàn bộ ổ hệ thống.
-- Chưa quét dịch vụ Windows, driver, IFEO/COM hijack hay ngoại lệ Defender do mã độc thêm vào; các cơ chế này hiếm gặp với virus shortcut nhưng nên kiểm tra thêm bằng antivirus nếu máy đã chạy payload lạ.
+- Chưa quét dịch vụ Windows, driver, IFEO/COM hijack hay ngoại lệ Defender do mã độc thêm vào; phần Registry chỉ tập trung vào các khoá File Explorer và policy khoá chức năng sửa chữa. Các cơ chế còn lại nên kiểm tra thêm bằng antivirus nếu máy đã chạy payload lạ.
 - `--scan` dừng sau 150.000 tệp hoặc 300 giây để không treo trên ổ quá lớn; khi đó một phần ổ chưa được kiểm tra.
 - Bản phát hành chưa ký số. Windows SmartScreen có thể cảnh báo; hãy đối chiếu SHA256 trước khi chạy.
 - Không hỗ trợ ổ mạng, ổ quang, hay thiết bị MTP.

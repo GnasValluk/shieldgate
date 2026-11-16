@@ -249,6 +249,10 @@ namespace ShieldGate
             if (!Enabled || e.Button != MouseButtons.Left) return;
             bool click = _down;
             _down = false;
+            // Nhả capture trước khi báo Click. Nếu Click mở hộp thoại modal, vòng lặp
+            // của hộp thoại chạy khi cửa sổ cũ còn giữ chuột, và cú nhấn đầu tiên
+            // trong hộp thoại bị nuốt (phải bấm hai lần).
+            Capture = false;
             Invalidate();
             if (click && ClientRectangle.Contains(e.Location)) OnClick(EventArgs.Empty);
         }
@@ -379,6 +383,9 @@ namespace ShieldGate
         {
             base.OnMouseUp(e);
             if (!Enabled || e.Button != MouseButtons.Left) return;
+            // Nhả capture trước khi báo Click, cùng lý do như FlatButton: tránh
+            // cú nhấn đầu tiên trong hộp thoại vừa mở bị nuốt.
+            Capture = false;
             if (ClientRectangle.Contains(e.Location)) OnClick(EventArgs.Empty);
         }
 

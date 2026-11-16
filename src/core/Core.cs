@@ -186,6 +186,13 @@ namespace ShieldGate
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern uint GetDriveTypeW(string root);
 
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool GetVolumeInformationW(string root, StringBuilder label, int labelSize,
+                                                         out uint serial, out uint maxComponent,
+                                                         out uint flags, StringBuilder fileSystem, int fsSize);
+
+        private const uint FileReadOnlyVolume = 0x00080000;
+
         [DllImport("kernel32.dll")]
         public static extern bool AttachConsole(int processId);
 
@@ -219,6 +226,36 @@ namespace ShieldGate
         public static List<string> RemovableDrives()
         {
             return Drives(DriveType.Removable);
+        }
+
+        // O duoc gan o che do chi doc: USB co khoa ghi, dia CD/DVD, anh ISO...
+        public static bool IsReadOnlyVolume(string root)
+        {
+            try
+            {
+                uint serial, maxComponent, flags;
+                StringBuilder label = new StringBuilder(8), fs = new StringBuilder(8);
+                if (!GetVolumeInformationW(root, label, 8, out serial, out maxComponent,
+                                           out flags, fs, 8))
+                    return false;
+                return (flags & FileReadOnlyVolume) != 0;
+            }
+            catch { return false; }
+        }
+
+        // Thu ghi that mot tep tam roi xoa ngay. Dung truoc khi di chuyen / cach ly
+        // de o chi doc hoac o khong co quyen ghi chi bao mot loi thay vi hang loat.
+        public static bool CanWrite(string dir)
+        {
+            try
+            {
+                string probe = Path.Combine(dir, ".shieldgate-write-test");
+                using (FileStream fs = new FileStream(probe, FileMode.Create, FileAccess.Write,
+                                                      FileShare.None, 1, FileOptions.DeleteOnClose))
+                    fs.WriteByte(0);
+                return true;
+            }
+            catch { return false; }
         }
 
         private static List<string> Drives(DriveType type)
@@ -284,10 +321,11 @@ namespace ShieldGate
         {
             try
             {
-                if (new FileInfo(path).Length > 10 * 1024 * 1024) return "";
+                // Mo bang handle de doc duoc ca duong dan dai hon 260 ky tu.
                 using (SHA256 sha = SHA256.Create())
-                using (FileStream fs = File.OpenRead(path))
+                using (FileStream fs = WinPath.OpenRead(WinPath.Ext(path)))
                 {
+                    if (fs.Length > 10 * 1024 * 1024) return "";
                     byte[] hash = sha.ComputeHash(fs);
                     StringBuilder sb = new StringBuilder(hash.Length * 2);
                     foreach (byte b in hash) sb.Append(b.ToString("X2"));
@@ -419,43 +457,66 @@ namespace ShieldGate
             catch { rel = System.IO.Path.GetFileName(path); }
             if (string.IsNullOrEmpty(rel)) rel = System.IO.Path.GetFileName(path);
 
-            string destDir = System.IO.Path.Combine(System.IO.Path.Combine(batch, "files"),
-                                                   System.IO.Path.GetDirectoryName(rel) ?? "");
-            try { Directory.CreateDirectory(destDir); }
-            catch { }
-
-            string dest = System.IO.Path.Combine(batch, "files", rel) + ".sgq";
-            int i = 1;
-            while (File.Exists(dest))
+            string from = WinPath.Ext(path);
+            if (!WinPath.Exists(from))
             {
-                dest = System.IO.Path.Combine(batch, "files", rel) + "." + i + ".sgq";
-                i++;
+                // Tệp đã biến mất (bảo vệ nền hoặc người dùng vừa cách ly trước đó).
+                error = "not found";
+                return false;
             }
 
-            long size = 0;
-            try { size = new FileInfo(path).Length; }
-            catch { }
+            // Thư mục cách ly cộng với tên gốc có thể vượt 260 ký tự (virus đặt tên
+            // tệp bằng chuỗi Base64 rất dài). Khi đó dùng tên ngắn, đường dẫn gốc
+            // vẫn được ghi trong manifest để khôi phục đúng chỗ.
+            string baseDest = System.IO.Path.Combine(batch, "files", rel);
+            string dest;
+            if ((baseDest + ".sgq").Length > 230)
+                dest = System.IO.Path.Combine(batch, "files", "_long",
+                                              Guid.NewGuid().ToString("N") + ".sgq");
+            else
+            {
+                dest = baseDest + ".sgq";
+                int i = 1;
+                while (WinPath.Exists(WinPath.Ext(dest)))
+                {
+                    dest = baseDest + "." + i + ".sgq";
+                    i++;
+                }
+            }
+            string destDir = System.IO.Path.GetDirectoryName(dest);
+            if (!string.IsNullOrEmpty(destDir)) WinPath.CreateDirTree(WinPath.Ext(destDir));
+
+            long size = WinPath.Size(from);
+            if (size < 0) size = 0;
             string sha = Native.Sha256(path);
 
-            try
+            int code = WinPath.CopyFile(from, WinPath.Ext(dest));
+            if (code != 0)
             {
-                File.Copy(path, dest, true);
-                File.SetAttributes(path, FileAttributes.Normal);
-                File.Delete(path);
-            }
-            catch (Exception e)
-            {
-                error = e.Message;
+                error = WinPath.ErrorText(code);
                 // Nếu nguồn vẫn còn thì bản sao trong vùng cách ly là mồ côi.
-                try { if (File.Exists(path) && File.Exists(dest)) File.Delete(dest); } catch { }
+                if (WinPath.Exists(from)) WinPath.DeleteFile(WinPath.Ext(dest));
                 // Antivirus (Defender) chặn đọc tệp này vì nó là mã độc: không sao lưu được,
                 // nên xoá thẳng khỏi ổ. Antivirus vẫn giữ bản của nó trong lịch sử bảo vệ.
-                if (IsVirusBlock(e) && RemoveFlagged(path))
+                if ((code == 225 || code == 226) && RemoveFlagged(path))
                 {
                     error = "";
                     reason = reason + "; antivirus-blocked, deleted";
                 }
                 else return false;
+            }
+            else
+            {
+                WinPath.SetNormal(from);
+                if (!WinPath.DeleteFile(from))
+                {
+                    // Bản sao đã tạo nhưng nguồn chưa rời đi: đừng ghi nhận đã cách ly,
+                    // và bỏ bản sao để vùng cách ly không có tệp mồ côi.
+                    int delCode = Marshal.GetLastWin32Error();
+                    WinPath.DeleteFile(WinPath.Ext(dest));
+                    error = WinPath.ErrorText(delCode);
+                    return false;
+                }
             }
 
             string row = string.Join(",", new string[]
@@ -474,24 +535,14 @@ namespace ShieldGate
             return true;
         }
 
-        private static bool IsVirusBlock(Exception e)
-        {
-            // ERROR_VIRUS_INFECTED (225) và ERROR_VIRUS_DELETED (226).
-            try
-            {
-                int code = Marshal.GetHRForException(e) & 0xFFFF;
-                return code == 225 || code == 226;
-            }
-            catch { return false; }
-        }
-
         private static bool RemoveFlagged(string path)
         {
             try
             {
-                File.SetAttributes(path, FileAttributes.Normal);
-                File.Delete(path);
-                return !File.Exists(path);
+                string ext = WinPath.Ext(path);
+                WinPath.SetNormal(ext);
+                WinPath.DeleteFile(ext);
+                return !WinPath.Exists(ext);
             }
             catch { return false; }
         }
@@ -565,8 +616,8 @@ namespace ShieldGate
                 if (iOrig >= row.Length || iQuar >= row.Length) continue;
                 string dest = row[iOrig], src = row[iQuar];
                 if (string.IsNullOrEmpty(dest) || string.IsNullOrEmpty(src)) continue;
-                if (!File.Exists(src)) { missing++; continue; }
-                if (File.Exists(dest)) { skipped++; continue; }
+                if (!WinPath.Exists(WinPath.Ext(src))) { missing++; continue; }
+                if (WinPath.Exists(WinPath.Ext(dest))) { skipped++; continue; }
                 // Bản cách ly bị sửa hoặc hỏng thì không ghi trả về ổ.
                 if (iSha >= 0 && iSha < row.Length && row[iSha].Length > 0)
                 {
@@ -578,15 +629,15 @@ namespace ShieldGate
                         continue;
                     }
                 }
-                try
+                string parent = WinPath.Parent(dest);
+                if (!string.IsNullOrEmpty(parent)) WinPath.CreateDirTree(WinPath.Ext(parent));
+                int code = WinPath.CopyFile(WinPath.Ext(src), WinPath.Ext(dest));
+                if (code == 0)
                 {
-                    string parent = System.IO.Path.GetDirectoryName(dest);
-                    if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
-                    File.Copy(src, dest, false);
                     restored++;
                     Log.Write(S.Log.Restored(dest));
                 }
-                catch { missing++; }
+                else missing++;
             }
         }
 
@@ -604,6 +655,19 @@ namespace ShieldGate
                 return true;
             }
             catch { return false; }
+        }
+
+        // Dọn sạch toàn bộ vùng cách ly. Trả về số lần cách ly và số tệp đã xoá được.
+        public static void RemoveAll(out int batches, out int files)
+        {
+            batches = 0;
+            files = 0;
+            foreach (BatchInfo b in ListBatches())
+            {
+                if (!RemoveBatch(b.Path)) continue;
+                batches++;
+                files += b.Count;
+            }
         }
     }
 

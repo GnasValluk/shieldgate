@@ -43,6 +43,8 @@ namespace ShieldGate
         public int Autoruns;
         public int RootExes;
         public int Folders;
+        // O chi doc (USB co khoa ghi, dia CD, anh ISO): chi xem duoc, khong sua duoc.
+        public bool ReadOnly;
     }
 
     internal static class UsbScan
@@ -128,6 +130,7 @@ namespace ShieldGate
             UsbScanResult result = new UsbScanResult();
             result.Root = root;
             result.Drive = root.Length >= 2 ? root.Substring(0, 2) : root;
+            result.ReadOnly = Native.IsReadOnlyVolume(root);
             int seen = 0;
             WalkStats stats = new WalkStats();
             List<string> nameless = UsbRestore.FindNameless(root);
@@ -309,6 +312,17 @@ namespace ShieldGate
                                 out int failed, out string batch, out int stopped, Action<int> progress)
         {
             failed = 0;
+            batch = "";
+            stopped = 0;
+            if (selected == null || selected.Count == 0) return 0;
+            // O chi doc: dung truoc khi thu xoa / di chuyen, de khong ghi hang loat
+            // loi Windows 5 vao nhat ky va khong tao thu muc cach ly rong.
+            if (!Native.CanWrite(scan.Root))
+            {
+                Log.Write(S.Log.DriveNotWritable(scan.Root), "WARN");
+                failed = selected.Count;
+                return 0;
+            }
             stopped = StopProcesses(scan.Root);
             batch = Quarantine.NewBatch("usb_" + (scan.Drive.Length > 0 ? scan.Drive.Substring(0, 1) : "x"), "");
             int done = 0;
@@ -326,6 +340,13 @@ namespace ShieldGate
                 if (it.Kind == UsbKind.HiddenFolder)
                 {
                     folders.Add(it.FolderName);
+                    if (progress != null) progress(i + 1);
+                    continue;
+                }
+                // Danh sach co the da cu: bao ve nen hoac nguoi dung vua xu ly tep nay
+                // truoc khi bam nut. Bo qua, khong ghi loi "Could not find file".
+                if (!WinPath.Exists(WinPath.Ext(it.Path)))
+                {
                     if (progress != null) progress(i + 1);
                     continue;
                 }
@@ -457,7 +478,7 @@ namespace ShieldGate
         MountPoint, StartupFile, Task, Process, Defender,
         DroppedFile, FakeProcess,
         DriveShortcut, DriveFakeFolder, DriveHiddenFolder, DriveExe,
-        WmiConsumer, LnkAssoc
+        WmiConsumer, LnkAssoc, RegHealth
     }
 
     internal sealed class PcItem
@@ -634,6 +655,11 @@ namespace ShieldGate
             if (stage != null) stage(S.Pc.StageWmi);
             ScanWmi(list);
             ScanLnkAssoc(list);
+
+            // Registry: các khoá File Explorer bị virus phá hoại hoặc ghi đè.
+            if (cancelled != null && cancelled()) return list;
+            if (stage != null) stage(S.Pc.StageRegistry);
+            ScanRegistry(list);
 
             if (stage != null) stage(S.Pc.StageDefender);
             try
@@ -1111,6 +1137,24 @@ namespace ShieldGate
             }
         }
 
+        // Registry: các khoá File Explorer bị hỏng hoặc bị ghi đè. Mỗi mục là một
+        // lựa chọn riêng trong danh sách kết quả, người dùng tự quyết định sửa.
+        private static void ScanRegistry(List<PcItem> findings)
+        {
+            foreach (RegIssue issue in RegistryGuard.Detect())
+            {
+                PcItem i = New(PcKind.RegHealth, issue.High, issue.Title,
+                               RegistryGuard.Detail(issue));
+                i.Data["hive"] = issue.Hive;
+                i.Data["path"] = issue.Path;
+                i.Data["name"] = issue.Name;
+                i.Data["value"] = issue.Expected;
+                i.Data["kind"] = issue.Kind;
+                i.Data["delete"] = issue.Remove;
+                findings.Add(i);
+            }
+        }
+
         private static string Cut(string s, int n)
         {
             if (string.IsNullOrEmpty(s)) return "";
@@ -1200,14 +1244,14 @@ namespace ShieldGate
 
         // ----------------------------------------------------------------- sửa
 
-        private static void BackupReg(RegistryHive hive, string path)
+        internal static void BackupReg(RegistryHive hive, string path)
         {
             if (!Native.IsAdmin()) return;
             Paths.EnsureDirs();
             string full = (hive == RegistryHive.LocalMachine ? "HKEY_LOCAL_MACHINE\\" : "HKEY_CURRENT_USER\\") + path;
             string safe = Regex.Replace(full, @"[\\/:*?""<>|]", "_");
             string file = System.IO.Path.Combine(Paths.BakDir,
-                "reg_" + safe + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".reg");
+                "reg_" + safe + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".reg");
             string output;
             Native.Run("reg.exe", "export \"" + full + "\" \"" + file + "\" /y", 20000, out output);
         }
@@ -1260,11 +1304,22 @@ namespace ShieldGate
                             break;
                         case PcKind.DriveShortcut:
                         case PcKind.DriveExe:
-                            ok = Quarantine.Add(Str(f, "path"), Str(f, "root"), batch, "drive", out err);
+                            // Ổ chỉ đọc: không thử từng tệp để khỏi ghi hàng loạt lỗi.
+                            if (!Native.CanWrite(Str(f, "root")))
+                                err = S.Err.DriveReadOnly(Str(f, "root"));
+                            else
+                                ok = Quarantine.Add(Str(f, "path"), Str(f, "root"), batch, "drive", out err);
                             break;
                         case PcKind.DriveFakeFolder:
                             string folder = Str(f, "folder");
                             string droot = Str(f, "root");
+                            // Ổ chỉ đọc: đừng thử cách ly từng tệp (mỗi tệp sẽ là một lỗi
+                            // Windows 5 trong nhật ký). Báo một lần cho cả mục.
+                            if (!Native.CanWrite(droot))
+                            {
+                                err = S.Err.DriveReadOnly(droot);
+                                break;
+                            }
                             int innerFail = 0;
                             UsbScan.QuarantineTree(System.IO.Path.Combine(droot, folder), droot, batch, ref innerFail);
                             UsbRestore.RemoveWrapper(droot, folder);
@@ -1275,7 +1330,8 @@ namespace ShieldGate
                             RestoreResult rr = UsbRestore.Restore(Str(f, "root"),
                                 new List<string> { Str(f, "folder") }, null);
                             ok = rr.DirsLeft == 0;
-                            if (!ok) err = S.Err.Unknown;
+                            if (rr.NoWrite) err = S.Err.DriveReadOnly(Str(f, "root"));
+                            else if (!ok) err = S.Err.Unknown;
                             break;
                         case PcKind.WmiConsumer:
                             ok = DeleteWmiConsumer(Str(f, "class"), Str(f, "name"));
@@ -1284,6 +1340,17 @@ namespace ShieldGate
                             BackupReg(hive, Str(f, "path"));
                             ok = Reg.DeleteValue(hive, Str(f, "path"), Str(f, "name"));
                             if (!ok) ok = Reg.DeleteTree(hive, Str(f, "path"));
+                            break;
+                        case PcKind.RegHealth:
+                            BackupReg(hive, Str(f, "path"));
+                            if (f.Data.ContainsKey("delete") && Convert.ToBoolean(f.Data["delete"]))
+                                ok = Reg.DeleteValue(hive, Str(f, "path"), Str(f, "name"));
+                            else
+                                ok = Reg.Write(hive, Str(f, "path"), Str(f, "name"),
+                                               f.Data["value"],
+                                               f.Data.ContainsKey("kind")
+                                                   ? (RegistryValueKind)f.Data["kind"]
+                                                   : RegistryValueKind.String);
                             break;
                         case PcKind.Process:
                         case PcKind.FakeProcess:
@@ -1367,6 +1434,16 @@ namespace ShieldGate
             return RegistryKey.OpenBaseKey(hive, RegistryView.Registry64);
         }
 
+        public static bool KeyExists(RegistryHive hive, string path)
+        {
+            try
+            {
+                using (RegistryKey k = Base(hive).OpenSubKey(path, false))
+                    return k != null;
+            }
+            catch { return false; }
+        }
+
         public static bool Read(RegistryHive hive, string path, string name,
                                 out object value, out RegistryValueKind kind)
         {
@@ -1405,7 +1482,9 @@ namespace ShieldGate
             {
                 using (RegistryKey k = Base(hive).OpenSubKey(path, true))
                 {
-                    if (k == null) return false;
+                    // Khóa chưa từng tồn tại thì coi như đã xóa xong: nếu trả về false
+                    // thì mọi lần "tắt bảo vệ" đều bị báo lỗi, dù chẳng có gì để xóa.
+                    if (k == null) return true;
                     k.DeleteValue(name, false);
                 }
                 return true;
@@ -1417,6 +1496,10 @@ namespace ShieldGate
         {
             try
             {
+                using (RegistryKey k = Base(hive).OpenSubKey(path, false))
+                {
+                    if (k == null) return true;
+                }
                 Base(hive).DeleteSubKeyTree(path, false);
                 return true;
             }

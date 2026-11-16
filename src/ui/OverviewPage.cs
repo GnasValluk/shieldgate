@@ -24,7 +24,7 @@ namespace ShieldGate
         private Label _protectTitle, _protectText, _quarTitle, _quarText;
         private Glyph _stateIcon;
         private FlatButton _primary;
-        private LinkText _secondary, _refresh, _protectLink, _quarLink;
+        private LinkText _secondary, _refresh, _protectLink, _quarLink, _quarClean;
         private DriveList _drives;
 
         private int _drivesLine, _protectLine, _quarLine, _protectRowY;
@@ -78,6 +78,7 @@ namespace ShieldGate
             Controls.Add(_protectTitle);
 
             _protectText = MakeLabel("", Theme.Body, Theme.Ink);
+            _protectText.AutoEllipsis = true;
             Controls.Add(_protectText);
 
             _protectLink = MakeLink(S.Overview.ProtectAction, "");
@@ -88,11 +89,16 @@ namespace ShieldGate
             Controls.Add(_quarTitle);
 
             _quarText = MakeLabel("", Theme.Body, Theme.Ink);
+            _quarText.AutoEllipsis = true;
             Controls.Add(_quarText);
 
             _quarLink = MakeLink(S.Overview.QuarantineAction, "");
             _quarLink.Click += delegate { ShowRestore(); };
             Controls.Add(_quarLink);
+
+            _quarClean = MakeLink(S.Overview.QuarantineClean, "");
+            _quarClean.Click += delegate { CleanQuarantine(); };
+            Controls.Add(_quarClean);
 
             _stageTimer = new System.Windows.Forms.Timer();
             _stageTimer.Interval = 120;
@@ -330,6 +336,7 @@ namespace ShieldGate
                 _status.Autorun = st.Autorun;
                 _status.Ini = st.Ini;
                 _status.Wsh = st.Wsh;
+                _status.Registry = st.Registry;
                 _status.Task = st.Task;
                 _status.Running = st.Running;
                 _status.QuarantineFiles = st.QuarantineFiles;
@@ -376,6 +383,7 @@ namespace ShieldGate
             int missing = 0;
             if (!_status.Autorun) missing++;
             if (!_status.Ini) missing++;
+            if (!_status.Registry) missing++;
             if (!_status.Running) missing++;
 
             if (missing == 0)
@@ -383,7 +391,7 @@ namespace ShieldGate
                 _protectText.Text = S.Overview.ProtectOk;
                 _protectDot = Theme.Safe;
             }
-            else if (!_status.Autorun && !_status.Ini && !_status.Running)
+            else if (!_status.Autorun && !_status.Ini && !_status.Registry && !_status.Running)
             {
                 _protectText.Text = S.Overview.ProtectOff;
                 _protectDot = Theme.InkFaint;
@@ -399,12 +407,14 @@ namespace ShieldGate
                 _quarText.Text = S.Overview.QuarantineCount(_status.QuarantineFiles);
                 _quarText.ForeColor = Theme.Ink;
                 _quarLink.Visible = true;
+                _quarClean.Visible = true;
             }
             else
             {
                 _quarText.Text = S.Overview.QuarantineEmpty;
                 _quarText.ForeColor = Theme.InkMuted;
                 _quarLink.Visible = false;
+                _quarClean.Visible = false;
             }
 
             UpdateState();
@@ -417,6 +427,20 @@ namespace ShieldGate
                 if (FindForm() != null) f.ShowDialog(FindForm());
                 else f.ShowDialog();
             }
+            RefreshAsync();
+        }
+
+        // Dọn sạch toàn bộ tệp đang cách ly ngay từ màn hình Tổng quan.
+        private void CleanQuarantine()
+        {
+            if (_status.QuarantineFiles <= 0) return;
+            if (!ConfirmDialog.Ask(FindForm(), S.Dlg.CleanAllTitle, S.Dlg.CleanAllBody,
+                                   S.Dlg.CleanOk, S.Dlg.Close, ButtonKind.Danger, false))
+                return;
+
+            int batches, files;
+            Quarantine.RemoveAll(out batches, out files);
+            Log.Write(S.Log.QuarantineCleanedAll(batches, files), "WARN");
             RefreshAsync();
         }
 
@@ -480,16 +504,24 @@ namespace ShieldGate
             _protectLine = protectY + Ui.Px(24);
             _protectRowY = protectY + Ui.Px(34);
 
-            _protectText.Bounds = new Rectangle(pad + Ui.Px(18), _protectRowY, width - Ui.Px(130), Ui.Px(40));
             int plw = Ui.Measure(S.Overview.ProtectAction, Theme.Small).Width;
             _protectLink.Bounds = new Rectangle(right - plw, _protectRowY + Ui.Px(8), plw, Ui.Px(22));
+            int protectTextX = pad + Ui.Px(18);
+            _protectText.Bounds = new Rectangle(protectTextX, _protectRowY,
+                Math.Max(Ui.Px(120), _protectLink.Left - Ui.Px(12) - protectTextX), Ui.Px(40));
 
             int quarY = _protectRowY + Ui.Px(48);
             _quarTitle.Bounds = new Rectangle(pad, quarY, Ui.Px(200), Ui.Px(20));
             _quarLine = quarY + Ui.Px(24);
-            _quarText.Bounds = new Rectangle(pad, quarY + Ui.Px(34), width - Ui.Px(130), Ui.Px(40));
             int qlw = Ui.Measure(S.Overview.QuarantineAction, Theme.Small).Width;
-            _quarLink.Bounds = new Rectangle(right - qlw, quarY + Ui.Px(42), qlw, Ui.Px(22));
+            int qcw = Ui.Measure(S.Overview.QuarantineClean, Theme.Small).Width;
+            _quarClean.Bounds = new Rectangle(right - qcw, quarY + Ui.Px(42), qcw, Ui.Px(22));
+            _quarLink.Bounds = new Rectangle(_quarClean.Left - Ui.Px(20) - qlw,
+                quarY + Ui.Px(42), qlw, Ui.Px(22));
+            // Chừa chỗ cho hai liên kết bên phải: nhãn trong suốt vẽ đè lên vùng
+            // của chúng và làm mất chữ nếu hai khung chồng nhau.
+            _quarText.Bounds = new Rectangle(pad, quarY + Ui.Px(34),
+                Math.Max(Ui.Px(120), _quarLink.Left - Ui.Px(12) - pad), Ui.Px(40));
 
             AutoScrollMinSize = new Size(0, quarY + Ui.Px(90));
         }

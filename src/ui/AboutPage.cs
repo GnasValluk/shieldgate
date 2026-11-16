@@ -14,10 +14,13 @@ namespace ShieldGate
         private readonly LogoView _logo;
         private readonly LinkText _openData;
         private readonly Label _sourceLabel, _dataLabel;
-        private readonly Label _sourceNote, _dataPath, _hashLabel, _noNetwork;
+        private readonly Label _sourceNote, _dataPath, _hashLabel;
         private readonly TextBox _hash;
         private readonly Panel _hashBox;
-        private int _sepY;
+        private readonly Label _removeLabel, _removeNote;
+        private readonly FlatButton _remove;
+        private bool _removing;
+        private int _sepY, _removeSepY;
 
         public AboutPage()
         {
@@ -79,8 +82,16 @@ namespace ShieldGate
             _hash.AccessibleName = S.About.Hash;
             _hashBox.Controls.Add(_hash);
 
-            _noNetwork = MakeLabel(S.About.NoNetwork, Theme.Small, Theme.InkFaint);
-            Controls.Add(_noNetwork);
+            _removeLabel = MakeLabel(S.About.RemoveTitle, Theme.Section, Theme.Ink);
+            Controls.Add(_removeLabel);
+
+            _removeNote = MakeLabel(S.About.RemoveNote, Theme.Small, Theme.InkMuted);
+            _removeNote.AutoEllipsis = false;
+            Controls.Add(_removeNote);
+
+            _remove = MakeButton(S.About.RemoveAction, ButtonKind.Danger);
+            _remove.Click += delegate { ConfirmRemove(); };
+            Controls.Add(_remove);
 
             LayoutPage();
             LoadHash();
@@ -126,6 +137,64 @@ namespace ShieldGate
             catch { }
         }
 
+        // ----------------------------------------------------------- gỡ cài đặt
+
+        private void ConfirmRemove()
+        {
+            if (_removing) return;
+            if (!Native.IsAdmin())
+            {
+                MessageBox.Show(FindForm(), S.Err.Admin, S.App.Name,
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (!ConfirmDialog.Ask(FindForm(), S.Dlg.UninstallTitle, S.Dlg.UninstallBody,
+                                   S.Dlg.UninstallOk, S.Dlg.Close, ButtonKind.Danger, false))
+                return;
+
+            _removing = true;
+            _remove.Enabled = false;
+            _removeNote.ForeColor = Theme.Ink;
+            _removeNote.Text = S.About.RemoveWorking;
+
+            Thread t = new Thread(delegate()
+            {
+                bool stopped = false;
+                bool clean = false;
+                try { stopped = Uninstaller.Run(out clean); }
+                catch { }
+                if (IsDisposed || !IsHandleCreated) return;
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate { FinishRemove(stopped, clean); });
+                }
+                catch { }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        private void FinishRemove(bool stopped, bool clean)
+        {
+            _removing = false;
+            if (!stopped)
+            {
+                _remove.Enabled = true;
+                _removeNote.ForeColor = Theme.InkMuted;
+                _removeNote.Text = S.About.RemoveNote;
+                MessageBox.Show(FindForm(), S.Err.Admin, S.App.Name,
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            MessageBox.Show(FindForm(), clean ? S.About.RemoveDone : S.About.RemoveCleanupPending,
+                S.App.Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            Form owner = FindForm();
+            if (owner != null) owner.Close();
+            Application.Exit();
+        }
+
         // --------------------------------------------------------------- bố cục
 
         protected override void OnResize(EventArgs e)
@@ -166,15 +235,21 @@ namespace ShieldGate
             _hash.Bounds = new Rectangle(Ui.Px(10), Ui.Px(7),
                 Math.Max(Ui.Px(80), _hashBox.Width - Ui.Px(20)), Ui.Px(18));
 
-            _noNetwork.Bounds = new Rectangle(pad, y + Ui.Px(92), width, Ui.Px(22));
+            y += Ui.Px(96);
+            _removeSepY = y - Ui.Px(10);
+            _removeLabel.Bounds = new Rectangle(pad, y + Ui.Px(8), Ui.Px(280), Ui.Px(20));
+            _removeNote.Bounds = new Rectangle(pad, y + Ui.Px(34), width, Ui.Px(58));
+            _remove.Bounds = new Rectangle(pad, y + Ui.Px(102),
+                TextWidth(S.About.RemoveAction, Theme.BodyStrong), Ui.Px(Theme.ControlHeight));
 
-            AutoScrollMinSize = new Size(0, y + Ui.Px(130));
+            AutoScrollMinSize = new Size(0, y + Ui.Px(164));
         }
 
         protected override void PaintPage(Graphics g)
         {
             int pad = Pad;
             Ui.HLine(g, pad, ClientSize.Width - pad, _sepY, Theme.Line);
+            Ui.HLine(g, pad, ClientSize.Width - pad, _removeSepY, Theme.Line);
         }
     }
 }

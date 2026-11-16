@@ -12,7 +12,7 @@ namespace ShieldGate
     {
         private readonly StatusInfo _status = new StatusInfo();
         private readonly Label _title, _intro, _backup, _tech, _adminNote;
-        private readonly SwitchRow _autorun, _ini, _wsh, _guard;
+        private readonly SwitchRow _autorun, _ini, _wsh, _registry, _guard;
         private readonly LinkText _techLink, _reload;
         private readonly FlatButton _toggle;
         private readonly Notice _notice;
@@ -51,6 +51,7 @@ namespace ShieldGate
             _autorun = MakeSwitch(S.Protect.SwitchAutorun, S.Protect.SwitchAutorunDetail);
             _ini = MakeSwitch(S.Protect.SwitchIni, S.Protect.SwitchIniDetail);
             _wsh = MakeSwitch(S.Protect.SwitchWsh, S.Protect.SwitchWshDetail);
+            _registry = MakeSwitch(S.Protect.SwitchRegistry, S.Protect.SwitchRegistryDetail);
             _guard = MakeSwitch(S.Protect.SwitchGuard, S.Protect.SwitchGuardDetail);
 
             _techLink = MakeLink(S.Protect.Tech, "chevron");
@@ -65,7 +66,8 @@ namespace ShieldGate
             Controls.Add(_techLink);
 
             _tech = MakeLabel(
-                S.Tech.Autorun + "\r\n" + S.Tech.Ini + "\r\n" + S.Tech.Wsh + "\r\n" + S.Tech.Guard,
+                S.Tech.Autorun + "\r\n" + S.Tech.Ini + "\r\n" + S.Tech.Wsh + "\r\n"
+                + S.Tech.Registry + "\r\n" + S.Tech.Guard,
                 Theme.Mono, Theme.InkMuted);
             _tech.TextAlign = ContentAlignment.TopLeft;
             _tech.Visible = false;
@@ -127,6 +129,7 @@ namespace ShieldGate
                 _status.Autorun = st.Autorun;
                 _status.Ini = st.Ini;
                 _status.Wsh = st.Wsh;
+                _status.Registry = st.Registry;
                 _status.Task = st.Task;
                 _status.Running = st.Running;
                 _status.QuarantineFiles = st.QuarantineFiles;
@@ -137,6 +140,7 @@ namespace ShieldGate
             _autorun.Checked = _status.Autorun;
             _ini.Checked = _status.Ini;
             _wsh.Checked = _status.Wsh;
+            _registry.Checked = _status.Registry;
             _guard.Checked = _status.Running;
             _loading = false;
 
@@ -156,6 +160,7 @@ namespace ShieldGate
             _autorun.Enabled = on;
             _ini.Enabled = on;
             _wsh.Enabled = on;
+            _registry.Enabled = on;
             _guard.Enabled = on;
             _toggle.Enabled = _status.Admin && !_busy;
         }
@@ -172,12 +177,13 @@ namespace ShieldGate
             bool autorun = _autorun.Checked;
             bool ini = _ini.Checked;
             bool wsh = _wsh.Checked;
+            bool registry = _registry.Checked;
             bool guard = _guard.Checked;
 
             Thread t = new Thread(delegate()
             {
                 bool ok = false;
-                try { ok = Guard.Configure(autorun, ini, wsh, guard, null); }
+                try { ok = Guard.Configure(autorun, ini, wsh, registry, guard, null); }
                 catch (Exception e) { Log.Write(S.Log.ProtectionApplyError(e.Message), "ERROR"); }
                 if (IsDisposed || !IsHandleCreated) return;
                 try { BeginInvoke((MethodInvoker)delegate { FinishApply(ok); }); }
@@ -204,6 +210,7 @@ namespace ShieldGate
                 int changes = 0;
                 if (!_status.Autorun) changes++;
                 if (!_status.Ini) changes++;
+                if (!_status.Registry) changes++;
                 if (!_status.Running) changes++;
                 if (!ConfirmDialog.Ask(FindForm(), S.Dlg.ProtectOnTitle,
                                        S.Dlg.ProtectOnBody(changes), S.Dlg.ProtectOnOk,
@@ -213,6 +220,7 @@ namespace ShieldGate
                 _loading = true;
                 _autorun.Checked = true;
                 _ini.Checked = true;
+                _registry.Checked = true;
                 _guard.Checked = true;
                 _loading = false;
             }
@@ -226,6 +234,7 @@ namespace ShieldGate
                 _autorun.Checked = false;
                 _ini.Checked = false;
                 _wsh.Checked = false;
+                _registry.Checked = false;
                 _guard.Checked = false;
                 _loading = false;
             }
@@ -281,6 +290,7 @@ namespace ShieldGate
             _autorun.Bounds = new Rectangle(pad, y, width, rowH); y += rowH;
             _ini.Bounds = new Rectangle(pad, y, width, rowH); y += rowH;
             _wsh.Bounds = new Rectangle(pad, y, width, rowH); y += rowH;
+            _registry.Bounds = new Rectangle(pad, y, width, rowH); y += rowH;
             _guard.Bounds = new Rectangle(pad, y, width, rowH); y += rowH;
 
             _techLink.Bounds = new Rectangle(pad, y + Ui.Px(14),

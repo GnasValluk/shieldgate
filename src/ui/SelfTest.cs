@@ -6,6 +6,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32;
 
 namespace ShieldGate
 {
@@ -25,7 +26,7 @@ namespace ShieldGate
             Environment.SetEnvironmentVariable("SHIELDGATE_HOME", root);
 
             int passed = 0;
-            int total = 19;
+            int total = 22;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -269,9 +270,9 @@ namespace ShieldGate
             bool configOk = false;
             try
             {
-                Guard.SaveConfig(false, true, true);
+                Guard.SaveConfig(false, true, true, true);
                 GuardConfig cfg = Guard.LoadConfig();
-                configOk = !cfg.Autorun && cfg.Ini && cfg.Wsh;
+                configOk = !cfg.Autorun && cfg.Ini && cfg.Wsh && cfg.Registry;
             }
             catch { }
             check(S.Selftest.GuardConfig, configOk);
@@ -329,6 +330,70 @@ namespace ShieldGate
             catch { }
             finally { S.SetLanguage(Bootstrap.LanguageVi); }
             check(S.Selftest.LogLanguage, logEnglish);
+
+            // 16. Khoá đăng ký chưa từng tồn tại: xoá phải coi là thành công, nếu không
+            //     mỗi lần tắt bảo vệ đều ghi "(ok=False)" dù chẳng có gì để xoá.
+            bool regMissing = false;
+            try
+            {
+                string testKey = @"Software\ShieldGateSelfTest\khong-ton-tai";
+                regMissing = Reg.DeleteValue(RegistryHive.CurrentUser, testKey, "x")
+                          && Reg.DeleteTree(RegistryHive.CurrentUser, testKey);
+            }
+            catch { }
+            check(S.Selftest.RegDeleteMissing, regMissing);
+
+            // 16b. Bộ kiểm tra Registry chạy được, không ném lỗi khi máy thiếu khoá.
+            bool regScan = false;
+            try { regScan = RegistryGuard.Detect() != null; }
+            catch { }
+            check(S.Selftest.RegistryScan, regScan);
+
+            // 17. Tệp nằm ở đường dẫn dài hơn 260 ký tự: vẫn cách ly và khôi phục được.
+            bool longOk = false;
+            string longBatch = "";
+            List<string> longDirs = new List<string>();
+            string longSeed = "";
+            try
+            {
+                string longDir = Path.Combine(root, "long");
+                longDirs.Add(longDir);
+                while (longDir.Length < 270)
+                {
+                    longDir = Path.Combine(longDir, "0123456789");
+                    longDirs.Add(longDir);
+                }
+                string longFile = Path.Combine(longDir, new string('a', 40) + ".txt");
+                longSeed = Path.Combine(root, "long-seed.txt");
+                File.WriteAllText(longSeed, "du lieu dai", new UTF8Encoding(false));
+
+                bool built = WinPath.CreateDirTree(WinPath.Ext(longDir))
+                          && WinPath.CopyFile(WinPath.Ext(longSeed), WinPath.Ext(longFile)) == 0;
+                longBatch = Quarantine.NewBatch("longpath", "");
+                string lerr;
+                bool added = built && Quarantine.Add(longFile, root, longBatch, "longpath", out lerr);
+                bool gone = added && !WinPath.Exists(WinPath.Ext(longFile));
+
+                int lr, ls, lm;
+                Quarantine.RestoreBatch(longBatch, out lr, out ls, out lm);
+                bool backLong = WinPath.Exists(WinPath.Ext(longFile));
+                string text = "";
+                if (backLong)
+                {
+                    using (StreamReader rd = new StreamReader(
+                               WinPath.OpenRead(WinPath.Ext(longFile)), Encoding.UTF8))
+                        text = rd.ReadToEnd();
+                }
+                longOk = built && added && gone && lr == 1 && lm == 0 && backLong && text == "du lieu dai";
+                if (backLong) WinPath.DeleteFile(WinPath.Ext(longFile));
+            }
+            catch { }
+            if (longBatch.Length > 0) Quarantine.RemoveBatch(longBatch);
+            // Directory.Delete không xoá được cây dài; dọn từng cấp bằng Win32.
+            for (int i = longDirs.Count - 1; i >= 0; i--)
+                WinPath.RemoveDir(WinPath.Ext(longDirs[i]));
+            if (longSeed.Length > 0) { try { File.Delete(longSeed); } catch { } }
+            check(S.Selftest.LongPathQuarantine, longOk);
 
             try { Directory.Delete(root, true); }
             catch { }

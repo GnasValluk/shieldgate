@@ -18,13 +18,15 @@ namespace ShieldGate
         public bool Autorun;
         public bool Ini;
         public bool Wsh;
+        public bool Registry;
         public bool Task;
         public bool Running;
         public int QuarantineFiles;
         public int QuarantineBatches;
 
-        // Ba thiết lập chính đang có hiệu lực: chặn autorun, chặn autorun.inf, chạy nền.
-        public bool FullyProtected { get { return Autorun && Ini && Running; } }
+        // Bốn thiết lập chính đang có hiệu lực: chặn autorun, chặn autorun.inf,
+        // bảo vệ Registry File Explorer và chạy nền.
+        public bool FullyProtected { get { return Autorun && Ini && Registry && Running; } }
     }
 
     // Lựa chọn người dùng đã đặt, để bảo vệ nền chỉ áp đúng phần đang bật.
@@ -33,6 +35,7 @@ namespace ShieldGate
         public bool Autorun = true;
         public bool Ini = true;
         public bool Wsh;
+        public bool Registry;
     }
 
     internal static class Guard
@@ -56,6 +59,19 @@ namespace ShieldGate
             new[] { "HKLM", WshPath, "Enabled" },
             new[] { "HKLM", WshPath32, "Enabled" }
         };
+
+        // Ổ chỉ đọc chỉ báo một lần, để vòng lặp nền không ghi lại cùng câu mỗi 10 giây.
+        private static readonly HashSet<string> ReadOnlyLogged =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private static bool SkipReadOnly(string volume)
+        {
+            if (!Native.IsReadOnlyVolume(volume)) return false;
+            bool first;
+            lock (ReadOnlyLogged) first = ReadOnlyLogged.Add(volume);
+            if (first) Log.Write(S.Log.DriveNotWritable(volume), "WARN");
+            return true;
+        }
 
         // ---------------------------------------------------------- chính sách
 
@@ -99,13 +115,14 @@ namespace ShieldGate
                     if (string.Equals(key, "autorun", StringComparison.OrdinalIgnoreCase)) c.Autorun = on;
                     else if (string.Equals(key, "ini", StringComparison.OrdinalIgnoreCase)) c.Ini = on;
                     else if (string.Equals(key, "wsh", StringComparison.OrdinalIgnoreCase)) c.Wsh = on;
+                    else if (string.Equals(key, "registry", StringComparison.OrdinalIgnoreCase)) c.Registry = on;
                 }
             }
             catch { }
             return c;
         }
 
-        public static void SaveConfig(bool autorun, bool ini, bool wsh)
+        public static void SaveConfig(bool autorun, bool ini, bool wsh, bool registry)
         {
             try
             {
@@ -113,7 +130,8 @@ namespace ShieldGate
                 File.WriteAllText(Paths.GuardConfig,
                     "autorun=" + (autorun ? "1" : "0") + "\r\n" +
                     "ini=" + (ini ? "1" : "0") + "\r\n" +
-                    "wsh=" + (wsh ? "1" : "0") + "\r\n",
+                    "wsh=" + (wsh ? "1" : "0") + "\r\n" +
+                    "registry=" + (registry ? "1" : "0") + "\r\n",
                     new UTF8Encoding(false));
             }
             catch (Exception e)
@@ -146,6 +164,7 @@ namespace ShieldGate
                 ok &= Reg.Write(RegistryHive.LocalMachine, WshPath, "Enabled", 0, RegistryValueKind.DWord);
                 ok &= Reg.Write(RegistryHive.LocalMachine, WshPath32, "Enabled", 0, RegistryValueKind.DWord);
             }
+            if (c.Registry) ok &= RegistryGuard.Ensure(true);
             return ok;
         }
 
@@ -610,7 +629,8 @@ namespace ShieldGate
             {
                 if (log != null) log(S.Cli.PolicyPartial);
             }
-            SaveConfig(true, true, blockWsh);
+            SaveConfig(true, true, blockWsh, true);
+            RegistryGuard.Ensure(true);
 
             string output;
             bool taskOk = RegisterTask(out output);
@@ -691,6 +711,7 @@ namespace ShieldGate
                                       StringComparison.OrdinalIgnoreCase);
             st.Wsh = Reg.Read(RegistryHive.LocalMachine, WshPath, "Enabled", out value, out kind)
                      && Convert.ToInt32(value) == 0;
+            st.Registry = LoadConfig().Registry;
             st.Running = HeartbeatAge() < 30;
             foreach (BatchInfo b in Quarantine.ListBatches())
             {
@@ -815,6 +836,8 @@ namespace ShieldGate
                             foreach (string vol in drives) StartRootCheck(scanning, vol);
                         }
                         known.RemoveWhere(delegate(string v) { return !drives.Contains(v); });
+                        lock (ReadOnlyLogged)
+                            ReadOnlyLogged.RemoveWhere(delegate(string v) { return !drives.Contains(v); });
                     }
                     catch (Exception e) { Log.Write(S.Log.WatchLoopError(e.Message), "ERROR"); }
                     Thread.Sleep(2000);
@@ -870,6 +893,7 @@ namespace ShieldGate
         // Chi quet phan goc o: du de bat shortcut/thu muc gia vua bi ghi lai.
         private static void CleanRoot(string volume)
         {
+            if (SkipReadOnly(volume)) return;
             UsbScanResult root = UsbScan.DetectRoot(volume);
             List<UsbItem> auto = new List<UsbItem>();
             foreach (UsbItem it in root.Items)
@@ -887,6 +911,7 @@ namespace ShieldGate
 
         private static void ScanAndClean(string volume)
         {
+            if (SkipReadOnly(volume)) return;
             UsbScanResult scan = UsbScan.Detect(volume, null, null);
             if (scan.Truncated)
                 Log.Write(S.Log.WatchScanTruncated(volume), "WARN");
@@ -957,8 +982,10 @@ namespace ShieldGate
             return ok;
         }
 
-        // Áp dụng đúng bốn lựa chọn của người dùng, phần nào tắt thì trả về giá trị gốc.
-        public static bool Configure(bool autorun, bool ini, bool wsh, bool guardOn, Action<string> log)
+        // Áp dụng đúng năm lựa chọn của người dùng, phần nào tắt thì trả về giá trị gốc.
+        // Riêng Registry: tắt chỉ ngừng theo dõi, không trả lại khoá đã hỏng.
+        public static bool Configure(bool autorun, bool ini, bool wsh, bool registry,
+                                     bool guardOn, Action<string> log)
         {
             if (!Native.IsAdmin())
             {
@@ -994,6 +1021,8 @@ namespace ShieldGate
             }
             else ok &= RestoreGroup(6, 7);
 
+            if (registry) ok &= RegistryGuard.Ensure(true);
+
             string output = "";
             if (guardOn)
             {
@@ -1024,8 +1053,8 @@ namespace ShieldGate
                 try { File.Delete(Paths.Heartbeat); } catch { }
             }
 
-            SaveConfig(autorun, ini, wsh);
-            Log.Write(S.Log.SettingsApplied(autorun, ini, wsh, guardOn, ok));
+            SaveConfig(autorun, ini, wsh, registry);
+            Log.Write(S.Log.SettingsApplied(autorun, ini, wsh, registry, guardOn, ok));
             if (log != null) log(ok ? S.Cli.Configured : S.Cli.ConfigurePartial);
             return ok;
         }

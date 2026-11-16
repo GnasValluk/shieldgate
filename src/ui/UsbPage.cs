@@ -46,6 +46,7 @@ namespace ShieldGate
             _drive.SelectedChanged += delegate
             {
                 if (_loading || _scanning || _applying) return;
+                _result = null;
                 _list.Clear();
                 _notice.ClearMessage();
                 ShowState(SelectedDrive() == null ? UsbState.NoDrive : UsbState.Idle);
@@ -223,6 +224,7 @@ namespace ShieldGate
                 _loading = true;
                 _drive.SelectedIndex = i;
                 _loading = false;
+                _result = null;
                 _list.Clear();
                 ShowState(UsbState.Idle);
                 return;
@@ -249,8 +251,8 @@ namespace ShieldGate
             _scan.Visible = state != UsbState.NoDrive && state != UsbState.Scanning;
             _scan.Enabled = hasDrive && !_applying && !_unhiding;
             _vaccine.Visible = hasDrive && state != UsbState.NoDrive && state != UsbState.Scanning;
-            _vaccine.Enabled = !_applying && !_unhiding;
-            bool canUnhide = hasDrive &&
+            _vaccine.Enabled = !_applying && !_unhiding && !ReadOnlyResult();
+            bool canUnhide = hasDrive && !ReadOnlyResult() &&
                 (state == UsbState.Idle || state == UsbState.Clean);
             _unhide.Visible = canUnhide;
             _unhide.Enabled = canUnhide && !_unhiding;
@@ -330,7 +332,13 @@ namespace ShieldGate
         {
             int n = _list.CheckedCount;
             _apply.Text = S.Usb.Apply(n);
-            _apply.Enabled = n > 0 && !_applying;
+            _apply.Enabled = n > 0 && !_applying && !ReadOnlyResult();
+        }
+
+        // Ổ chỉ đọc: kiểm tra được nhưng không sửa được, nên tắt các thao tác ghi.
+        private bool ReadOnlyResult()
+        {
+            return _result != null && _result.ReadOnly;
         }
 
         // ---------------------------------------------------------------- kiểm tra
@@ -416,6 +424,7 @@ namespace ShieldGate
             Log.Write(S.Log.UsbScanDone(drive, result.Files, result.Items.Count, result.Seconds));
 
             List<string> warnings = new List<string>();
+            if (result.ReadOnly) warnings.Add(S.Usb.ReadOnlyWarning(drive));
             if (result.Truncated) warnings.Add(S.Usb.Truncated(result.Files));
             int rootExe = 0;
             foreach (UsbItem item in result.Items)
@@ -443,6 +452,15 @@ namespace ShieldGate
             List<UsbItem> selected = _list.CheckedItems();
             if (selected.Count == 0) return;
 
+            string drive = SelectedDrive();
+            if (drive == null) return;
+            // Kiểm tra quyền ghi trước khi hỏi: ổ chỉ đọc thì không có gì để xác nhận.
+            if (_result.ReadOnly || !Native.CanWrite(drive))
+            {
+                _notice.SetMessage(S.Err.DriveReadOnly(drive), true);
+                return;
+            }
+
             List<string> names = new List<string>();
             for (int i = 0; i < selected.Count && i < 6; i++) names.Add(selected[i].Rel);
             string body = string.Join("\n", names.ToArray());
@@ -459,7 +477,6 @@ namespace ShieldGate
             _apply.Enabled = false;
             _cancelFlag = false;
 
-            string drive = SelectedDrive();
             UsbScanResult scan = _result;
             Thread t = new Thread(delegate()
             {
@@ -498,17 +515,34 @@ namespace ShieldGate
             _batch = batch;
             Settings.SetDriveScan(drive, _result == null ? 0 : _result.Files, 0);
 
-            if (failed > 0) _notice.SetMessage(S.Usb.PartialNote(failed), true);
-            if (done == 0)
+            if (done > 0)
             {
-                _notice.SetMessage(S.Err.Unknown, true);
-                ShowState(UsbState.Results);
-                UpdateApplyButton();
+                _list.Clear();
+                ShowState(UsbState.Done);
+                if (failed > 0) _notice.SetMessage(S.Usb.PartialNote(failed), true);
                 return;
             }
 
-            _list.Clear();
-            ShowState(UsbState.Done);
+            // Không cách ly được tệp nào. Danh sách có thể đã cũ (bảo vệ nền hoặc
+            // lần chạy trước vừa xử lý) — không báo "lỗi không mong muốn", kiểm tra lại.
+            if (done == 0)
+            {
+                _batch = "";
+                if (batch.Length > 0) Quarantine.RemoveBatch(batch);
+            }
+            if (failed > 0)
+            {
+                ShowState(UsbState.Results);
+                UpdateApplyButton();
+                _notice.SetMessage(S.Usb.PartialNote(failed), true);
+                return;
+            }
+
+            ShowState(UsbState.Results);
+            UpdateApplyButton();
+            _notice.SetMessage(S.Usb.NothingChanged, false);
+            StartScan();
+            if (_scanning) _notice.SetMessage(S.Usb.NothingChanged, false);
         }
 
         private void DoUndo()
@@ -541,6 +575,11 @@ namespace ShieldGate
         {
             string drive = SelectedDrive();
             if (drive == null || _scanning || _applying || _unhiding) return;
+            if (!Native.CanWrite(drive))
+            {
+                _notice.SetMessage(S.Err.DriveReadOnly(drive), true);
+                return;
+            }
             bool existed;
             string error;
             if (Guard.Vaccinate(drive, out existed, out error))
@@ -555,6 +594,11 @@ namespace ShieldGate
         {
             string drive = SelectedDrive();
             if (drive == null || _scanning || _applying || _unhiding) return;
+            if (!Native.CanWrite(drive))
+            {
+                _notice.SetMessage(S.Err.DriveReadOnly(drive), true);
+                return;
+            }
             if (!ConfirmDialog.Ask(FindForm(), S.Dlg.UnhideTitle, S.Dlg.UnhideBody,
                                    S.Dlg.UnhideOk, S.Dlg.Cancel, ButtonKind.Secondary, false))
                 return;

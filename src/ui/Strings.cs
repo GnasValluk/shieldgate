@@ -24,7 +24,7 @@ namespace ShieldGate
         public static class App
         {
             public static string Name { get { return AppInfo.Name; } }
-            public static string Tagline { get { return T("Chặn và dọn virus shortcut", "Block and clean shortcut viruses"); } }
+            public static string Tagline { get { return T("Bảo vệ các cổng kết nối", "Protect your connection ports"); } }
             public static string WindowTitle { get { return AppInfo.Name; } }
         }
 
@@ -44,7 +44,6 @@ namespace ShieldGate
                 return T("ShieldGate " + version + " · mã nguồn mở, giấy phép MIT",
                          "ShieldGate " + version + " · open source, MIT license");
             }
-            public static string Privacy { get { return T("Không gửi dữ liệu ra ngoài", "No data leaves this computer"); } }
         }
 
         public static class Overview
@@ -132,7 +131,8 @@ namespace ShieldGate
             public static string Quarantine { get { return T("Cách ly", "Quarantine"); } }
             public static string QuarantineCount(int n) { return T(n + " tệp đang cách ly", n + " files in quarantine"); }
             public static string QuarantineEmpty { get { return T("Chưa có tệp nào bị cách ly", "No files in quarantine"); } }
-            public static string QuarantineAction { get { return T("Khôi phục tệp", "Restore files"); } }
+            public static string QuarantineAction { get { return T("Quản lý cách ly", "Manage quarantine"); } }
+            public static string QuarantineClean { get { return T("Dọn sạch", "Clean up"); } }
         }
 
         public static class Usb
@@ -199,6 +199,19 @@ namespace ShieldGate
             {
                 return T("Có " + n + " tệp chạy bị ẩn ở gốc ổ. Cách ly tệp đó rồi kiểm tra lại USB trên máy sạch.",
                          n + " hidden executable(s) sit at the drive root. Quarantine them and check the drive on a clean computer.");
+            }
+            public static string ReadOnlyWarning(string drive)
+            {
+                return T("Ổ " + drive + " đang ở chế độ chỉ đọc. Vẫn kiểm tra được nhưng không cách ly được; bỏ khoá ghi trên USB rồi kiểm tra lại.",
+                         "Drive " + drive + " is read-only. It can be scanned but files cannot be quarantined; remove the write lock and scan again.");
+            }
+            public static string NothingChanged
+            {
+                get
+                {
+                    return T("Không có gì để thay đổi: các tệp đã được xử lý trước đó hoặc không còn ở đó.",
+                             "Nothing to change: the files were already handled or are no longer there.");
+                }
             }
             public static string ResultsTitle(int n) { return T(n + " tệp cần xử lý", n + " files need action"); }
             public static string ResultsNote
@@ -372,6 +385,15 @@ namespace ShieldGate
                              "Run in the background and check every USB drive as soon as it is plugged in.");
                 }
             }
+            public static string SwitchRegistry { get { return T("Bảo vệ Registry của File Explorer", "Protect File Explorer registry keys"); } }
+            public static string SwitchRegistryDetail
+            {
+                get
+                {
+                    return T("Tự sửa khoá mở thư mục, mở .exe và hiện tệp ẩn nếu virus phá hoại. Tắt chỉ ngừng kiểm tra.",
+                             "Repair folder, .exe and hidden-file keys if a virus damages them. Turning off only stops checking.");
+                }
+            }
             public static string On { get { return T("Bật bảo vệ", "Turn on protection"); } }
             public static string Off { get { return T("Tắt bảo vệ", "Turn off protection"); } }
             public static string Tech { get { return T("Chi tiết kỹ thuật", "Technical details"); } }
@@ -379,8 +401,8 @@ namespace ShieldGate
             {
                 get
                 {
-                    return T("Thay đổi được sao lưu. Tắt bảo vệ sẽ trả Windows về đúng cấu hình trước khi bật.",
-                             "Changes are backed up. Turning protection off restores the previous Windows configuration.");
+                    return T("Thay đổi được sao lưu. Tắt bảo vệ sẽ trả Windows về đúng cấu hình trước khi bật; riêng Registry đã sửa thì giữ nguyên.",
+                             "Changes are backed up. Turning protection off restores the previous Windows configuration; repaired registry keys are kept.");
                 }
             }
             public static string AdminOnly { get { return T("Cần quyền quản trị để bật bảo vệ.", "Administrator rights are required to turn on protection."); } }
@@ -391,10 +413,23 @@ namespace ShieldGate
 
         public static class Restore
         {
-            public static string Title { get { return T("Khôi phục tệp", "Restore files"); } }
-            public static string Intro { get { return T("Tệp bị cách ly vẫn còn nguyên, chỉ bị chuyển khỏi vị trí cũ.", "Quarantined files are intact, only moved from their original location."); } }
+            public static string Title { get { return T("Vùng cách ly", "Quarantine"); } }
+            public static string Intro { get { return T("Tệp bị cách ly vẫn còn nguyên. Bạn có thể khôi phục hoặc xoá vĩnh viễn.", "Quarantined files are kept intact. You can restore or delete them."); } }
             public static string Empty { get { return T("Chưa có tệp nào bị cách ly.", "No files in quarantine."); } }
             public static string Action { get { return T("Khôi phục lần này", "Restore this batch"); } }
+            public static string Clean { get { return T("Xoá vĩnh viễn", "Delete permanently"); } }
+            public static string CleanAll { get { return T("Dọn sạch tất cả", "Clean up all"); } }
+            public static string CleanDone(int files)
+            {
+                return T("Đã xoá vĩnh viễn " + files + " tệp khỏi vùng cách ly.",
+                         "Permanently deleted " + files + " files from quarantine.");
+            }
+            public static string CleanAllDone(int batches, int files)
+            {
+                return T("Đã dọn sạch " + batches + " lần cách ly (" + files + " tệp).",
+                         "Cleaned up " + batches + " quarantine batches (" + files + " files).");
+            }
+            public static string CleanFailed { get { return T("Không xoá được toàn bộ tệp trong vùng cách ly. Xem nhật ký để biết chi tiết.", "Could not delete every quarantined file. See the log for details."); } }
             public static string OpenFolder { get { return T("Mở thư mục cách ly", "Open quarantine folder"); } }
             public static string Done(int restored, int kept)
             {
@@ -428,13 +463,14 @@ namespace ShieldGate
             public static string StageProcesses { get { return T("Đang xem tiến trình đang chạy", "Checking running processes"); } }
             public static string StageWmi { get { return T("Đang xem đăng ký sự kiện WMI", "Checking WMI event subscriptions"); } }
             public static string StageDefender { get { return T("Đang xem bảo vệ của Windows", "Checking Windows protection"); } }
+            public static string StageRegistry { get { return T("Đang xem Registry của File Explorer", "Checking the File Explorer registry"); } }
             public static string Clean { get { return T("Không phát hiện gì bất thường", "Nothing unusual found"); } }
             public static string CleanBody
             {
                 get
                 {
-                    return T("Đã kiểm tra mục khởi động, tác vụ hẹn giờ, tiến trình đang chạy và các ổ đĩa.",
-                             "Checked startup items, scheduled tasks, running processes and drives.");
+                    return T("Đã kiểm tra mục khởi động, tác vụ hẹn giờ, tiến trình đang chạy, các ổ đĩa và Registry.",
+                             "Checked startup items, scheduled tasks, running processes, drives and the registry.");
                 }
             }
             public static string Done(int fixedCount, int manual)
@@ -462,17 +498,43 @@ namespace ShieldGate
             public static string DriveExe(string name) { return T("Tệp chạy giả dạng thư mục ở gốc ổ: " + name, "Executable posing as a folder at a drive root: " + name); }
             public static string WmiConsumer(string name) { return T("Đăng ký sự kiện WMI có thể tự chạy mã độc: " + name, "WMI event subscription that can run malicious code: " + name); }
             public static string LnkAssoc(string name) { return T("Kiểu tệp .lnk bị đổi để mọi shortcut chạy mã lạ: " + name, "The .lnk file type was changed so every shortcut runs foreign code: " + name); }
+            public static string RegHealth(string name) { return T("Registry bị phá hoại: " + name, "Damaged registry setting: " + name); }
             public static string Defender { get { return T("Bảo vệ thời gian thực của Windows đang tắt", "Windows real-time protection is off"); } }
+        }
+
+        // Tên ngắn của từng lỗi Registry, dùng chung cho màn hình quét máy và nhật ký.
+        public static class Registry
+        {
+            public static string ExeAssoc { get { return T("Liên kết tệp .exe bị đổi", "The .exe file association was changed"); } }
+            public static string ExeCommand { get { return T("Lệnh mở tệp .exe bị đổi", "The command that opens .exe files was changed"); } }
+            public static string FolderCommand { get { return T("Lệnh mở thư mục (Folder) bị đổi", "The command that opens folders was changed"); } }
+            public static string FolderDelegate { get { return T("Thiếu mã DelegateExecute khi mở thư mục", "The folder DelegateExecute code is missing"); } }
+            public static string ShowHidden { get { return T("Không bật được chế độ hiện tệp ẩn", "The show-hidden-files setting cannot be enabled"); } }
+            public static string NoFolderOptions { get { return T("Tuỳ chọn thư mục (Folder Options) bị khoá", "Folder Options is locked"); } }
+            public static string NoContextMenu { get { return T("Menu chuột phải bị khoá", "The right-click menu is locked"); } }
+            public static string NoTaskMgr { get { return T("Task Manager bị khoá", "Task Manager is locked"); } }
+            public static string NoRegistryTools { get { return T("Registry Editor (regedit) bị khoá", "Registry Editor (regedit) is locked"); } }
+            public static string Missing { get { return T("(không có)", "(missing)"); } }
         }
 
         public static class Log
         {
             public static string Title { get { return T("Nhật ký", "Log"); } }
             public static string All { get { return T("Tất cả", "All"); } }
+            public static string Warnings { get { return T("Cảnh báo", "Warnings"); } }
             public static string ErrorsOnly { get { return T("Chỉ lỗi", "Errors only"); } }
             public static string Export { get { return T("Xuất nhật ký", "Export log"); } }
             public static string Empty { get { return T("Chưa có hoạt động nào.", "No activity yet."); } }
             public static string NoErrors { get { return T("Không có lỗi nào được ghi.", "No errors were logged."); } }
+            public static string NoWarnings { get { return T("Không có cảnh báo nào được ghi.", "No warnings were logged."); } }
+            public static string Newer { get { return T("Mới hơn", "Newer"); } }
+            public static string Older { get { return T("Cũ hơn", "Older"); } }
+            public static string Page(int page, int pages, int lines)
+            {
+                return T("Trang " + page + "/" + pages + " · " + lines + " dòng",
+                         "Page " + page + "/" + pages + " · " + lines + " lines");
+            }
+            public static string PageEmpty { get { return T("Không có dòng nào", "No lines"); } }
             public static string Refresh { get { return T("Làm mới", "Refresh"); } }
             public static string ExportTitle { get { return T("Lưu nhật ký", "Save log"); } }
             public static string FilterName { get { return T("Tệp văn bản", "Text file"); } }
@@ -582,12 +644,24 @@ namespace ShieldGate
                 return T("Không tạo được tác vụ bảo vệ: " + detail,
                          "Could not create the protection task: " + detail);
             }
-            public static string SettingsApplied(bool autorun, bool ini, bool wsh, bool guard, bool ok)
+            public static string SettingsApplied(bool autorun, bool ini, bool wsh, bool registry, bool guard, bool ok)
             {
                 return T("Thiết lập bảo vệ: chặn tự chạy=" + autorun + ", chặn autorun.inf=" + ini
-                         + ", chặn script=" + wsh + ", chạy nền=" + guard + " (ok=" + ok + ")",
+                         + ", chặn script=" + wsh + ", bảo vệ Registry=" + registry
+                         + ", chạy nền=" + guard + " (ok=" + ok + ")",
                          "Protection settings: AutoRun block=" + autorun + ", autorun.inf block=" + ini
-                         + ", script block=" + wsh + ", background=" + guard + " (ok=" + ok + ")");
+                         + ", script block=" + wsh + ", registry protection=" + registry
+                         + ", background=" + guard + " (ok=" + ok + ")");
+            }
+            public static string RegistryRepaired(int count)
+            {
+                return T("Đã tự sửa " + count + " khoá Registry bị phá hoại.",
+                         "Automatically repaired " + count + " damaged registry keys.");
+            }
+            public static string RegistryRepairFailed(string what)
+            {
+                return T("Không sửa được khoá Registry: " + what,
+                         "Could not repair the registry key: " + what);
             }
             public static string ProcessStopped(int pid, string root)
             {
@@ -603,6 +677,11 @@ namespace ShieldGate
             {
                 return T("Cách ly " + done + " tệp từ " + root + " (lỗi " + failed + ")",
                          "Quarantined " + done + " files from " + root + " (" + failed + " errors)");
+            }
+            public static string DriveNotWritable(string root)
+            {
+                return T("Ổ " + root + " chỉ đọc hoặc không có quyền ghi; không thay đổi gì.",
+                         "Drive " + root + " is read-only or not writable; nothing was changed.");
             }
             public static string RestoreCopied(string name, int code)
             {
@@ -641,6 +720,21 @@ namespace ShieldGate
             {
                 return T("Khôi phục " + restored + " tệp từ " + batch + " (thiếu " + missing + ")",
                          "Restored " + restored + " files from " + batch + " (" + missing + " missing)");
+            }
+            public static string QuarantineCleaned(int files, string batch)
+            {
+                return T("Xoá vĩnh viễn " + files + " tệp cách ly trong " + batch,
+                         "Permanently deleted " + files + " quarantined files from " + batch);
+            }
+            public static string QuarantineCleanedAll(int batches, int files)
+            {
+                return T("Dọn sạch vùng cách ly: " + batches + " lần, " + files + " tệp",
+                         "Quarantine cleaned: " + batches + " batches, " + files + " files");
+            }
+            public static string QuarantineCleanError(string batch)
+            {
+                return T("Không xoá được vùng cách ly: " + batch,
+                         "Could not delete quarantine: " + batch);
             }
             public static string LogExported(string path)
             {
@@ -721,9 +815,30 @@ namespace ShieldGate
             public static string Source { get { return T("Mã nguồn", "Source code"); } }
             public static string Data { get { return T("Dữ liệu", "Data"); } }
             public static string Hash { get { return T("SHA256 của tệp đang chạy", "SHA256 of the running file"); } }
-            public static string NoNetwork { get { return T("Không gửi dữ liệu ra ngoài. Không có telemetry.", "No data leaves this computer. No telemetry."); } }
             public static string SourceSoon { get { return T("Mã nguồn đầy đủ đi kèm bản phát hành này.", "The full source code ships with this release."); } }
             public static string OpenFolder { get { return T("Mở thư mục", "Open folder"); } }
+
+            // Gỡ cài đặt
+            public static string RemoveTitle { get { return T("Gỡ cài đặt", "Uninstall"); } }
+            public static string RemoveNote
+            {
+                get
+                {
+                    return T("Tắt bảo vệ và xoá toàn bộ dữ liệu, nhật ký, tệp cách ly cùng tệp chạy ShieldGate khỏi máy. Không thể hoàn tác.",
+                             "Turns off protection and removes all ShieldGate data, logs, quarantined files and the app file from this computer. This cannot be undone.");
+                }
+            }
+            public static string RemoveAction { get { return T("Gỡ ShieldGate khỏi máy", "Remove ShieldGate from this computer"); } }
+            public static string RemoveWorking { get { return T("Đang gỡ ShieldGate…", "Removing ShieldGate…"); } }
+            public static string RemoveDone { get { return T("Đã gỡ ShieldGate khỏi máy. Ứng dụng sẽ đóng.", "ShieldGate has been removed from this computer. The app will now close."); } }
+            public static string RemoveCleanupPending
+            {
+                get
+                {
+                    return T("Đã tắt bảo vệ. Một số tệp còn lại sẽ được dọn nốt sau khi ứng dụng đóng.",
+                             "Protection is off. The remaining files will be cleaned up after the app closes.");
+                }
+            }
         }
 
         public static class Setup
@@ -788,6 +903,11 @@ namespace ShieldGate
                          "Could not read " + path + " — another program may have it open.");
             }
             public static string ReadOnly { get { return T("USB đang ở chế độ chỉ đọc. Bỏ khoá ghi trên USB rồi thử lại.", "The USB drive is read-only. Remove the write lock and try again."); } }
+            public static string DriveReadOnly(string drive)
+            {
+                return T("Ổ " + drive + " đang ở chế độ chỉ đọc hoặc không có quyền ghi. Bỏ khoá ghi rồi thử lại.",
+                         "Drive " + drive + " is read-only or not writable. Remove the write lock and try again.");
+            }
             public static string Space(int files, string need)
             {
                 return T("Không đủ dung lượng để cách ly " + files + " tệp. Cần thêm " + need + ".",
@@ -865,6 +985,35 @@ namespace ShieldGate
                 }
             }
             public static string RestoreOk { get { return T("Khôi phục", "Restore"); } }
+            public static string CleanTitle(int n) { return T("Xoá vĩnh viễn " + n + " tệp?", "Delete " + n + " files permanently?"); }
+            public static string CleanBody
+            {
+                get
+                {
+                    return T("Tệp sẽ bị xoá khỏi vùng cách ly và không thể khôi phục. Chỉ xoá khi bạn chắc không cần chúng nữa.",
+                             "The files will be deleted from quarantine and cannot be restored. Only delete them if you are sure you no longer need them.");
+                }
+            }
+            public static string CleanAllTitle { get { return T("Dọn sạch vùng cách ly?", "Clean up all quarantine?"); } }
+            public static string CleanAllBody
+            {
+                get
+                {
+                    return T("Toàn bộ tệp đang cách ly sẽ bị xoá vĩnh viễn và không thể khôi phục.",
+                             "Every quarantined file will be deleted permanently and cannot be restored.");
+                }
+            }
+            public static string CleanOk { get { return T("Xoá vĩnh viễn", "Delete permanently"); } }
+            public static string UninstallTitle { get { return T("Gỡ ShieldGate khỏi máy?", "Remove ShieldGate from this computer?"); } }
+            public static string UninstallBody
+            {
+                get
+                {
+                    return T("ShieldGate sẽ tắt bảo vệ, xoá tác vụ hẹn giờ, khôi phục thiết lập Windows đã thay đổi, rồi xoá nhật ký, tệp cách ly, bản sao lưu, toàn bộ dữ liệu và tệp chạy ShieldGate.\n\nThao tác này không thể hoàn tác.",
+                             "ShieldGate will turn off protection, remove its scheduled tasks, restore the changed Windows settings, then delete its logs, quarantined files, backups, all data and the ShieldGate app file.\n\nThis cannot be undone.");
+                }
+            }
+            public static string UninstallOk { get { return T("Gỡ cài đặt", "Uninstall"); } }
             public static string UnhideTitle { get { return T("Hiện tệp bị ẩn?", "Unhide files?"); } }
             public static string UnhideBody
             {
@@ -889,6 +1038,14 @@ namespace ShieldGate
             }
             public static string Ini { get { return "HKLM\\…\\IniFileMapping\\Autorun.inf = @SYS:DoesNotExist"; } }
             public static string Wsh { get { return "HKLM\\…\\Windows Script Host\\Settings: Enabled = 0"; } }
+            public static string Registry
+            {
+                get
+                {
+                    return T("HKCR\\Folder\\shell\\open\\command: DelegateExecute = {11dbb47c-…}, mở bằng Explorer.exe; kiểm tra .exe, hiện tệp ẩn",
+                             "HKCR\\Folder\\shell\\open\\command: DelegateExecute = {11dbb47c-…}, opens with Explorer.exe; checks .exe and hidden-file setting");
+                }
+            }
             public static string Guard
             {
                 get
@@ -921,6 +1078,9 @@ namespace ShieldGate
             public static string TamperRefused { get { return T("không khôi phục bản cách ly đã bị sửa", "refuse to restore a modified quarantined file"); } }
             public static string Truncation { get { return T("báo đúng khi quét bị giới hạn", "report when a scan is truncated"); } }
             public static string LogLanguage { get { return T("nhật ký đổi theo ngôn ngữ", "log text follows the chosen language"); } }
+            public static string RegDeleteMissing { get { return T("xoá khoá đăng ký chưa tồn tại không báo lỗi", "deleting a registry key that never existed does not fail"); } }
+            public static string RegistryScan { get { return T("quét Registry File Explorer không gây lỗi", "the File Explorer registry check runs without errors"); } }
+            public static string LongPathQuarantine { get { return T("cách ly và khôi phục tệp có đường dẫn dài hơn 260 ký tự", "quarantine and restore a file whose path is longer than 260 characters"); } }
         }
 
         // Biểu tượng khay hệ thống của bản chạy nền.
@@ -986,6 +1146,8 @@ namespace ShieldGate
             public static string TaskMissing { get { return T("Không có tác vụ bảo vệ để xoá.", "There is no protection task to remove."); } }
             public static string PolicyRestored { get { return T("Đã phục hồi cấu hình trước khi bật.", "Restored the configuration from before protection was turned on."); } }
             public static string PolicyRestoreFailed { get { return T("Không phục hồi được cấu hình. Kiểm tra lại thiết lập AutoRun.", "Could not restore the configuration. Check the AutoRun settings."); } }
+            public static string UninstallDone { get { return T("Đã gỡ ShieldGate và xoá dữ liệu của nó.", "ShieldGate removed and its data deleted."); } }
+            public static string UninstallPending { get { return T("Đã tắt bảo vệ. Phần tệp còn lại sẽ được dọn sau khi tiến trình thoát.", "Protection turned off. The remaining files will be cleaned up after this process exits."); } }
             public static string ProtectOffDone { get { return T("Đã tắt bảo vệ. Tệp cách ly và nhật ký vẫn được giữ.", "Protection turned off. Quarantined files and logs are kept."); } }
             public static string NoDriveSelected { get { return T("Chưa chọn ổ đĩa.", "No drive selected."); } }
             public static string StatusTitle { get { return T("Trạng thái ShieldGate", "ShieldGate status"); } }
@@ -993,6 +1155,7 @@ namespace ShieldGate
             public static string StatusAutorun(bool on) { return T("Chặn tự chạy: " + (on ? "bật" : "tắt"), "AutoRun block: " + (on ? "on" : "off")); }
             public static string StatusIni(bool on) { return T("Chặn autorun.inf: " + (on ? "bật" : "tắt"), "autorun.inf block: " + (on ? "on" : "off")); }
             public static string StatusWsh(bool on) { return T("Chặn Windows Script Host: " + (on ? "bật" : "tắt"), "Windows Script Host block: " + (on ? "on" : "off")); }
+            public static string StatusRegistry(bool on) { return T("Bảo vệ Registry: " + (on ? "bật" : "tắt"), "Registry protection: " + (on ? "on" : "off")); }
             public static string StatusGuard(bool on) { return T("Chạy nền: " + (on ? "đang chạy" : "không chạy"), "Background: " + (on ? "running" : "not running")); }
             public static string StatusAdmin(bool on) { return T("Quyền quản trị: " + (on ? "có" : "không"), "Administrator rights: " + (on ? "yes" : "no")); }
             public static string StatusQuarantine(int files, int batches)

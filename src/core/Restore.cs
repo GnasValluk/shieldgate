@@ -3,9 +3,11 @@
 // co dau cach cuoi ten se hong voi System.IO tren .NET 4.0.
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace ShieldGate
 {
@@ -23,6 +25,7 @@ namespace ShieldGate
         public int Failed;       // so muc khong chuyen duoc
         public int DirsRemoved;  // thu muc khong ten da duoc xoa (da rong)
         public int DirsLeft;     // thu muc khong ten con lai (chua rong)
+        public bool NoWrite;     // o chi doc / khong co quyen ghi: khong thu chuyen
         public List<string> Names = new List<string>();
     }
 
@@ -75,6 +78,21 @@ namespace ShieldGate
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern bool CreateDirectoryW(string path, IntPtr security);
 
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateFileW(string name, uint access, uint share,
+                                                 IntPtr security, uint disposition,
+                                                 uint flags, IntPtr template);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool GetFileSizeEx(IntPtr handle, out long size);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        private const uint GenericRead = 0x80000000;
+        private const uint ShareAll = 0x00000001 | 0x00000002 | 0x00000004;
+        private const uint OpenExisting = 3;
+
         private static readonly IntPtr InvalidHandle = new IntPtr(-1);
         private const uint InvalidAttrs = 0xFFFFFFFF;
         public const uint AttrDirectory = 0x10;
@@ -92,6 +110,15 @@ namespace ShieldGate
         public static string Join(string dir, string name)
         {
             return dir.TrimEnd('\\') + "\\" + name;
+        }
+
+        // Thư mục cha, không dùng System.IO.Path vì nó từ chối đường dẫn > 260 ký tự.
+        public static string Parent(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            string p = path.TrimEnd('\\');
+            int i = p.LastIndexOf('\\');
+            return i > 4 ? p.Substring(0, i) : "";
         }
 
         public static List<DirEntry> List(string dirExt)
@@ -151,6 +178,54 @@ namespace ShieldGate
         public static bool CreateDir(string pathExt)
         {
             return CreateDirectoryW(pathExt, IntPtr.Zero);
+        }
+
+        // Tao ca cay thu muc. System.IO tu choi duong dan dai hon 260 ky tu,
+        // ke ca khi da co tien to \\?\, nen phai tao tung cap bang Win32.
+        public static bool CreateDirTree(string pathExt)
+        {
+            if (pathExt == null || pathExt.Length == 0) return false;
+            if (Exists(pathExt)) return IsDir(pathExt);
+            if (!pathExt.StartsWith(@"\\?\", StringComparison.Ordinal)) return false;
+            for (int i = 4; i < pathExt.Length; i++)
+            {
+                if (pathExt[i] != '\\') continue;
+                string part = pathExt.Substring(0, i);
+                if (!Exists(part)) CreateDir(part);
+            }
+            if (!Exists(pathExt)) CreateDir(pathExt);
+            return IsDir(pathExt);
+        }
+
+        // Mo tep chi de doc, ke ca duong dan dai hon 260 ky tu.
+        public static FileStream OpenRead(string pathExt)
+        {
+            IntPtr h = CreateFileW(pathExt, GenericRead, ShareAll, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+            if (h == InvalidHandle)
+            {
+                int code = Marshal.GetLastWin32Error();
+                throw new IOException(ErrorText(code), code);
+            }
+            return new FileStream(new SafeFileHandle(h, true), FileAccess.Read);
+        }
+
+        // Kich thuoc tep; -1 neu khong doc duoc.
+        public static long Size(string pathExt)
+        {
+            IntPtr h = CreateFileW(pathExt, GenericRead, ShareAll, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+            if (h == InvalidHandle) return -1;
+            try
+            {
+                long size;
+                return GetFileSizeEx(h, out size) ? size : -1;
+            }
+            finally { CloseHandle(h); }
+        }
+
+        public static string ErrorText(int code)
+        {
+            try { return new Win32Exception(code).Message; }
+            catch { return "Windows error " + code; }
         }
 
         public static bool RemoveDir(string pathExt)
@@ -365,6 +440,17 @@ namespace ShieldGate
         public static RestoreResult Restore(string root, IList<string> names, Func<bool> cancelled)
         {
             RestoreResult r = new RestoreResult();
+            if (names != null && names.Count > 0 && !Native.CanWrite(root))
+            {
+                // O chi doc (USB co khoa ghi, dia CD, anh ISO): thu chuyen tung tep
+                // chi lam day nhat ky bang loi Windows 5. Bao mot lan roi thoi.
+                Log.Write(S.Log.DriveNotWritable(root), "WARN");
+                r.NoWrite = true;
+                r.Failed = names.Count;
+                r.DirsLeft = names.Count;
+                foreach (string name in names) r.Names.Add(name);
+                return r;
+            }
             string rootExt = WinPath.Ext(root);
             foreach (string name in names)
             {
