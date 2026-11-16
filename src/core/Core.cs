@@ -322,7 +322,8 @@ namespace ShieldGate
         };
 
         public static IEnumerable<TreeItem> Walk(string root, WalkStats stats = null,
-                                                 int maxFiles = 150000, int maxSeconds = 300)
+                                                 int maxFiles = 150000, int maxSeconds = 300,
+                                                 int maxDepth = int.MaxValue)
         {
             DateTime start = DateTime.UtcNow;
             Stack<KeyValuePair<string, int>> stack = new Stack<KeyValuePair<string, int>>();
@@ -362,7 +363,7 @@ namespace ShieldGate
                     item.Rel = full.Substring(root.Length).TrimStart('\\');
                     if (item.Rel.Length == 0) item.Rel = name;
                     yield return item;
-                    if (isDir) stack.Push(new KeyValuePair<string, int>(full, cur.Value + 1));
+                    if (isDir && cur.Value < maxDepth) stack.Push(new KeyValuePair<string, int>(full, cur.Value + 1));
                 }
             }
         }

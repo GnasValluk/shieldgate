@@ -779,6 +779,7 @@ namespace ShieldGate
                 HashSet<string> scanning = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 DateTime lastPolicy = DateTime.MinValue;
                 DateTime lastBeat = DateTime.MinValue;
+                DateTime lastRoot = DateTime.MinValue;
 
                 while (true)
                 {
@@ -803,20 +804,15 @@ namespace ShieldGate
                         {
                             if (known.Contains(vol)) continue;
                             known.Add(vol);
-                            lock (scanning)
-                            {
-                                if (scanning.Contains(vol)) continue;
-                                scanning.Add(vol);
-                            }
-                            string volume = vol;
-                            Thread t = new Thread(delegate()
-                            {
-                                try { ScanAndClean(volume); }
-                                catch (Exception e) { Log.Write(S.Log.VolumeError(volume, e.Message), "ERROR"); }
-                                finally { lock (scanning) scanning.Remove(volume); }
-                            });
-                            t.IsBackground = true;
-                            t.Start();
+                            StartVolumeScan(scanning, vol);
+                        }
+
+                        // O da cam van co the bi virus tren may ghi lai shortcut sau lan quet dau.
+                        // Kiem tra lai phan goc o moi 10 giay de don ngay khi no xuat hien.
+                        if ((now - lastRoot).TotalSeconds >= 10)
+                        {
+                            lastRoot = now;
+                            foreach (string vol in drives) StartRootCheck(scanning, vol);
                         }
                         known.RemoveWhere(delegate(string v) { return !drives.Contains(v); });
                     }
@@ -833,6 +829,60 @@ namespace ShieldGate
             {
                 if (mutex != null) { try { mutex.Dispose(); } catch { } }
             }
+        }
+
+        private static void StartVolumeScan(HashSet<string> scanning, string vol)
+        {
+            lock (scanning)
+            {
+                if (scanning.Contains(vol)) return;
+                scanning.Add(vol);
+            }
+            string volume = vol;
+            Thread t = new Thread(delegate()
+            {
+                try { ScanAndClean(volume); }
+                catch (Exception e) { Log.Write(S.Log.VolumeError(volume, e.Message), "ERROR"); }
+                finally { lock (scanning) scanning.Remove(volume); }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        private static void StartRootCheck(HashSet<string> scanning, string vol)
+        {
+            lock (scanning)
+            {
+                if (scanning.Contains(vol)) return;
+                scanning.Add(vol);
+            }
+            string volume = vol;
+            Thread t = new Thread(delegate()
+            {
+                try { CleanRoot(volume); }
+                catch (Exception e) { Log.Write(S.Log.VolumeError(volume, e.Message), "ERROR"); }
+                finally { lock (scanning) scanning.Remove(volume); }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        // Chi quet phan goc o: du de bat shortcut/thu muc gia vua bi ghi lai.
+        private static void CleanRoot(string volume)
+        {
+            UsbScanResult root = UsbScan.DetectRoot(volume);
+            List<UsbItem> auto = new List<UsbItem>();
+            foreach (UsbItem it in root.Items)
+                if (it.High) auto.Add(it);
+            if (auto.Count == 0) return;
+
+            int failed = 0, stopped = 0;
+            string batch = "";
+            UsbScan.Apply(root, auto, out failed, out batch, out stopped, null);
+            int done = auto.Count - failed;
+            int unhidden = 0;
+            if (done > 0) unhidden = UsbScan.Unhide(volume, null);
+            Log.Write(S.Log.AutoScan(volume, root.Files, root.Items.Count, done, failed, unhidden, stopped));
         }
 
         private static void ScanAndClean(string volume)

@@ -9,10 +9,11 @@ ShieldGate là công cụ nhỏ để chặn kiểu lây đó và dọn những 
 - Kiểm tra một ổ USB và liệt kê shortcut, script, autorun có dấu hiệu độc hại.
 - Để bạn xem danh sách trước, bỏ chọn tệp muốn giữ, rồi mới cách ly. Tệp bị cách ly vẫn khôi phục được.
 - Nhận ra **thư mục không tên** (nơi virus giấu dữ liệu) và **tệp .exe giả thư mục** (kiểu "Documents", "Docsument"). Khi bạn bấm **Cách ly**, tệp giả bị cách ly, dữ liệu trong thư mục không tên được chuyển ra gốc ổ (không ghi đè, trùng tên thì thêm `(1)`), rồi thư mục rỗng đó bị xoá.
-- Quét máy: ngoài script, còn bắt tệp chạy không chữ ký đặt thẳng trong AppData/Temp/ProgramData, tệp mạo danh tiến trình hệ thống (`svchost.exe`...) chạy ngoài thư mục Windows, và mục khởi động trỏ vào thùng rác hoặc USB.
+- Nhận ra **thư mục giả mạo** kiểu `Docusment` (gõ sai "Documents") có `desktop.ini` mang CLSID thư mục hệ thống, hoặc chứa **gói payload** đặc trưng (`1.exe`, `opera_elf.dll`, `adback.dat`, `link.dat`, `icudtl.dat`). Nhận diện theo cấu trúc, tên tệp và SHA256 của mẫu đã thu thập, nên virus đổi tên tệp vẫn bị bắt; chữ ký số hợp lệ của `1.exe` (bản Opera bị lợi dụng) không làm nó thoát.
+- Quét máy: ngoài script, còn bắt tệp chạy không chữ ký đặt thẳng trong AppData/Temp/ProgramData, tệp mạo danh tiến trình hệ thống (`svchost.exe`...) chạy ngoài thư mục Windows, mục khởi động trỏ vào thùng rác hoặc USB, shortcut/thư mục giả và dữ liệu bị ẩn ngay tại gốc các ổ, cùng đăng ký sự kiện WMI và liên kết `.lnk` bị virus sửa.
 - Có nút **Hiện tệp bị ẩn** để bỏ thuộc tính ẩn cho cả ổ, dùng khi virus đã giấu dữ liệu của bạn.
 - Tắt tự chạy của Windows, chặn tệp `autorun.inf`, và tùy chọn chặn Windows Script Host.
-- Chạy nền để kiểm tra USB ngay khi cắm vào, nếu bạn bật mục này. Bảo vệ nền chỉ tự cách ly dấu hiệu mạnh; mục yếu hơn để bạn xem lại, tránh xoá nhầm. Khi bảo vệ nền đang chạy, ShieldGate có biểu tượng trong khay hệ thống (vùng biểu tượng ẩn cạnh đồng hồ): nhấn đúp để mở ứng dụng, chuột phải để xem trạng thái, và bóng thông báo sẽ hiện khi vừa cách ly hoặc còn mục cần xem.
+- Chạy nền để kiểm tra USB ngay khi cắm vào, nếu bạn bật mục này. Bảo vệ nền chỉ tự cách ly dấu hiệu mạnh; mục yếu hơn để bạn xem lại, tránh xoá nhầm. Khi bảo vệ nền đang chạy, ShieldGate có biểu tượng trong khay hệ thống (vùng biểu tượng ẩn cạnh đồng hồ): nhấn đúp để mở ứng dụng, chuột phải để xem trạng thái, và bóng thông báo sẽ hiện khi vừa cách ly hoặc còn mục cần xem. Bảo vệ nền còn kiểm tra lại gốc các ổ di động mỗi 10 giây, nên shortcut và thư mục giả vừa được virus tạo ra sẽ bị dọn ngay cả khi không có sự kiện cắm USB mới.
 
 ## Chạy lần đầu
 
@@ -26,13 +27,23 @@ Lựa chọn được lưu ở `%LOCALAPPDATA%\ShieldGate\setup.ini`. Muốn ch�
 ## Dùng trên USB
 
 1. Chép `ShieldGate.exe` vào USB.
-2. Chạy tệp đó. Windows sẽ hỏi quyền quản trị — đồng ý, vì phần bảo vệ cần sửa thiết lập hệ thống.
+2. Chạy tệp đó. Giao diện và phần bảo vệ cần quyền quản trị nên Windows sẽ hỏi — đồng ý. Riêng `--scan`, `--status` và `--selftest` chạy được bằng quyền người dùng thường.
 3. Mở mục **Xử lý USB**, chọn ổ, bấm **Kiểm tra USB**.
 4. Xem danh sách. Bỏ chọn tệp bạn chắc là sạch, rồi bấm **Cách ly**.
 5. Nếu dữ liệu của bạn vẫn bị ẩn, bấm **Hiện tệp bị ẩn** ở mục **Xử lý USB**.
 6. Muốn lấy lại tệp đã cách ly, mở mục **Tổng quan** → **Khôi phục tệp**.
 
 Lần đầu dùng, nên mở **Bảo vệ** và bật ít nhất mục đầu tiên. Mục chặn Windows Script Host chỉ nên bật nếu máy không dùng phần mềm cần VBScript; nếu sau này có phần mềm trục trặc, tắt lại là Windows trở về cấu hình cũ.
+
+## Mẫu virus shortcut đã phân tích
+
+Kho mã có một mẫu thật (không đưa lên GitHub) dùng để kiểm tra. Mẫu hoạt động như sau:
+
+- Ở gốc ổ có `GnasValluk.lnk` (đặt tên theo nhãn ổ). Shortcut trỏ `cmd.exe` với tham số `/q /c "Docusment\1\1.exe 442 101"`, tức chạy một tệp nằm trong thư mục con bằng đường dẫn tương đối.
+- `Docusment` là thư mục gõ sai "Documents". `desktop.ini` của nó mang CLSID `{88C6C381-2E85-11D0-94DE-444553540000}` để Windows hiển thị như thư mục hệ thống.
+- Bên trong là gói payload chia theo thư mục `1\`, `2\`: `1.exe` (bản Opera có chữ ký số hợp lệ, bị lợi dụng), `opera_elf.dll`, `adback.dat`, `link.dat`, `icudtl.dat`.
+
+Vì `1.exe` có chữ ký hợp lệ, chỉ kiểm tra chữ ký sẽ bỏ sót. ShieldGate bắt theo cấu trúc shortcut + thư mục giả + tên/SHA256 của gói payload. Khi cách ly, toàn bộ cây `Docusment` được đưa vào vùng cách ly và shortcut bị xoá khỏi ổ, nên lần cắm sau không còn gì để chạy. Bộ kiểm tra `--selftest` dựng lại đúng cấu trúc này trong thư mục tạm.
 
 ## Dòng lệnh
 
@@ -47,6 +58,8 @@ ShieldGate.exe --selftest      tự kiểm tra trên USB giả trong thư mục 
 ```
 
 `--selftest` không sửa máy thật. Nó tạo một ổ giả, chạy các phép kiểm tra phát hiện, cách ly, khôi phục, rồi xóa thư mục tạm. Dùng lệnh này để kiểm tra bản tải về có chạy đúng trên máy bạn.
+
+`--scan`, `--status` và `--selftest` không cần quyền quản trị, nên chạy được trong script và giữ nguyên stdout khi chuyển hướng. Các lệnh `--install`, `--uninstall`, `--watch`, `--tray` và giao diện sẽ tự yêu cầu nâng quyền qua UAC. Tên lệnh chấp nhận cả có và không có dấu `--`.
 
 `--scan` trả mã thoát `0` khi ổ sạch, `2` khi tìm thấy mục cần xử lý, và `1` khi lệnh gặp lỗi. Nếu lần kiểm tra chạm giới hạn an toàn (150.000 tệp hoặc 300 giây), chương trình in cảnh báo rằng một phần ổ chưa được xem.
 
@@ -106,12 +119,12 @@ Bản PowerShell `legacy\4.8\ShieldGate_4.8.bat` vẫn được giữ nguyên. �
 
 ## Giới hạn đã biết
 
-- Chưa có số liệu đo trên bộ mẫu virus shortcut thật. Ngưỡng phát hành là báo nhầm dưới 0,5% và bỏ sót dưới 5%; khi có số liệu, kết quả sẽ nằm trong kho tài liệu.
-- Chương trình chỉ xử lý lây nhiễm qua USB. Nó không thay antivirus và không quét toàn bộ ổ hệ thống.
+- Mới có số liệu trên một mẫu virus shortcut thật (mẫu `GnasValluk`/`Docusment`), chưa phải bộ đo diện rộng. Ngưỡng phát hành là báo nhầm dưới 0,5% và bỏ sót dưới 5%; khi có thêm mẫu, kết quả sẽ nằm trong kho tài liệu.
+- Chương trình tập trung vào lây nhiễm qua USB và các dấu vết shortcut trên ổ. Nó không thay antivirus và không quét toàn bộ ổ hệ thống.
 - `--scan` dừng sau 150.000 tệp hoặc 300 giây để không treo trên ổ quá lớn; khi đó một phần ổ chưa được kiểm tra.
 - Bản phát hành chưa ký số. Windows SmartScreen có thể cảnh báo; hãy đối chiếu SHA256 trước khi chạy.
 - Không hỗ trợ ổ mạng, ổ quang, hay thiết bị MTP.
-- Cần quyền quản trị để mở, kể cả khi bạn chỉ muốn kiểm tra.
+- Cần quyền quản trị cho giao diện và phần bảo vệ; chỉ các lệnh `--scan`, `--status`, `--selftest` chạy được không cần nâng quyền.
 
 ## Giấy phép và đóng góp
 

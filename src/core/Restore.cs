@@ -84,6 +84,8 @@ namespace ShieldGate
         {
             if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path;
             if (path.StartsWith(@"\\", StringComparison.Ordinal)) return @"\\?\UNC\" + path.Substring(2);
+            try { if (!Path.IsPathRooted(path)) path = Path.GetFullPath(path); }
+            catch { }
             return @"\\?\" + path;
         }
 
@@ -245,26 +247,33 @@ namespace ShieldGate
             return rel.Substring(0, cut + 1) + Codes(rel.Substring(cut + 1));
         }
 
-        private static bool HasRiskyFile(string dirExt)
+        // Thu muc khong ten chi chua du lieu nguoi dung (khong co tep chay, shortcut,
+        // script) thi co the tu dong tra du lieu ra goc o ma khong so mat an toan.
+        public static bool HasRiskyContent(string dir)
         {
-            foreach (DirEntry e in WinPath.List(dirExt))
+            int seen = 0;
+            try
             {
-                if (e.IsDir) continue;
-                string ext = System.IO.Path.GetExtension(e.Name).ToLowerInvariant();
-                switch (ext)
+                foreach (TreeItem t in Tree.Walk(dir, null, 800, 5))
                 {
-                    case ".exe": case ".scr": case ".com": case ".pif": case ".lnk":
-                    case ".vbs": case ".vbe": case ".js": case ".jse": case ".wsf":
-                    case ".hta": case ".bat": case ".cmd":
-                        return true;
+                    if (t.IsDir) continue;
+                    if (++seen > 800) return true;
+                    switch (System.IO.Path.GetExtension(t.Name).ToLowerInvariant())
+                    {
+                        case ".exe": case ".scr": case ".com": case ".pif": case ".lnk":
+                        case ".vbs": case ".vbe": case ".js": case ".jse": case ".wsf":
+                        case ".hta": case ".bat": case ".cmd": case ".dll":
+                            return true;
+                    }
                 }
             }
+            catch { }
             return false;
         }
 
         // Thu muc gia ("Docsument", "Documents" ...) nam canh thu muc khong ten tren o da nhiem.
         // Ten go sai chinh ta (khong phai tu that) la dau hieu rieng; ten dung chi tinh khi
-        // trong do co tep chay.
+        // trong do co goi payload hoac desktop.ini gia dang thu muc he thong.
         public static List<string> FindFakeDirs(string root)
         {
             List<string> found = new List<string>();
@@ -273,10 +282,32 @@ namespace ShieldGate
             {
                 string name = kv.Value.Name;
                 if (IsNameless(name) || !LooksLikeFolderName(name)) continue;
-                bool exact = IsFolderWord(name);
-                if (!exact || HasRiskyFile(WinPath.Join(rootExt, kv.Key))) found.Add(kv.Key);
+                string full = WinPath.Join(rootExt, kv.Key);
+                Detect.FolderCheck check = Detect.CheckFolder(full, name);
+                if (check != null && (check.Strong || check.Code == "lookalike-folder"
+                                     || check.Code == "desktop-ini-clsid"))
+                    found.Add(kv.Key);
             }
             return found;
+        }
+
+        // Tra ve true khi ten la ban go sai cua mot ten thu muc thong dung
+        // (vd "Docusment" thay vi "Documents"), nhung khong phai chinh ten do.
+        // Chi xet ten du dai va trung hai ky tu dau de tranh bao nham cac ten
+        // that nhu "Proton" (gan voi "photos") hay "download".
+        public static bool IsMisspelledFolder(string name)
+        {
+            string n = (name ?? "").Trim().ToLowerInvariant();
+            if (n.Length < 8) return false;
+            foreach (string w in FolderWords)
+                if (n == w) return false;
+            foreach (string w in FolderWords)
+            {
+                if (w.Length < 8) continue;
+                if (n[0] != w[0] || n[1] != w[1]) continue;
+                if (Distance(n, w) <= 2) return true;
+            }
+            return false;
         }
 
         // Xoa thu muc boc ngoai (phan cha cua duong dan tuong doi) neu da rong.
@@ -291,19 +322,11 @@ namespace ShieldGate
             WinPath.RemoveDir(wrap);
         }
 
-        private static bool IsFolderWord(string name)
-        {
-            string n = (name ?? "").Trim().ToLowerInvariant();
-            foreach (string w in FolderWords)
-                if (n == w) return true;
-            return false;
-        }
-
         private static readonly string[] FolderWords =
         {
             "documents", "document", "my documents", "folder", "new folder", "pictures",
-            "photos", "images", "music", "videos", "downloads", "files", "data", "backup",
-            "tai lieu", "work"
+            "photos", "images", "music", "videos", "downloads", "download", "files",
+            "data", "backup", "tai lieu", "work"
         };
 
         // Tep .exe mang bieu tuong thu muc thuong dat ten giong thu muc that, hoac ten

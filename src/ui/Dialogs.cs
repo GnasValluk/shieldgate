@@ -127,6 +127,12 @@ namespace ShieldGate
                 case PcKind.Process: return S.Pc.Process(item.Arg1);
                 case PcKind.DroppedFile: return S.Pc.DroppedFile(item.Arg1);
                 case PcKind.FakeProcess: return S.Pc.FakeProcess(item.Arg1);
+                case PcKind.DriveShortcut: return S.Pc.DriveShortcut(item.Arg1);
+                case PcKind.DriveFakeFolder: return S.Pc.DriveFakeFolder(item.Arg1);
+                case PcKind.DriveHiddenFolder: return S.Pc.DriveHiddenFolder(item.Arg1);
+                case PcKind.DriveExe: return S.Pc.DriveExe(item.Arg1);
+                case PcKind.WmiConsumer: return S.Pc.WmiConsumer(item.Arg1);
+                case PcKind.LnkAssoc: return S.Pc.LnkAssoc(item.Arg1);
                 default: return S.Pc.Defender;
             }
         }

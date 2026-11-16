@@ -272,7 +272,14 @@ namespace ShieldGate
                 if (code == null) return "";
                 if (code.StartsWith("target=", StringComparison.Ordinal)) return DangerTarget(code.Substring(7));
                 if (code.StartsWith("args=", StringComparison.Ordinal)) return Args(code.Substring(5));
+                if (code.StartsWith("args-relative-exe=", StringComparison.Ordinal)) return RelativeExe(code.Substring(18));
+                if (code.StartsWith("args-drive-exe=", StringComparison.Ordinal)) return DriveExeArg(code.Substring(15));
                 if (code == "target-missing") return TargetMissing;
+                if (code == "target-on-drive") return TargetOnDrive;
+                if (code == "target-odd-name") return TargetOddName;
+                if (code == "target-in-hidden-folder") return TargetInHidden;
+                if (code == "target-in-fake-folder") return TargetInFake;
+                if (code == "named-after-drive") return NamedAfterDrive;
                 if (code == "unreadable-hidden") return UnreadableHidden;
                 if (code == "shadows-hidden-folder") return ShadowsHiddenFolder;
                 if (code.StartsWith("markers=", StringComparison.Ordinal)) return ScriptMarkers;
@@ -282,6 +289,10 @@ namespace ShieldGate
                 if (code == "nameless-folder") return NamelessFolder;
                 if (code == "fake-folder-exe") return FakeFolderExe;
                 if (code == "fake-folder-dir") return FakeFolderDir;
+                if (code == "lookalike-folder") return LookalikeFolder;
+                if (code == "desktop-ini-clsid") return DesktopIniClsid;
+                if (code == "fake-folder-clsid") return FakeFolderClsid;
+                if (code == "payload-bundle") return PayloadBundle;
                 return "";
             }
 
@@ -298,9 +309,20 @@ namespace ShieldGate
             public static string EncodedVbs { get { return T("Script VBScript đã bị mã hoá để tránh bị đọc.", "VBScript file is encoded to avoid inspection."); } }
             public static string AutorunPayload { get { return T("Tệp autorun sẽ tự chạy một chương trình khi cắm USB.", "The autorun file will launch a program when the USB drive is plugged in."); } }
             public static string NamelessFolder { get { return T("Thư mục không tên: virus giấu dữ liệu của bạn ở đây. Dữ liệu sẽ được chuyển ra gốc ổ rồi thư mục này bị xoá.", "Nameless folder: the virus hides your data here. The data will be moved to the drive root and this folder removed."); } }
-            public static string FakeFolderDir { get { return T("Thư mục giả mạo (tên gõ sai) nằm cạnh thư mục không tên. Nội dung sẽ được cách ly, khôi phục được.", "Fake folder (misspelled name) next to a nameless folder. Its contents will be quarantined and can be restored."); } }
+            public static string FakeFolderDir { get { return T("Thư mục giả mạo tên thư mục thông dụng (vd \"Docusment\" thay cho \"Documents\"). Nội dung sẽ được cách ly, khôi phục được.", "Fake folder with a misspelled common folder name (e.g. \"Docusment\" instead of \"Documents\"). Its contents will be quarantined and can be restored."); } }
             public static string FakeFolderExe { get { return T("Tệp chạy mang tên thư mục (bấm vào là chạy virus), không phải thư mục thật.", "An executable posing as a folder (opening it runs the virus), not a real folder."); } }
             public static string HiddenRootExe { get { return T("Tệp chạy bị ẩn ở gốc ổ — vị trí virus thường dùng.", "A hidden executable at the drive root — a location viruses often use."); } }
+            public static string RelativeExe(string payload) { return T("Shortcut chạy tệp bằng đường dẫn tương đối: " + payload, "Shortcut runs a file by a relative path: " + payload); }
+            public static string DriveExeArg(string payload) { return T("Shortcut chạy tệp nằm trên chính ổ này: " + payload, "Shortcut runs a file on this drive: " + payload); }
+            public static string TargetOnDrive { get { return T("Shortcut trỏ tới tệp trên chính ổ này.", "Shortcut points to a file on this drive."); } }
+            public static string TargetOddName { get { return T("Shortcut trỏ tới tệp chạy có tên dạng số (1.exe, 2.exe…).", "Shortcut points to an executable with a numeric name (1.exe, 2.exe…)."); } }
+            public static string TargetInHidden { get { return T("Shortcut trỏ vào một thư mục đang bị ẩn.", "Shortcut points into a hidden folder."); } }
+            public static string TargetInFake { get { return T("Shortcut trỏ vào thư mục giả mạo của virus.", "Shortcut points into the virus's fake folder."); } }
+            public static string NamedAfterDrive { get { return T("Shortcut mang đúng tên (nhãn) của ổ đĩa — chiêu cũ để bạn tưởng là biểu tượng ổ.", "Shortcut is named exactly like the drive label — an old trick to look like the drive icon."); } }
+            public static string LookalikeFolder { get { return T("Tên thư mục gõ sai gần giống thư mục thông dụng (vd \"Docusment\"). Kiểm tra kỹ trước khi cách ly.", "Folder name is a near-miss of a common folder name (e.g. \"Docusment\"). Check before quarantining."); } }
+            public static string DesktopIniClsid { get { return T("Thư mục có desktop.ini đặt CLSID để giả dạng thư mục hệ thống.", "Folder has a desktop.ini CLSID that makes it pose as a system folder."); } }
+            public static string FakeFolderClsid { get { return T("Thư mục giả dạng thư mục hệ thống bằng desktop.ini và có tên gõ sai. Nội dung sẽ được cách ly.", "Folder poses as a system folder via desktop.ini and has a misspelled name. Its contents will be quarantined."); } }
+            public static string PayloadBundle { get { return T("Thư mục chứa đúng bộ tệp của virus shortcut (1.exe, opera_elf.dll, adback.dat, link.dat, icudtl.dat). Nội dung sẽ được cách ly.", "Folder contains the shortcut virus payload set (1.exe, opera_elf.dll, adback.dat, link.dat, icudtl.dat). Its contents will be quarantined."); } }
         }
 
         public static class Protect
@@ -404,6 +426,7 @@ namespace ShieldGate
             public static string StageDrives { get { return T("Đang xem ổ đĩa đã cắm", "Checking plugged-in drives"); } }
             public static string StageTasks { get { return T("Đang xem tác vụ hẹn giờ", "Checking scheduled tasks"); } }
             public static string StageProcesses { get { return T("Đang xem tiến trình đang chạy", "Checking running processes"); } }
+            public static string StageWmi { get { return T("Đang xem đăng ký sự kiện WMI", "Checking WMI event subscriptions"); } }
             public static string StageDefender { get { return T("Đang xem bảo vệ của Windows", "Checking Windows protection"); } }
             public static string Clean { get { return T("Không phát hiện gì bất thường", "Nothing unusual found"); } }
             public static string CleanBody
@@ -433,6 +456,12 @@ namespace ShieldGate
             public static string StartupFile(string name) { return T("Tệp trong thư mục khởi động: " + name, "File in the startup folder: " + name); }
             public static string Task(string name) { return T("Tác vụ hẹn giờ đáng ngờ: " + name, "Suspicious scheduled task: " + name); }
             public static string Process(string name) { return T("Script đang chạy: " + name, "Script is running: " + name); }
+            public static string DriveShortcut(string name) { return T("Shortcut đáng ngờ trên ổ đĩa hoặc thư mục người dùng: " + name, "Suspicious shortcut on a drive or user folder: " + name); }
+            public static string DriveFakeFolder(string name) { return T("Thư mục giả mạo của virus trên ổ đĩa: " + name, "Virus fake folder on a drive: " + name); }
+            public static string DriveHiddenFolder(string name) { return T("Thư mục không tên giấu dữ liệu trên ổ đĩa: " + name, "Nameless folder hiding data on a drive: " + name); }
+            public static string DriveExe(string name) { return T("Tệp chạy giả dạng thư mục ở gốc ổ: " + name, "Executable posing as a folder at a drive root: " + name); }
+            public static string WmiConsumer(string name) { return T("Đăng ký sự kiện WMI có thể tự chạy mã độc: " + name, "WMI event subscription that can run malicious code: " + name); }
+            public static string LnkAssoc(string name) { return T("Kiểu tệp .lnk bị đổi để mọi shortcut chạy mã lạ: " + name, "The .lnk file type was changed so every shortcut runs foreign code: " + name); }
             public static string Defender { get { return T("Bảo vệ thời gian thực của Windows đang tắt", "Windows real-time protection is off"); } }
         }
 
@@ -874,6 +903,7 @@ namespace ShieldGate
         public static class Selftest
         {
             public static string RestoreNameless { get { return T("chuyển dữ liệu ra khỏi thư mục không tên, không ghi đè", "move data out of a nameless folder without overwriting"); } }
+            public static string FakeFolderDetected { get { return T("nhận ra cấu trúc virus: shortcut cmd + thư mục Docusment + payload", "recognise the virus structure: cmd shortcut + Docusment folder + payload"); } }
             public static string FakeUsb { get { return T("tạo được USB giả và shortcut thử", "create a fake USB drive and test shortcuts"); } }
             public static string Detected { get { return T("phát hiện đúng 3 mục độc hại", "detect exactly 3 malicious items"); } }
             public static string NoFalsePositive { get { return T("shortcut sạch không bị báo nhầm", "clean shortcut is not reported"); } }

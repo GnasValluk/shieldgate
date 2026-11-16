@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -12,6 +13,9 @@ namespace ShieldGate
     internal static class Program
     {
         private const string UiMutexName = AppInfo.UiMutexName;
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetStdHandle(int which);
 
         [STAThread]
         private static int Main(string[] args)
@@ -24,11 +28,25 @@ namespace ShieldGate
 
             string command = args.Length > 0 ? args[0].TrimStart('-').ToLowerInvariant() : "";
 
+            // Giao diện và các lệnh cài đặt cần quyền quản trị. Tự nâng quyền thay vì
+            // đặt requireAdministrator trong manifest: nếu manifest bắt buộc, Windows
+            // khởi chạy lại qua UAC và làm mất stdout khi người dùng chuyển hướng lệnh
+            // `ShieldGate.exe scan` ra tệp.
+            if (!Native.IsAdmin() && NeedsAdmin(command))
+            {
+                if (!RelaunchElevated(args))
+                {
+                    if (command.Length > 0) Console.WriteLine(S.Cli.AdminRequired);
+                    return 1;
+                }
+                return 0;
+            }
+
             if (command.Length > 0)
             {
-                // Chỉ gắn vào console của tiến trình cha khi stdout chưa bị
-                // chuyển hướng; AttachConsole sẽ ghi đè handle chuyển hướng.
-                if (!HasStdOut()) AttachConsole();
+                // Chỉ gắn vào console của tiến trình cha khi chưa có stdout (không bị
+                // chuyển hướng). Kiểm tra bằng handle thật của Win32.
+                if (!StdOutIsRedirected()) AttachConsole();
                 try { Console.OutputEncoding = Encoding.UTF8; } catch { }
                 try { Console.Title = S.Cli.ConsoleTitle; } catch { }
             }
@@ -167,9 +185,45 @@ namespace ShieldGate
         }
 
         // True khi stdout đã là tệp hoặc pipe do tiến trình gọi truyền vào.
-        private static bool HasStdOut()
+        private static bool StdOutIsRedirected()
         {
-            try { return Console.OpenStandardOutput() != Stream.Null; }
+            try
+            {
+                IntPtr h = GetStdHandle(-11);
+                return h != IntPtr.Zero && h != new IntPtr(-1);
+            }
+            catch { return false; }
+        }
+
+        private static bool NeedsAdmin(string command)
+        {
+            switch (command)
+            {
+                case "": case "install": case "uninstall": case "watch": case "tray":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool RelaunchElevated(string[] args)
+        {
+            try
+            {
+                StringBuilder sb = new StringBuilder();
+                foreach (string a in args)
+                {
+                    if (sb.Length > 0) sb.Append(' ');
+                    sb.Append('"').Append(a.Replace("\"", "\\\"")).Append('"');
+                }
+                System.Diagnostics.ProcessStartInfo psi =
+                    new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath);
+                psi.Arguments = sb.ToString();
+                psi.UseShellExecute = true;
+                psi.Verb = "runas";
+                System.Diagnostics.Process.Start(psi);
+                return true;
+            }
             catch { return false; }
         }
 
@@ -213,6 +267,8 @@ namespace ShieldGate
             }
 
             string root = args[1].Trim();
+            try { root = System.IO.Path.GetFullPath(root); }
+            catch { }
             if (!root.EndsWith("\\")) root += "\\";
 
             UsbScanResult result = UsbScan.Detect(root, null, null);

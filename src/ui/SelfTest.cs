@@ -25,7 +25,7 @@ namespace ShieldGate
             Environment.SetEnvironmentVariable("SHIELDGATE_HOME", root);
 
             int passed = 0;
-            int total = 16;
+            int total = 17;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -142,6 +142,50 @@ namespace ShieldGate
             catch (Exception e)
             {
                 check(S.Selftest.RestoreNameless, false);
+                Console.WriteLine("  " + e.Message);
+            }
+
+            // 9c. Cấu trúc virus thu thập được: LNK -> cmd /c "Docusment\1\1.exe"
+            //     cùng thư mục giả mạo có desktop.ini CLSID và bộ payload.
+            try
+            {
+                string usb3 = Path.Combine(root, "usb3");
+                string fake = Path.Combine(usb3, "Docusment");
+                Directory.CreateDirectory(Path.Combine(fake, "1"));
+                Directory.CreateDirectory(Path.Combine(fake, "2"));
+                File.WriteAllText(Path.Combine(fake, "desktop.ini"),
+                    "[.ShellClassInfo]\r\nCLSID={88C6C381-2E85-11D0-94DE-444553540000}\r\n",
+                    new UTF8Encoding(true));
+                File.WriteAllBytes(Path.Combine(fake, "1", "1.exe"), new byte[2048]);
+                File.WriteAllText(Path.Combine(fake, "1", "adback.dat"), "x");
+                File.WriteAllText(Path.Combine(fake, "1", "link.dat"), "");
+                File.WriteAllBytes(Path.Combine(fake, "1", "opera_elf.dll"), new byte[1024]);
+                File.WriteAllBytes(Path.Combine(fake, "2", "icudtl.dat"), new byte[1024]);
+                string driveLink = Path.Combine(usb3, "USB.lnk");
+                string cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+                bool madeDriveLink = MakeShortcut(driveLink, cmd,
+                    "/q /c \"Docusment\\1\\1.exe 442 101\"");
+
+                UsbScanResult fakeScan = UsbScan.Detect(usb3, null, null);
+                bool sawShortcut = false, sawArgs = false, sawFake = false, fakeStrong = false;
+                foreach (UsbItem it in fakeScan.Items)
+                {
+                    if (it.Kind == UsbKind.Shortcut)
+                    {
+                        sawShortcut = true;
+                        if (it.Codes.Contains("args-relative-exe=Docusment\\1\\1.exe")) sawArgs = true;
+                    }
+                    if (it.Kind == UsbKind.FakeFolder && it.FolderName == "Docusment")
+                    {
+                        sawFake = true;
+                        fakeStrong = it.High;
+                    }
+                }
+                check(S.Selftest.FakeFolderDetected, madeDriveLink && sawShortcut && sawArgs && sawFake && fakeStrong);
+            }
+            catch (Exception e)
+            {
+                check(S.Selftest.FakeFolderDetected, false);
                 Console.WriteLine("  " + e.Message);
             }
 

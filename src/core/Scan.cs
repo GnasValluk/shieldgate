@@ -111,6 +111,19 @@ namespace ShieldGate
 
         public static UsbScanResult Detect(string root, Action<int, string> progress, Func<bool> cancelled)
         {
+            return Detect(root, progress, cancelled, int.MaxValue);
+        }
+
+        // Quet nhanh chi o goc o (va cac thu muc con cap 1 de nhan dien thu muc gia).
+        // Dung cho kiem tra dinh ky khi USB dang cam va cho quet goc cac o tren may.
+        public static UsbScanResult DetectRoot(string root)
+        {
+            return Detect(root, null, null, 0);
+        }
+
+        public static UsbScanResult Detect(string root, Action<int, string> progress,
+                                           Func<bool> cancelled, int maxDepth)
+        {
             DateTime started = DateTime.UtcNow;
             UsbScanResult result = new UsbScanResult();
             result.Root = root;
@@ -120,7 +133,7 @@ namespace ShieldGate
             List<string> nameless = UsbRestore.FindNameless(root);
             List<TreeItem> rootExes = new List<TreeItem>();
 
-            foreach (TreeItem f in Tree.Walk(root, stats))
+            foreach (TreeItem f in Tree.Walk(root, stats, 150000, 300, maxDepth))
             {
                 if (cancelled != null && cancelled())
                 {
@@ -197,6 +210,7 @@ namespace ShieldGate
             }
 
             // Thu muc khong ten: noi virus giau du lieu that cua nguoi dung.
+            // Neu chi chua du lieu (khong co tep chay) thi co the tu chuyen ra goc o.
             foreach (string nm in nameless)
             {
                 UsbItem fi = new UsbItem();
@@ -205,26 +219,26 @@ namespace ShieldGate
                 fi.Kind = UsbKind.HiddenFolder;
                 fi.FolderName = nm;
                 fi.Codes.Add("nameless-folder");
-                fi.High = false;   // chuyen du lieu cua nguoi dung luon can ho dong y
+                fi.High = !UsbRestore.HasRiskyContent(fi.Path);
                 result.Items.Add(fi);
                 result.Folders++;
             }
 
-            // Thu muc gia (vd "Docsument") nam canh thu muc khong ten.
-            if (nameless.Count > 0)
+            // Thu muc gia (vd "Docusment") khong can thu muc khong ten di kem.
+            // Noi dung virus (payload) bi cach ly; du lieu nguoi dung duoc giu lai.
+            foreach (string fk in UsbRestore.FindFakeDirs(root))
             {
-                foreach (string fk in UsbRestore.FindFakeDirs(root))
-                {
-                    UsbItem fd = new UsbItem();
-                    fd.Path = System.IO.Path.Combine(root, fk);
-                    fd.Rel = fk;
-                    fd.Kind = UsbKind.FakeFolder;
-                    fd.FolderName = fk;
-                    fd.Codes.Add("fake-folder-dir");
-                    fd.High = false;
-                    result.Items.Add(fd);
-                    result.Folders++;
-                }
+                string full = System.IO.Path.Combine(root, fk);
+                ShieldGate.Detect.FolderCheck fc = ShieldGate.Detect.CheckFolder(full, System.IO.Path.GetFileName(fk));
+                UsbItem fd = new UsbItem();
+                fd.Path = full;
+                fd.Rel = fk;
+                fd.Kind = UsbKind.FakeFolder;
+                fd.FolderName = fk;
+                fd.Codes.Add(fc != null && fc.Code.Length > 0 ? fc.Code : "fake-folder-dir");
+                fd.High = fc != null && fc.Strong;
+                result.Items.Add(fd);
+                result.Folders++;
             }
 
             // Tep .exe gia thu muc ("Documents" co bieu tuong thu muc nhung la chuong trinh).
@@ -271,7 +285,11 @@ namespace ShieldGate
             {
                 if (r.StartsWith("target=", StringComparison.OrdinalIgnoreCase)) return true;
                 if (r.StartsWith("args=", StringComparison.OrdinalIgnoreCase)) return true;
+                if (r.StartsWith("args-relative-exe=", StringComparison.OrdinalIgnoreCase)) return true;
+                if (r.StartsWith("args-drive-exe=", StringComparison.OrdinalIgnoreCase)) return true;
                 if (r == "shadows-hidden-folder") return true;
+                if (r == "target-in-hidden-folder") return true;
+                if (r == "target-in-fake-folder") return true;
             }
             return false;
         }
@@ -342,7 +360,7 @@ namespace ShieldGate
             return done;
         }
 
-        private static int QuarantineTree(string dir, string root, string batch, ref int failed)
+        public static int QuarantineTree(string dir, string root, string batch, ref int failed)
         {
             int n = 0;
             List<string> dirs = new List<string>();
@@ -437,7 +455,9 @@ namespace ShieldGate
     {
         RunValue, WinlogonShell, WinlogonUserinit, AppInit,
         MountPoint, StartupFile, Task, Process, Defender,
-        DroppedFile, FakeProcess
+        DroppedFile, FakeProcess,
+        DriveShortcut, DriveFakeFolder, DriveHiddenFolder, DriveExe,
+        WmiConsumer, LnkAssoc
     }
 
     internal sealed class PcItem
@@ -599,6 +619,20 @@ namespace ShieldGate
 
             ScanDropDirs(list);
             ScanImpostors(list);
+            ScanOddProcesses(list);
+
+            // Cac o dia va thu muc nguoi dung: noi virus tha shortcut/thu muc gia
+            // va giau du lieu. Quet goc o de tim ban sao tren may bi nhiem.
+            if (cancelled != null && cancelled()) return list;
+            if (stage != null) stage(S.Pc.StageDrives);
+            ScanDriveRoots(list);
+            ScanUserFolders(list);
+
+            // WMI co the chay script moi khi cam USB ma khong co tien trinh thuong tru.
+            if (cancelled != null && cancelled()) return list;
+            if (stage != null) stage(S.Pc.StageWmi);
+            ScanWmi(list);
+            ScanLnkAssoc(list);
 
             if (stage != null) stage(S.Pc.StageDefender);
             try
@@ -713,6 +747,260 @@ namespace ShieldGate
             }
             catch { }
         }
+
+        // Tien trinh chay tu USB hoac tu thu muc nguoi dung voi ten dang so (1.exe,
+        // 2.exe...) va khong co chu ky: dau hieu payload cua virus shortcut.
+        private static void ScanOddProcesses(List<PcItem> findings)
+        {
+            try
+            {
+                string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                ManagementScope scope = new ManagementScope(@"\\.\root\cimv2");
+                scope.Connect();
+                ManagementObjectSearcher s = new ManagementObjectSearcher(scope, new ObjectQuery(
+                    "SELECT ProcessId, Name, ExecutablePath FROM Win32_Process"));
+                s.Options.Timeout = TimeSpan.FromSeconds(10);
+                foreach (ManagementBaseObject o in s.Get())
+                {
+                    ManagementObject mo = o as ManagementObject;
+                    if (mo == null) continue;
+                    try
+                    {
+                        string path = Convert.ToString(mo["ExecutablePath"]);
+                        if (string.IsNullOrEmpty(path)) continue;
+                        if (path.StartsWith(win + "\\", StringComparison.OrdinalIgnoreCase)) continue;
+                        string leaf = System.IO.Path.GetFileName(path).ToLowerInvariant();
+                        bool odd = Regex.IsMatch(leaf, @"^\d{1,3}\.(exe|scr|com|pif)$");
+                        bool removable = false;
+                        try
+                        {
+                            if (path.Length > 2 && path[1] == ':')
+                                removable = new DriveInfo(path.Substring(0, 1)).DriveType == DriveType.Removable;
+                        }
+                        catch { }
+                        if (!odd && !removable) continue;
+                        // Ung dung di dong co chu ky hop le (ke ca tren USB) khong phai
+                        // payload; ngoai le la tep trung ten/hash cua mau da thu thap.
+                        if (!odd && !ShieldGate.Detect.IsPayloadFile(path)
+                            && ShieldGate.Detect.IsSigned(path)) continue;
+                        int pid = Convert.ToInt32(mo["ProcessId"]);
+                        PcItem i = New(PcKind.FakeProcess, true, Convert.ToString(mo["Name"]),
+                                       path + "  [PID " + pid + "]" +
+                                       (removable ? " (chay tu USB)" : " (ten dang so)"));
+                        i.Data["pid"] = pid;
+                        findings.Add(i);
+                    }
+                    catch { }
+                    finally { try { mo.Dispose(); } catch { } }
+                }
+            }
+            catch { }
+        }
+
+        // Goc cac o dia: tim shortcut, thu muc gia, thu muc khong ten va tep chay gia dang
+        // ma virus shortcut de lai tren may bi nhiem (ke ca o he thong).
+        private static void ScanDriveRoots(List<PcItem> findings)
+        {
+            try
+            {
+                foreach (DriveInfo d in DriveInfo.GetDrives())
+                {
+                    try
+                    {
+                        if (!d.IsReady) continue;
+                        if (d.DriveType != DriveType.Fixed && d.DriveType != DriveType.Removable) continue;
+                        string root = d.RootDirectory.FullName;
+                        UsbScanResult r = UsbScan.DetectRoot(root);
+                        foreach (UsbItem it in r.Items)
+                        {
+                            if (it.Kind == UsbKind.FakeFolder)
+                            {
+                                // Tren o he thong, chi bao thu muc gia khi co bang chung
+                                // manh (payload/clsid). Ten chi hoi giong thu muc that
+                                // (vd "download") khong du de de xuat xoa ca cay thu muc.
+                                if (!it.High) continue;
+                                PcItem i = New(PcKind.DriveFakeFolder, it.High, it.FolderName,
+                                               it.Path + "  ->  " + string.Join("; ", it.Codes.ToArray()));
+                                i.Data["root"] = root;
+                                i.Data["folder"] = it.FolderName;
+                                findings.Add(i);
+                            }
+                            else if (it.Kind == UsbKind.HiddenFolder)
+                            {
+                                PcItem i = New(PcKind.DriveHiddenFolder, true,
+                                               S.Usb.NamelessLabel(UsbRestore.Display(it.FolderName)),
+                                               it.Path);
+                                i.Data["root"] = root;
+                                i.Data["folder"] = it.FolderName;
+                                findings.Add(i);
+                            }
+                            else if (it.Kind == UsbKind.Shortcut && it.High)
+                            {
+                                PcItem i = New(PcKind.DriveShortcut, true, System.IO.Path.GetFileName(it.Path),
+                                               it.Path + "  ->  " + string.Join("; ", it.Codes.ToArray()));
+                                i.Data["path"] = it.Path;
+                                i.Data["root"] = root;
+                                findings.Add(i);
+                            }
+                            else if (it.Kind == UsbKind.RootExe && it.High)
+                            {
+                                PcItem i = New(PcKind.DriveExe, true, System.IO.Path.GetFileName(it.Path),
+                                               it.Path + "  ->  " + string.Join("; ", it.Codes.ToArray()));
+                                i.Data["path"] = it.Path;
+                                i.Data["root"] = root;
+                                findings.Add(i);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        // Desktop / Documents / Downloads ...: virus tha shortcut va script tai day
+        // de nguoi dung bam nham, hoac de tu chay lai sau khi khoi dong.
+        private static void ScanUserFolders(List<PcItem> findings)
+        {
+            List<string> dirs = new List<string>();
+            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            AddDir(dirs, profile);
+            AddDir(dirs, Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+            AddDir(dirs, Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+            AddDir(dirs, Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
+            AddDir(dirs, Environment.GetFolderPath(Environment.SpecialFolder.MyMusic));
+            AddDir(dirs, Environment.GetFolderPath(Environment.SpecialFolder.MyVideos));
+            if (profile.Length > 0) AddDir(dirs, System.IO.Path.Combine(profile, "Downloads"));
+            string pub = Environment.GetEnvironmentVariable("PUBLIC");
+            if (!string.IsNullOrEmpty(pub)) AddDir(dirs, System.IO.Path.Combine(pub, "Desktop"));
+
+            foreach (string dir in dirs)
+            {
+                string[] files;
+                try { files = Directory.GetFiles(dir); }
+                catch { continue; }
+                foreach (string path in files)
+                {
+                    try
+                    {
+                        string ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+                        if (ext != ".lnk" && !ShieldGate.Detect.ScriptExts.Contains(ext)) continue;
+                        FileAttributes attrs = File.GetAttributes(path);
+                        List<string> why;
+                        bool bad = ext == ".lnk"
+                            ? ShieldGate.Detect.LnkVerdict(path, dir, attrs, out why)
+                            : ShieldGate.Detect.ScriptVerdict(path, attrs, 0, out why);
+                        if (!bad) continue;
+                        PcItem i = New(ext == ".lnk" ? PcKind.DriveShortcut : PcKind.DroppedFile,
+                                       true, System.IO.Path.GetFileName(path),
+                                       path + "  ->  " + string.Join("; ", why.ToArray()));
+                        i.Data["path"] = path;
+                        i.Data["root"] = dir;
+                        findings.Add(i);
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        private static void AddDir(List<string> dirs, string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+            foreach (string e in dirs)
+                if (string.Equals(e, dir, StringComparison.OrdinalIgnoreCase)) return;
+            dirs.Add(dir);
+        }
+
+        // WMI permanent event subscription: cach virus chay lai moi khi cam USB
+        // ma khong can tien trinh hay muc khoi dong nao.
+        private static void ScanWmi(List<PcItem> findings)
+        {
+            string[] classes = { "CommandLineEventConsumer", "ActiveScriptEventConsumer" };
+            ManagementScope scope = null;
+            try
+            {
+                scope = new ManagementScope(@"\\.\root\subscription");
+                scope.Connect();
+            }
+            catch { return; }
+
+            foreach (string cls in classes)
+            {
+                try
+                {
+                    ManagementObjectSearcher s = new ManagementObjectSearcher(scope,
+                        new ObjectQuery("SELECT * FROM " + cls));
+                    s.Options.Timeout = TimeSpan.FromSeconds(10);
+                    foreach (ManagementBaseObject o in s.Get())
+                    {
+                        ManagementObject mo = o as ManagementObject;
+                        if (mo == null) continue;
+                        try
+                        {
+                            string name = Convert.ToString(mo["Name"]);
+                            string action = cls == "CommandLineEventConsumer"
+                                ? (Convert.ToString(mo["ExecutablePath"]) + " " +
+                                   Convert.ToString(mo["CommandLineTemplate"])).Trim()
+                                : Convert.ToString(mo["ScriptText"]);
+                            ShieldGate.CommandCheck v = ShieldGate.Detect.CommandVerdict(action);
+                            bool high = cls == "ActiveScriptEventConsumer" || (v != null && v.High);
+                            PcItem i = New(PcKind.WmiConsumer, high, name,
+                                           cls + "  ->  " + Cut(action, 300));
+                            i.Data["class"] = cls;
+                            i.Data["name"] = name;
+                            findings.Add(i);
+                        }
+                        catch { }
+                        finally { try { mo.Dispose(); } catch { } }
+                    }
+                }
+                catch { }
+            }
+        }
+
+        // Virus doi chuong trinh mo tep .lnk de moi shortcut deu chay ma doc.
+        private static void ScanLnkAssoc(List<PcItem> findings)
+        {
+            object val;
+            RegistryValueKind kind;
+            string ext = @"Software\Classes\.lnk";
+            if (Reg.Read(RegistryHive.CurrentUser, ext, "", out val, out kind))
+            {
+                string prog = Convert.ToString(val);
+                if (!string.IsNullOrEmpty(prog)
+                    && !string.Equals(prog.Trim(), "lnkfile", StringComparison.OrdinalIgnoreCase))
+                {
+                    PcItem i = New(PcKind.LnkAssoc, true, ".lnk", ext + "  ->  " + prog);
+                    i.Data["hive"] = RegistryHive.CurrentUser;
+                    i.Data["path"] = ext;
+                    i.Data["name"] = "";
+                    findings.Add(i);
+                }
+            }
+
+            string uc = @"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.lnk\UserChoice";
+            if (Reg.Read(RegistryHive.CurrentUser, uc, "ProgId", out val, out kind))
+            {
+                string prog = Convert.ToString(val);
+                if (!string.IsNullOrEmpty(prog)
+                    && !string.Equals(prog.Trim(), "lnkfile", StringComparison.OrdinalIgnoreCase))
+                {
+                    PcItem i = New(PcKind.LnkAssoc, true, ".lnk", uc + "  ->  " + prog);
+                    i.Data["hive"] = RegistryHive.CurrentUser;
+                    i.Data["path"] = uc;
+                    i.Data["name"] = "ProgId";
+                    findings.Add(i);
+                }
+            }
+        }
+
+        private static string Cut(string s, int n)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            s = s.Replace("\r", " ").Replace("\n", " ").Trim();
+            return s.Length > n ? s.Substring(0, n) + "…" : s;
+        }
+
 
         private static void ScanStartupDir(string folder, List<PcItem> findings)
         {
@@ -853,6 +1141,33 @@ namespace ShieldGate
                         case PcKind.DroppedFile:
                             ok = Quarantine.Add(Str(f, "path"), Str(f, "root"), batch, "dropped", out err);
                             break;
+                        case PcKind.DriveShortcut:
+                        case PcKind.DriveExe:
+                            ok = Quarantine.Add(Str(f, "path"), Str(f, "root"), batch, "drive", out err);
+                            break;
+                        case PcKind.DriveFakeFolder:
+                            string folder = Str(f, "folder");
+                            string droot = Str(f, "root");
+                            int innerFail = 0;
+                            UsbScan.QuarantineTree(System.IO.Path.Combine(droot, folder), droot, batch, ref innerFail);
+                            UsbRestore.RemoveWrapper(droot, folder);
+                            ok = innerFail == 0;
+                            if (innerFail > 0) err = S.Err.Unknown;
+                            break;
+                        case PcKind.DriveHiddenFolder:
+                            RestoreResult rr = UsbRestore.Restore(Str(f, "root"),
+                                new List<string> { Str(f, "folder") }, null);
+                            ok = rr.DirsLeft == 0;
+                            if (!ok) err = S.Err.Unknown;
+                            break;
+                        case PcKind.WmiConsumer:
+                            ok = DeleteWmiConsumer(Str(f, "class"), Str(f, "name"));
+                            break;
+                        case PcKind.LnkAssoc:
+                            BackupReg(hive, Str(f, "path"));
+                            ok = Reg.DeleteValue(hive, Str(f, "path"), Str(f, "name"));
+                            if (!ok) ok = Reg.DeleteTree(hive, Str(f, "path"));
+                            break;
                         case PcKind.Process:
                         case PcKind.FakeProcess:
                             try
@@ -876,6 +1191,53 @@ namespace ShieldGate
         private static string Str(PcItem f, string key)
         {
             return f.Data.ContainsKey(key) ? Convert.ToString(f.Data[key]) : "";
+        }
+
+        // Xoá một WMI consumer cùng các binding trỏ tới nó. Đây là cách virus
+        // chạy lại theo sự kiện (cắm USB, đăng nhập) mà không cần tệp khởi động.
+        private static bool DeleteWmiConsumer(string cls, string name)
+        {
+            if (string.IsNullOrEmpty(cls) || string.IsNullOrEmpty(name)) return false;
+            try
+            {
+                ManagementScope scope = new ManagementScope(@"\\.\root\subscription");
+                scope.Connect();
+
+                ManagementObjectSearcher bs = new ManagementObjectSearcher(scope,
+                    new ObjectQuery("SELECT * FROM __FilterToConsumerBinding"));
+                bs.Options.Timeout = TimeSpan.FromSeconds(10);
+                foreach (ManagementBaseObject o in bs.Get())
+                {
+                    ManagementObject mo = o as ManagementObject;
+                    if (mo == null) continue;
+                    try
+                    {
+                        string consumer = Convert.ToString(mo["Consumer"]);
+                        if (!string.IsNullOrEmpty(consumer)
+                            && consumer.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0
+                            && consumer.IndexOf(cls, StringComparison.OrdinalIgnoreCase) >= 0)
+                            mo.Delete();
+                    }
+                    catch { }
+                    finally { try { mo.Dispose(); } catch { } }
+                }
+
+                string safe = name.Replace("'", "\\'");
+                ManagementObjectSearcher s = new ManagementObjectSearcher(scope,
+                    new ObjectQuery("SELECT * FROM " + cls + " WHERE Name='" + safe + "'"));
+                s.Options.Timeout = TimeSpan.FromSeconds(10);
+                bool ok = false;
+                foreach (ManagementBaseObject o in s.Get())
+                {
+                    ManagementObject mo = o as ManagementObject;
+                    if (mo == null) continue;
+                    try { mo.Delete(); ok = true; }
+                    catch { }
+                    finally { try { mo.Dispose(); } catch { } }
+                }
+                return ok;
+            }
+            catch { return false; }
         }
     }
 
