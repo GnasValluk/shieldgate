@@ -25,7 +25,7 @@ namespace ShieldGate
             Environment.SetEnvironmentVariable("SHIELDGATE_HOME", root);
 
             int passed = 0;
-            int total = 17;
+            int total = 19;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -186,6 +186,60 @@ namespace ShieldGate
             catch (Exception e)
             {
                 check(S.Selftest.FakeFolderDetected, false);
+                Console.WriteLine("  " + e.Message);
+            }
+
+            // 9d. Lệnh cmd bọc payload bị bắt; shortcut hợp lệ không bị báo nhầm.
+            try
+            {
+                CommandCheck bad = Detect.CommandVerdict(
+                    "cmd.exe /q /c \"Docusment\\1\\1.exe 442 101\"");
+                CommandCheck good = Detect.CommandVerdict(
+                    "C:\\Users\\x\\AppData\\Local\\Discord\\Update.exe --processStart Discord.exe");
+                check(S.Selftest.CommandVerdict, bad != null && bad.High && good == null);
+            }
+            catch (Exception e)
+            {
+                check(S.Selftest.CommandVerdict, false);
+                Console.WriteLine("  " + e.Message);
+            }
+
+            // 9e. Sửa máy: cách ly thư mục giả + shortcut trên một gốc ổ giả.
+            try
+            {
+                string pcroot = Path.Combine(root, "pcroot");
+                string fake = Path.Combine(pcroot, "Docusment");
+                Directory.CreateDirectory(Path.Combine(fake, "1"));
+                File.WriteAllBytes(Path.Combine(fake, "1", "1.exe"), new byte[2048]);
+                File.WriteAllText(Path.Combine(fake, "1", "adback.dat"), "x");
+                File.WriteAllText(Path.Combine(fake, "1", "link.dat"), "");
+                string lnk = Path.Combine(pcroot, "USB.lnk");
+                File.WriteAllText(lnk, "dummy");
+
+                List<PcItem> items = new List<PcItem>();
+                PcItem folder = new PcItem();
+                folder.Kind = PcKind.DriveFakeFolder;
+                folder.High = true;
+                folder.Arg1 = "Docusment";
+                folder.Data["root"] = pcroot;
+                folder.Data["folder"] = "Docusment";
+                items.Add(folder);
+                PcItem shortcut = new PcItem();
+                shortcut.Kind = PcKind.DriveShortcut;
+                shortcut.High = true;
+                shortcut.Arg1 = "USB.lnk";
+                shortcut.Data["path"] = lnk;
+                shortcut.Data["root"] = pcroot;
+                items.Add(shortcut);
+
+                int ok, fail;
+                PcScan.Fix(items, null, null, out ok, out fail);
+                check(S.Selftest.PcFixWorks,
+                      ok == 2 && fail == 0 && !Directory.Exists(fake) && !File.Exists(lnk));
+            }
+            catch (Exception e)
+            {
+                check(S.Selftest.PcFixWorks, false);
                 Console.WriteLine("  " + e.Message);
             }
 

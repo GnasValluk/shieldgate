@@ -45,6 +45,20 @@ Kho mã có một mẫu thật (không đưa lên GitHub) dùng để kiểm tra
 
 Vì `1.exe` có chữ ký hợp lệ, chỉ kiểm tra chữ ký sẽ bỏ sót. ShieldGate bắt theo cấu trúc shortcut + thư mục giả + tên/SHA256 của gói payload. Khi cách ly, toàn bộ cây `Docusment` được đưa vào vùng cách ly và shortcut bị xoá khỏi ổ, nên lần cắm sau không còn gì để chạy. Bộ kiểm tra `--selftest` dựng lại đúng cấu trúc này trong thư mục tạm.
 
+## Quét và sửa máy sau khi lỡ chạy virus
+
+Nếu đã bấm nhầm shortcut hoặc chạy tệp trên máy, mở **Tổng quan** → **Kiểm tra máy**. Phần này không chỉ xem vài mục khởi động; nó kiểm tra:
+
+- Run/RunOnce, `Winlogon\Shell`, `Userinit`, `AppInit_DLLs`, `MountPoints2` và thư mục Startup.
+- Tác vụ hẹn giờ, đăng ký sự kiện WMI (cách chạy lại khi cắm USB mà không cần tệp khởi động), và kiểu tệp `.lnk` bị đổi.
+- Tiến trình có tên dạng số, chạy từ USB, hoặc chạy bản sao của gói payload; tiến trình mạo danh tên hệ thống.
+- Bản sao `Docusment`/payload trong AppData, Temp, ProgramData, Public, Desktop, Documents, Downloads, Pictures, Music, Videos.
+- Shortcut, thư mục giả, thư mục không tên và tệp chạy giả thư mục ở gốc các ổ.
+
+Khi bấm **Sửa**, ShieldGate cách ly tệp/cả cây thư mục giả, xoá giá trị Run/Winlogon/MountPoints/`.lnk` độc hại, tắt tác vụ, xoá WMI consumer cùng binding, và dừng tiến trình liên quan. Mọi thao tác đều ghi nhật ký; tệp bị cách ly vẫn khôi phục được. Sau khi sửa, nên **Kiểm tra máy** lại để xác nhận sạch.
+
+Công cụ này tập trung vào virus shortcut và các cơ chế tự chạy phổ biến, **không thay antivirus**. Nếu payload thật đã chạy (đặc biệt khi Windows Defender bị tắt), hãy chạy thêm **Microsoft Defender Offline scan** và đổi mật khẩu các tài khoản quan trọng.
+
 ## Dòng lệnh
 
 ```
@@ -121,6 +135,7 @@ Bản PowerShell `legacy\4.8\ShieldGate_4.8.bat` vẫn được giữ nguyên. �
 
 - Mới có số liệu trên một mẫu virus shortcut thật (mẫu `GnasValluk`/`Docusment`), chưa phải bộ đo diện rộng. Ngưỡng phát hành là báo nhầm dưới 0,5% và bỏ sót dưới 5%; khi có thêm mẫu, kết quả sẽ nằm trong kho tài liệu.
 - Chương trình tập trung vào lây nhiễm qua USB và các dấu vết shortcut trên ổ. Nó không thay antivirus và không quét toàn bộ ổ hệ thống.
+- Chưa quét dịch vụ Windows, driver, IFEO/COM hijack hay ngoại lệ Defender do mã độc thêm vào; các cơ chế này hiếm gặp với virus shortcut nhưng nên kiểm tra thêm bằng antivirus nếu máy đã chạy payload lạ.
 - `--scan` dừng sau 150.000 tệp hoặc 300 giây để không treo trên ổ quá lớn; khi đó một phần ổ chưa được kiểm tra.
 - Bản phát hành chưa ký số. Windows SmartScreen có thể cảnh báo; hãy đối chiếu SHA256 trước khi chạy.
 - Không hỗ trợ ổ mạng, ổ quang, hay thiết bị MTP.

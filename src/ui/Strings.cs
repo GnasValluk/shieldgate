@@ -904,6 +904,8 @@ namespace ShieldGate
         {
             public static string RestoreNameless { get { return T("chuyển dữ liệu ra khỏi thư mục không tên, không ghi đè", "move data out of a nameless folder without overwriting"); } }
             public static string FakeFolderDetected { get { return T("nhận ra cấu trúc virus: shortcut cmd + thư mục Docusment + payload", "recognise the virus structure: cmd shortcut + Docusment folder + payload"); } }
+            public static string CommandVerdict { get { return T("bắt lệnh cmd bọc payload, không báo nhầm shortcut hợp lệ", "flag a cmd command wrapping a payload without false-positive shortcuts"); } }
+            public static string PcFixWorks { get { return T("cách ly thư mục giả và shortcut khi sửa máy", "quarantine the fake folder and shortcut during machine fix"); } }
             public static string FakeUsb { get { return T("tạo được USB giả và shortcut thử", "create a fake USB drive and test shortcuts"); } }
             public static string Detected { get { return T("phát hiện đúng 3 mục độc hại", "detect exactly 3 malicious items"); } }
             public static string NoFalsePositive { get { return T("shortcut sạch không bị báo nhầm", "clean shortcut is not reported"); } }

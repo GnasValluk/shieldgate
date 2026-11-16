@@ -618,6 +618,7 @@ namespace ShieldGate
             catch { }
 
             ScanDropDirs(list);
+            ScanPayloadTrees(list);
             ScanImpostors(list);
             ScanOddProcesses(list);
 
@@ -709,6 +710,122 @@ namespace ShieldGate
                     }
                     catch { }
                 }
+            }
+        }
+
+        // Ban sao goi payload/thu muc gia trong cac thu muc nguoi dung ghi duoc
+        // (AppData, Temp, ProgramData, Public). Virus thuong chep ca cay vao day
+        // de chay lai sau khi USB rut ra.
+        private static void ScanPayloadTrees(List<PcItem> findings)
+        {
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> seenDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (PcItem x in findings)
+            {
+                string p = Str(x, "path");
+                if (p.Length > 0) seen.Add(p);
+                if (x.Kind == PcKind.DriveFakeFolder)
+                {
+                    string fr = Str(x, "root"), ff = Str(x, "folder");
+                    if (fr.Length > 0 && ff.Length > 0)
+                        seenDirs.Add(System.IO.Path.Combine(fr, ff));
+                }
+            }
+
+            List<string> candidates = new List<string>(ShieldGate.Detect.DropDirs());
+            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (profile.Length > 0)
+                candidates.Add(System.IO.Path.Combine(profile, "Downloads"));
+            candidates.Add(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+            candidates.Add(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+            candidates.Add(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
+            candidates.Add(Environment.GetFolderPath(Environment.SpecialFolder.MyMusic));
+            candidates.Add(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos));
+
+            List<string> roots = new List<string>();
+            foreach (string d in candidates)
+            {
+                string dd = (d ?? "").TrimEnd('\\');
+                if (dd.Length == 0 || !Directory.Exists(dd)) continue;
+                bool under = false;
+                foreach (string r in roots)
+                    if (ShieldGate.Detect.IsUnder(dd, r)) { under = true; break; }
+                if (!under) roots.Add(dd);
+            }
+
+            foreach (string dir in roots)
+            {
+                List<string> fakeDirs = new List<string>();
+                List<TreeItem> files = new List<TreeItem>();
+                try
+                {
+                    foreach (TreeItem t in Tree.Walk(dir, null, 6000, 15, 4))
+                    {
+                        if (t.IsDir)
+                        {
+                            bool nested = false;
+                            foreach (string fd in fakeDirs)
+                                if (ShieldGate.Detect.IsUnder(t.Path, fd)) { nested = true; break; }
+                            if (nested) continue;
+                            ShieldGate.Detect.FolderCheck fc =
+                                ShieldGate.Detect.CheckFolder(t.Path, t.Name);
+                            if (fc == null || !fc.Strong) continue;
+                            if (!seenDirs.Add(t.Path))
+                            {
+                                // Thu muc da duoc bao o lan quet truoc (cac thu muc
+                                // nguoi dung long nhau); van ghi nho de bo qua tep ben trong.
+                                fakeDirs.Add(t.Path);
+                                continue;
+                            }
+                            PcItem i = New(PcKind.DriveFakeFolder, true, t.Name,
+                                           t.Path + "  ->  " + fc.Code);
+                            i.Data["root"] = System.IO.Path.GetDirectoryName(t.Path);
+                            i.Data["folder"] = t.Name;
+                            findings.Add(i);
+                            fakeDirs.Add(t.Path);
+                        }
+                        else files.Add(t);
+                    }
+                }
+                catch { }
+
+                foreach (TreeItem t in files)
+                {
+                    if (seen.Contains(t.Path)) continue;
+                    bool inFake = false;
+                    foreach (string fd in fakeDirs)
+                        if (ShieldGate.Detect.IsUnder(t.Path, fd)) { inFake = true; break; }
+                    if (inFake) continue;
+                    if (!ShieldGate.Detect.IsPayloadFile(t.Path)) continue;
+                    PcItem i = New(PcKind.DroppedFile, true, t.Name,
+                                   "payload-bundle  ->  " + t.Path);
+                    i.Data["path"] = t.Path;
+                    i.Data["root"] = System.IO.Path.GetDirectoryName(t.Path);
+                    findings.Add(i);
+                    seen.Add(t.Path);
+                }
+            }
+
+            // Goc ho so nguoi dung: chi xem cac thu muc con truc tiep, vi
+            // AppData/Desktop/Downloads da duoc quet o tren.
+            if (profile.Length > 0)
+            {
+                try
+                {
+                    foreach (TreeItem t in Tree.Walk(profile, null, 2000, 10, 0))
+                    {
+                        if (!t.IsDir || !seenDirs.Add(t.Path)) continue;
+                        ShieldGate.Detect.FolderCheck fc =
+                            ShieldGate.Detect.CheckFolder(t.Path, t.Name);
+                        if (fc == null || !fc.Strong) continue;
+                        PcItem i = New(PcKind.DriveFakeFolder, true, t.Name,
+                                       t.Path + "  ->  " + fc.Code);
+                        i.Data["root"] = profile;
+                        i.Data["folder"] = t.Name;
+                        findings.Add(i);
+                    }
+                }
+                catch { }
             }
         }
 

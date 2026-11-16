@@ -284,6 +284,7 @@ namespace ShieldGate
                 string ext = Path.GetExtension(exe).ToLowerInvariant();
                 if (ext != ".exe" && ext != ".scr" && ext != ".com" && ext != ".pif") return null;
                 string leaf = Path.GetFileName(exe);
+                if (Regex.IsMatch(leaf, @"^\d{1,3}\.(exe|scr|com|pif)$")) return "odd-exe-name";
                 string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
                 bool inWin = win.Length > 0 && exe.StartsWith(win + "\\", StringComparison.OrdinalIgnoreCase);
                 if (SystemNames.Contains(leaf) && !inWin) return "fake-system-name";
@@ -308,6 +309,62 @@ namespace ShieldGate
                         if (File.Exists(exe) && !IsSigned(exe)) return "unsigned-exe-in-drop-folder";
                         break;
                     }
+            }
+            catch { }
+            return null;
+        }
+
+        // Tep chay nam trong tham so (cmd /c "...", action cua task, gia tri Run).
+        // Chi bao khi duong dan dang ngo: tuong doi co ca thu muc, ten dang so,
+        // trung ten/hash payload, hoac nam trong thu muc nguoi dung ghi duoc,
+        // o di dong, thu muc an hay thu muc gia. Tep trong Program Files/Windows
+        // va ung dung co chu ky trong AppData duoc bo qua de tranh bao nham.
+        public static string EmbeddedExeReason(string value)
+        {
+            try
+            {
+                string exe = Environment.ExpandEnvironmentVariables((value ?? "").Trim().Trim('"', '\''));
+                if (exe.Length < 4) return null;
+                string leaf = Path.GetFileName(exe);
+                if (PayloadNames.Contains(leaf)) return "payload-file";
+                if (Regex.IsMatch(leaf, @"^\d{1,3}\.(exe|scr|com|pif)$")) return "odd-exe-name";
+
+                if (!Path.IsPathRooted(exe))
+                {
+                    if (exe.IndexOf('\\') < 0 && exe.IndexOf('/') < 0) return null;
+                    return "relative-exe-arg";
+                }
+
+                string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                if (win.Length > 0 && exe.StartsWith(win + "\\", StringComparison.OrdinalIgnoreCase))
+                    return null;
+                if (!File.Exists(exe)) return null;
+
+                if (IsPayloadFile(exe)) return "payload-file";
+                if (exe.Length > 2 && exe[1] == ':')
+                {
+                    try
+                    {
+                        if (new DriveInfo(exe.Substring(0, 1)).DriveType == DriveType.Removable)
+                            return "run-from-removable";
+                    }
+                    catch { }
+                }
+
+                string dir = Path.GetDirectoryName(exe);
+                if (string.IsNullOrEmpty(dir)) return null;
+                try
+                {
+                    if ((File.GetAttributes(dir) & FileAttributes.Hidden) != 0)
+                        return "exe-in-hidden-folder";
+                }
+                catch { }
+                FolderCheck fc = CheckFolder(dir, Path.GetFileName(dir));
+                if (fc != null && fc.Strong) return "exe-in-fake-folder";
+
+                foreach (string d in DropDirs())
+                    if (string.Equals(d.TrimEnd('\\'), dir.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                        return IsSigned(exe) ? null : "unsigned-exe-in-drop-folder";
             }
             catch { }
             return null;
@@ -403,7 +460,7 @@ namespace ShieldGate
             catch { return null; }
         }
 
-        private static bool IsUnder(string path, string root)
+        public static bool IsUnder(string path, string root)
         {
             string r = (root ?? "").TrimEnd('\\');
             if (r.Length == 0 || string.IsNullOrEmpty(path)) return false;
@@ -575,6 +632,45 @@ namespace ShieldGate
                 c.Reasons.Add(loc);
                 c.High = true;
             }
+
+            // Lenh boc tep chay khac trong tham so: cmd /c "Docusment\1\1.exe",
+            // action cua task hoac gia tri Run tro vao AppData/Temp/USB.
+            string primary = ExePathOf(cmd);
+            List<string> candidates = new List<string>();
+            List<string> quoted = new List<string>();
+            foreach (Match m in Regex.Matches(cmd, "\"([^\"]+\\.(exe|scr|com|pif))\""))
+            {
+                quoted.Add(m.Groups[1].Value);
+                candidates.Add(m.Groups[1].Value);
+            }
+            foreach (Match m in Regex.Matches(cmd, @"(?i)([^\s""']+\.(exe|scr|com|pif))"))
+            {
+                string part = m.Groups[1].Value;
+                bool insideQuoted = false;
+                foreach (string q in quoted)
+                    if (q.IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        insideQuoted = true;
+                        break;
+                    }
+                if (!insideQuoted) candidates.Add(part);
+            }
+            foreach (string raw in candidates)
+            {
+                string arg = raw.Trim('"', '\'');
+                if (arg.Length < 4) continue;
+                // Bo qua chinh lenh va cac manh cua duong dan co dau cach
+                // (vd "C:\Program Files\App\app.exe" bi cat thanh "Files\App\app.exe").
+                if (primary.Length > 0
+                    && (string.Equals(arg, primary, StringComparison.OrdinalIgnoreCase)
+                        || primary.IndexOf(arg, StringComparison.OrdinalIgnoreCase) >= 0))
+                    continue;
+                string reason = EmbeddedExeReason(arg);
+                if (reason != null && !c.Reasons.Contains(reason))
+                    c.Reasons.Add(reason);
+                if (reason != null) c.High = true;
+            }
+
             foreach (string[] p in HighPatterns)
                 if (Regex.IsMatch(cmd, p[0], RegexOptions.IgnoreCase))
                 {
