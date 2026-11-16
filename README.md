@@ -1,148 +1,129 @@
-# ShieldGate
+# ShieldGate 1.0
 
-Cắm USB vào một máy lạ, mở lên chỉ thấy một loạt shortcut, còn tệp thật thì biến mất hoặc bị ẩn. Đó là virus shortcut: nó giấu thư mục, tạo shortcut cùng tên để bạn bấm nhầm, rồi lây sang ổ khác.
+ShieldGate removes USB shortcut viruses on Windows. The virus hides folders, replaces them with shortcuts, and runs a payload from a hidden folder. ShieldGate scans the drive, quarantines what you select, and repairs the traces left on the PC.
 
-ShieldGate là công cụ nhỏ để chặn kiểu lây đó và dọn những gì đã bị tạo ra. Chương trình chạy trực tiếp từ USB, không cần cài, không gửi dữ liệu ra ngoài.
+Portable single `.exe`. No installer, no network access, no telemetry.
 
-## ShieldGate làm gì
+## What it detects
 
-- Kiểm tra một ổ USB và liệt kê shortcut, script, autorun có dấu hiệu độc hại.
-- Để bạn xem danh sách trước, bỏ chọn tệp muốn giữ, rồi mới cách ly. Tệp bị cách ly vẫn khôi phục được.
-- Nhận ra **thư mục không tên** (nơi virus giấu dữ liệu) và **tệp .exe giả thư mục** (kiểu "Documents", "Docsument"). Khi bạn bấm **Cách ly**, tệp giả bị cách ly, dữ liệu trong thư mục không tên được chuyển ra gốc ổ (không ghi đè, trùng tên thì thêm `(1)`), rồi thư mục rỗng đó bị xoá.
-- Nhận ra **thư mục giả mạo** kiểu `Docusment` (gõ sai "Documents") có `desktop.ini` mang CLSID thư mục hệ thống, hoặc chứa **gói payload** đặc trưng (`1.exe`, `opera_elf.dll`, `adback.dat`, `link.dat`, `icudtl.dat`). Nhận diện theo cấu trúc, tên tệp và SHA256 của mẫu đã thu thập, nên virus đổi tên tệp vẫn bị bắt; chữ ký số hợp lệ của `1.exe` (bản Opera bị lợi dụng) không làm nó thoát.
-- Quét máy: ngoài script, còn bắt tệp chạy không chữ ký đặt thẳng trong AppData/Temp/ProgramData, tệp mạo danh tiến trình hệ thống (`svchost.exe`...) chạy ngoài thư mục Windows, mục khởi động trỏ vào thùng rác hoặc USB, shortcut/thư mục giả và dữ liệu bị ẩn ngay tại gốc các ổ, cùng đăng ký sự kiện WMI và liên kết `.lnk` bị virus sửa.
-- Có nút **Hiện tệp bị ẩn** để bỏ thuộc tính ẩn cho cả ổ, dùng khi virus đã giấu dữ liệu của bạn.
-- Tắt tự chạy của Windows, chặn tệp `autorun.inf`, và tùy chọn chặn Windows Script Host.
-- **Bảo vệ Registry**: tự kiểm tra và sửa các khoá File Explorer quan trọng nếu virus phá hoại — lệnh mở thư mục (`Folder\shell\open\command` và `DelegateExecute`), liên kết `.exe`, và thiết lập hiện tệp ẩn. Mỗi lần sửa đều được `reg export` sao lưu trước.
-- Chạy nền để kiểm tra USB ngay khi cắm vào, nếu bạn bật mục này. Bảo vệ nền chỉ tự cách ly dấu hiệu mạnh; mục yếu hơn để bạn xem lại, tránh xoá nhầm. Khi bảo vệ nền đang chạy, ShieldGate có biểu tượng trong khay hệ thống (vùng biểu tượng ẩn cạnh đồng hồ): nhấn đúp để mở ứng dụng, chuột phải để xem trạng thái, và bóng thông báo sẽ hiện khi vừa cách ly hoặc còn mục cần xem. Bảo vệ nền còn kiểm tra lại gốc các ổ di động mỗi 10 giây, nên shortcut và thư mục giả vừa được virus tạo ra sẽ bị dọn ngay cả khi không có sự kiện cắm USB mới.
+On USB drives:
 
-## Chạy lần đầu
+- Shortcuts, scripts and `autorun.inf` that point at hidden folders, drive roots or odd payloads.
+- Nameless or hidden folders used to stash data, and hidden executables at drive roots.
+- Fake folder executables, `Documents`/`Docusment` lookalike folders with a system CLSID in `desktop.ini`, and known payload bundles (`1.exe`, `opera_elf.dll`, `adback.dat`, `link.dat`, `icudtl.dat`).
+- Matching uses shortcut structure, folder markers, file names and SHA256, so renamed payload files still match. `1.exe` is a validly signed Opera binary used as a decoy; a good signature alone does not clear it.
 
-Lần đầu mở ShieldGate, một cửa sổ thiết lập hiện ra để chọn:
+On the PC:
 
-- **Thư mục dữ liệu** — nơi lưu nhật ký, tệp cách ly và bản sao lưu. Mặc định `C:\ProgramData\ShieldGate`; có thể chọn thư mục khác.
-- **Ngôn ngữ** — Tiếng Việt hoặc English.
+- Run/RunOnce, `Winlogon` Shell/Userinit, `AppInit_DLLs`, `MountPoints2` and the Startup folder.
+- Scheduled tasks, WMI event subscriptions and modified `.lnk` files.
+- Unsigned executables in AppData/Temp/ProgramData, system process names running from the wrong folder, and processes started from USB or from payload copies.
+- Payload copies in user folders and at drive roots.
+- Explorer registry: the folder open command and `DelegateExecute`, `.exe` association, hidden-file setting, and policies for Folder Options, the context menu, Task Manager and `regedit`. `HKCU\Software\Classes` overrides that shadow machine keys are included.
 
-Lựa chọn được lưu ở `%LOCALAPPDATA%\ShieldGate\setup.ini`. Muốn chạy lại thiết lập, tắt bảo vệ, đóng ứng dụng, xóa tệp đó rồi mở lại.
+## What it does
 
-## Dùng trên USB
+- Shows findings first. Quarantine runs only on the items you keep selected, and can be undone.
+- Data inside a nameless folder moves to the drive root during quarantine. Nothing is overwritten; duplicates get `(1)`.
+- Fix removes malicious Run/Winlogon/MountPoints/`.lnk` values, disables tasks, deletes WMI consumers and bindings, and stops related processes. Every action is logged.
+- Registry repair runs `reg export` before changing a key.
+- **Unhide files** moves data out of nameless folders and clears the hidden attribute across a drive.
 
-1. Chép `ShieldGate.exe` vào USB.
-2. Chạy tệp đó. Giao diện và phần bảo vệ cần quyền quản trị nên Windows sẽ hỏi — đồng ý. Riêng `--scan`, `--status` và `--selftest` chạy được bằng quyền người dùng thường.
-3. Mở mục **Xử lý USB**, chọn ổ, bấm **Kiểm tra USB**.
-4. Xem danh sách. Bỏ chọn tệp bạn chắc là sạch, rồi bấm **Cách ly**.
-5. Nếu dữ liệu của bạn vẫn bị ẩn, bấm **Hiện tệp bị ẩn** ở mục **Xử lý USB**.
-6. Muốn lấy lại tệp đã cách ly, mở mục **Tổng quan** → **Khôi phục tệp**.
+## Protection
 
-Lần đầu dùng, nên mở **Bảo vệ** và bật ít nhất mục đầu tiên và **Bảo vệ Registry**. Mục chặn Windows Script Host chỉ nên bật nếu máy không dùng phần mềm cần VBScript; nếu sau này có phần mềm trục trặc, tắt lại là Windows trở về cấu hình cũ. Riêng Registry đã sửa thì được giữ nguyên khi tắt, vì trả lại giá trị hỏng sẽ làm hỏng lại File Explorer.
+Optional and off by default.
 
-## Mẫu virus shortcut đã phân tích
+- Disable AutoRun and block `autorun.inf`.
+- Block Windows Script Host. Turn this on only if you do not need VBScript.
+- Registry protection: keep checking Explorer keys, repair only damaged ones.
+- Background watch: scans a USB drive when it is plugged in, and rechecks removable drive roots every 10 seconds. Only high-confidence items are quarantined automatically. A tray icon shows that it is running.
 
-Kho mã có một mẫu thật (không đưa lên GitHub) dùng để kiểm tra. Mẫu hoạt động như sau:
+Registry fixes stay after protection is turned off. Restoring broken values would break Explorer again.
 
-- Ở gốc ổ có `GnasValluk.lnk` (đặt tên theo nhãn ổ). Shortcut trỏ `cmd.exe` với tham số `/q /c "Docusment\1\1.exe 442 101"`, tức chạy một tệp nằm trong thư mục con bằng đường dẫn tương đối.
-- `Docusment` là thư mục gõ sai "Documents". `desktop.ini` của nó mang CLSID `{88C6C381-2E85-11D0-94DE-444553540000}` để Windows hiển thị như thư mục hệ thống.
-- Bên trong là gói payload chia theo thư mục `1\`, `2\`: `1.exe` (bản Opera có chữ ký số hợp lệ, bị lợi dụng), `opera_elf.dll`, `adback.dat`, `link.dat`, `icudtl.dat`.
+## Run
 
-Vì `1.exe` có chữ ký hợp lệ, chỉ kiểm tra chữ ký sẽ bỏ sót. ShieldGate bắt theo cấu trúc shortcut + thư mục giả + tên/SHA256 của gói payload. Khi cách ly, toàn bộ cây `Docusment` được đưa vào vùng cách ly và shortcut bị xoá khỏi ổ, nên lần cắm sau không còn gì để chạy. Bộ kiểm tra `--selftest` dựng lại đúng cấu trúc này trong thư mục tạm.
+Get `ShieldGate.exe` from Releases, run it and accept the UAC prompt. First start asks for a data folder and a language (Vietnamese or English). The choice is stored in `%LOCALAPPDATA%\ShieldGate\setup.ini`. Delete that file to run setup again.
 
-## Quét và sửa máy sau khi lỡ chạy virus
+1. Open **USB scan**, choose a drive, click **Scan USB**.
+2. Clear the items you want to keep, then click **Quarantine**.
+3. If data is still hidden, use **Unhide files**.
+4. Restore quarantined files from **Overview**.
 
-Nếu đã bấm nhầm shortcut hoặc chạy tệp trên máy, mở **Tổng quan** → **Kiểm tra máy**. Phần này không chỉ xem vài mục khởi động; nó kiểm tra:
+To carry it on a USB drive, copy `ShieldGate.exe` to the drive. The GUI and protection need administrator rights. `--scan`, `--status` and `--selftest` do not.
 
-- Run/RunOnce, `Winlogon\Shell`, `Userinit`, `AppInit_DLLs`, `MountPoints2` và thư mục Startup.
-- Tác vụ hẹn giờ, đăng ký sự kiện WMI (cách chạy lại khi cắm USB mà không cần tệp khởi động), và kiểu tệp `.lnk` bị đổi.
-- Tiến trình có tên dạng số, chạy từ USB, hoặc chạy bản sao của gói payload; tiến trình mạo danh tên hệ thống.
-- Bản sao `Docusment`/payload trong AppData, Temp, ProgramData, Public, Desktop, Documents, Downloads, Pictures, Music, Videos.
-- Shortcut, thư mục giả, thư mục không tên và tệp chạy giả thư mục ở gốc các ổ.
-- **Registry của File Explorer**: lệnh mở thư mục và `DelegateExecute` (đúng trường hợp mất mã trong ảnh), liên kết `.exe`, thiết lập hiện tệp ẩn, cùng các policy khoá Folder Options, menu chuột phải, Task Manager và `regedit`. Mục nào bị hỏng sẽ hiện trong danh sách để bạn chọn sửa; khoá ghi đè trong `HKCU\Software\Classes` cũng được kiểm tra vì nó che khoá máy.
-
-Khi bấm **Sửa**, ShieldGate cách ly tệp/cả cây thư mục giả, xoá giá trị Run/Winlogon/MountPoints/`.lnk` độc hại, tắt tác vụ, xoá WMI consumer cùng binding, và dừng tiến trình liên quan. Mọi thao tác đều ghi nhật ký; tệp bị cách ly vẫn khôi phục được. Sau khi sửa, nên **Kiểm tra máy** lại để xác nhận sạch.
-
-Công cụ này tập trung vào virus shortcut và các cơ chế tự chạy phổ biến, **không thay antivirus**. Nếu payload thật đã chạy (đặc biệt khi Windows Defender bị tắt), hãy chạy thêm **Microsoft Defender Offline scan** và đổi mật khẩu các tài khoản quan trọng.
-
-## Dòng lệnh
+## Command line
 
 ```
-ShieldGate.exe                 mở giao diện
-ShieldGate.exe --status        xem trạng thái bảo vệ
-ShieldGate.exe --scan E:\      kiểm tra một ổ, chỉ đọc, không cách ly
-ShieldGate.exe --install       bật bảo vệ không cần mở giao diện
-ShieldGate.exe --uninstall     tắt bảo vệ, trả cấu hình cũ
-ShieldGate.exe --watch         chạy bảo vệ nền (dùng cho tác vụ hệ thống)
-ShieldGate.exe --selftest      tự kiểm tra trên USB giả trong thư mục tạm
+ShieldGate.exe                            GUI
+ShieldGate.exe --status                   protection state
+ShieldGate.exe --scan E:\                 read-only scan
+ShieldGate.exe --install                  install background protection
+ShieldGate.exe --install --blockscript    also block Windows Script Host
+ShieldGate.exe --uninstall                remove protection, restore Windows
+ShieldGate.exe --watch                    background worker, used by the task
+ShieldGate.exe --tray                     tray icon worker
+ShieldGate.exe --selftest                 self-test in a temp folder
 ```
 
-`--selftest` không sửa máy thật. Nó tạo một ổ giả, chạy các phép kiểm tra phát hiện, cách ly, khôi phục, rồi xóa thư mục tạm. Dùng lệnh này để kiểm tra bản tải về có chạy đúng trên máy bạn.
+- `--scan` exits `0` when clean, `2` when it finds items and `1` on error. It stops after 150,000 files or 300 seconds and reports that the drive was only partly checked.
+- `--selftest` writes only inside its temp folder. It covers detection, quarantine, restore, hidden folders, the payload bundle, registry checks, settings and logging. Current result: 22/22.
+- Flags work with `--` or `-`.
+- `--install`, `--uninstall`, `--watch`, `--tray` and the GUI request admin through UAC.
 
-`--scan`, `--status` và `--selftest` không cần quyền quản trị, nên chạy được trong script và giữ nguyên stdout khi chuyển hướng. Các lệnh `--install`, `--uninstall`, `--watch`, `--tray` và giao diện sẽ tự yêu cầu nâng quyền qua UAC. Tên lệnh chấp nhận cả có và không có dấu `--`.
+## Data
 
-`--scan` trả mã thoát `0` khi ổ sạch, `2` khi tìm thấy mục cần xử lý, và `1` khi lệnh gặp lỗi. Nếu lần kiểm tra chạm giới hạn an toàn (150.000 tệp hoặc 300 giây), chương trình in cảnh báo rằng một phần ổ chưa được xem.
-
-## Dữ liệu lưu ở đâu
-
-Mặc định: `C:\ProgramData\ShieldGate` (hoặc thư mục bạn chọn lần đầu).
+Default folder: `C:\ProgramData\ShieldGate`, falling back to `%LOCALAPPDATA%\ShieldGate`.
 
 ```
-settings.txt        thiết lập và số liệu lần kiểm tra
-guard.cfg           lựa chọn bảo vệ bạn đã đặt (bảo vệ nền chỉ áp phần đang bật)
-log\shieldgate.log  nhật ký hoạt động
-quarantine\         tệp đã cách ly
-backup\             bản sao cấu hình Windows trước khi bật bảo vệ
-bin\ShieldGate.exe  bản chạy nền, kèm SHA256
+settings.txt        settings and scan counters
+guard.cfg           protection choices
+last_scan.txt       last machine scan result
+log\shieldgate.log  activity log, rotated at 5 MB
+quarantine\         quarantined files and manifests
+backup\             Windows config and registry backups
+bin\ShieldGate.exe  background copy plus SHA256
 ```
 
-Thư mục dữ liệu được khoá quyền khi bảo vệ được bật: chỉ quản trị viên và SYSTEM ghi được; người dùng thường chỉ đọc phần cần thiết, còn `quarantine` và `backup` thì không đọc được. Nhờ vậy người dùng thường không thể thay tệp cấu hình mà chương trình đọc bằng quyền quản trị.
+While protection is on, the data folder is limited to Administrators and SYSTEM. Standard users get read access only where needed, not to `quarantine` or `backup`. Nothing leaves the machine.
 
-Nếu không ghi được vào `ProgramData`, chương trình dùng `%LOCALAPPDATA%\ShieldGate`. Không có dữ liệu nào rời khỏi máy.
+## Build
 
-## Tự dựng bản chạy
-
-Cần Windows có .NET Framework 4.0. Không cần Visual Studio.
+Needs Windows and the .NET Framework 4.0 compiler (`csc.exe`). Visual Studio is not required.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1
+powershell -ExecutionPolicy Bypass -File build.ps1   # dist\ShieldGate.exe
+powershell -ExecutionPolicy Bypass -File test.ps1    # self-test
 ```
 
-Kết quả là `dist\ShieldGate.exe`. Mã nguồn chia hai phần: `src\core\` là lõi, `src\ui\` là giao diện. Mọi câu chữ hiện ra nằm trong `src\ui\Strings.cs`, có hai ngôn ngữ Việt và Anh. Nhật ký cũng ghi theo ngôn ngữ đang chọn, nên bản tiếng Anh không bị lẫn câu tiếng Việt.
+The source is C# 5 and WinForms. `src\core` holds the logic, `src\ui` the interface. Every user-facing string is in `src\ui\Strings.cs` in both languages; the log follows the selected language.
 
-Chạy bộ kiểm tra lõi (không cần quyền quản trị, không đụng USB thật):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File test.ps1
-```
-
-Bộ kiểm tra dựng `dist\ShieldGate.Tests.exe`, tạo USB giả trong thư mục tạm, rồi kiểm tra phát hiện, cách ly, khôi phục, chống sửa bản cách ly, lưu thiết lập, giới hạn quét và ngôn ngữ nhật ký. Cấu hình CI trong `.github\workflows\build.yml` chạy cả hai lệnh trên Windows.
-
-Mã dùng C# 5 và WinForms, biên dịch bằng `csc.exe` của .NET Framework 4.0. Đây là lựa chọn có chủ ý để bản chạy được trên Windows 7 cũ mà không kéo theo runtime mới.
-
-## Cấu trúc kho mã
+CI (`.github\workflows\build.yml`) builds and runs the tests on Windows for every push.
 
 ```
-src\core\      lõi: đường dẫn, quét, cách ly, bảo vệ, cấu hình khởi động
-src\ui\        giao diện: năm màn hình, hộp thoại, thiết lập lần đầu, chuỗi hai ngôn ngữ
-tests\         điểm vào bộ tự kiểm tra lõi
-assets\        biểu tượng
-tools\         công cụ vẽ biểu tượng
-legacy\4.8\    bản PowerShell 4.8 chạy đơn, giữ để đối chiếu
-build.ps1      dựng dist\ShieldGate.exe
-test.ps1       dựng và chạy bộ tự kiểm tra lõi
+src\core\      paths, scanning, quarantine, protection, startup repair
+src\ui\        forms, dialogs, setup, strings
+tests\         self-test entry point
+assets\        icon
+tools\         icon generator
+legacy\4.8\    old single-file PowerShell version
+build.ps1      builds dist\ShieldGate.exe
+test.ps1       builds and runs the self-test
 ```
 
-## Bản 4.8 chạy đơn
+## Legacy 4.8
 
-Bản PowerShell `legacy\4.8\ShieldGate_4.8.bat` vẫn được giữ nguyên. Đây là bản chạy độc lập, không cần .NET, chỉ hiện lại tệp bị ẩn và xóa shortcut/script trong thư mục chứa nó. Xem `legacy\4.8\README.md`.
+`legacy\4.8\ShieldGate_4.8.bat` is the old standalone PowerShell script. It only removes shortcuts and scripts in its own folder. See `legacy\4.8\README.md`.
 
-## Giới hạn đã biết
+## Limits
 
-- Mới có số liệu trên một mẫu virus shortcut thật (mẫu `GnasValluk`/`Docusment`), chưa phải bộ đo diện rộng. Ngưỡng phát hành là báo nhầm dưới 0,5% và bỏ sót dưới 5%; khi có thêm mẫu, kết quả sẽ nằm trong kho tài liệu.
-- Chương trình tập trung vào lây nhiễm qua USB và các dấu vết shortcut trên ổ. Nó không thay antivirus và không quét toàn bộ ổ hệ thống.
-- Chưa quét dịch vụ Windows, driver, IFEO/COM hijack hay ngoại lệ Defender do mã độc thêm vào; phần Registry chỉ tập trung vào các khoá File Explorer và policy khoá chức năng sửa chữa. Các cơ chế còn lại nên kiểm tra thêm bằng antivirus nếu máy đã chạy payload lạ.
-- `--scan` dừng sau 150.000 tệp hoặc 300 giây để không treo trên ổ quá lớn; khi đó một phần ổ chưa được kiểm tra.
-- Bản phát hành chưa ký số. Windows SmartScreen có thể cảnh báo; hãy đối chiếu SHA256 trước khi chạy.
-- Không hỗ trợ ổ mạng, ổ quang, hay thiết bị MTP.
-- Cần quyền quản trị cho giao diện và phần bảo vệ; chỉ các lệnh `--scan`, `--status`, `--selftest` chạy được không cần nâng quyền.
+- Tuned on one real sample (`GnasValluk`/`Docusment`), not measured on a wide corpus. Release targets are under 0.5% false positives and under 5% misses; more samples will be added to the repo.
+- Not an antivirus. It does not scan the whole system drive and does not replace Defender.
+- It does not check services, drivers, IFEO/COM hijacks or Defender exclusions. Registry coverage is limited to Explorer keys and the policies that block repairs.
+- A scan can stop early at 150,000 files or 300 seconds.
+- The release is unsigned. SmartScreen may warn; compare the SHA256 before running.
+- No network, optical or MTP drives.
+- Windows 7 or later with .NET Framework 4.0.
 
-## Giấy phép và đóng góp
+## License
 
-Mã nguồn mở theo giấy phép MIT, xem [LICENSE](LICENSE). Báo lỗi và góp ý qua mục Issues của kho mã. Khi báo lỗi, ghi kèm phiên bản Windows, loại ổ USB và vài dòng cuối trong `shieldgate.log`.
+MIT. See [LICENSE](LICENSE). Report bugs in Issues; include the Windows version, drive type and the last lines of `shieldgate.log`.
