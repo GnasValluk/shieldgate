@@ -125,6 +125,8 @@ namespace ShieldGate
                 case PcKind.StartupFile: return S.Pc.StartupFile(item.Arg1);
                 case PcKind.Task: return S.Pc.Task(item.Arg1);
                 case PcKind.Process: return S.Pc.Process(item.Arg1);
+                case PcKind.DroppedFile: return S.Pc.DroppedFile(item.Arg1);
+                case PcKind.FakeProcess: return S.Pc.FakeProcess(item.Arg1);
                 default: return S.Pc.Defender;
             }
         }

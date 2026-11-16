@@ -176,14 +176,18 @@ namespace ShieldGate
             {
                 get
                 {
-                    return T("Bỏ thuộc tính ẩn cho mọi tệp và thư mục trên ổ. Dùng khi virus đã giấu dữ liệu của bạn.",
-                             "Clear the hidden attribute on every file and folder on the drive. Use this when a virus hid your data.");
+                    return T("Chuyển dữ liệu ra khỏi thư mục không tên và bỏ thuộc tính ẩn cho mọi tệp, thư mục trên ổ. Dùng khi virus đã giấu dữ liệu của bạn.",
+                             "Move data out of nameless folders and clear the hidden attribute on every file and folder on the drive. Use this when a virus hid your data.");
                 }
             }
             public static string Unhidden(int n)
             {
                 return T("Đã bỏ thuộc tính ẩn cho " + n + " mục. Thao tác này không hoàn tác tự động.",
                          "Unhid " + n + " items. This action is not undone automatically.");
+            }
+            public static string NamelessLabel(string codes)
+            {
+                return T("[Thư mục không tên " + codes + "]", "[Nameless folder " + codes + "]");
             }
             public static string UnhiddenNone { get { return T("Không có mục nào đang bị ẩn.", "No hidden items were found."); } }
             public static string Truncated(int files)
@@ -275,6 +279,9 @@ namespace ShieldGate
                 if (code == "encoded-vbscript") return EncodedVbs;
                 if (code == "autorun-payload") return AutorunPayload;
                 if (code == "hidden-root-exe") return HiddenRootExe;
+                if (code == "nameless-folder") return NamelessFolder;
+                if (code == "fake-folder-exe") return FakeFolderExe;
+                if (code == "fake-folder-dir") return FakeFolderDir;
                 return "";
             }
 
@@ -290,6 +297,9 @@ namespace ShieldGate
             public static string ScriptMarkers { get { return T("Script chứa lệnh tạo shortcut và ẩn tệp — dấu hiệu của virus shortcut.", "Script creates shortcuts and hides files — a sign of a shortcut virus."); } }
             public static string EncodedVbs { get { return T("Script VBScript đã bị mã hoá để tránh bị đọc.", "VBScript file is encoded to avoid inspection."); } }
             public static string AutorunPayload { get { return T("Tệp autorun sẽ tự chạy một chương trình khi cắm USB.", "The autorun file will launch a program when the USB drive is plugged in."); } }
+            public static string NamelessFolder { get { return T("Thư mục không tên: virus giấu dữ liệu của bạn ở đây. Dữ liệu sẽ được chuyển ra gốc ổ rồi thư mục này bị xoá.", "Nameless folder: the virus hides your data here. The data will be moved to the drive root and this folder removed."); } }
+            public static string FakeFolderDir { get { return T("Thư mục giả mạo (tên gõ sai) nằm cạnh thư mục không tên. Nội dung sẽ được cách ly, khôi phục được.", "Fake folder (misspelled name) next to a nameless folder. Its contents will be quarantined and can be restored."); } }
+            public static string FakeFolderExe { get { return T("Tệp chạy mang tên thư mục (bấm vào là chạy virus), không phải thư mục thật.", "An executable posing as a folder (opening it runs the virus), not a real folder."); } }
             public static string HiddenRootExe { get { return T("Tệp chạy bị ẩn ở gốc ổ — vị trí virus thường dùng.", "A hidden executable at the drive root — a location viruses often use."); } }
         }
 
@@ -418,6 +428,8 @@ namespace ShieldGate
             public static string WinlogonUserinit { get { return T("Quá trình đăng nhập bị chèn thêm chương trình", "Sign-in process has an extra program"); } }
             public static string AppInit { get { return T("Thư viện lạ được nạp vào mọi chương trình", "An unknown library is loaded into every program"); } }
             public static string MountPoint(string drive) { return T("Ổ " + drive + " tự chạy chương trình khi cắm vào", "Drive " + drive + " launches a program when plugged in"); }
+            public static string DroppedFile(string name) { return T("Tệp chạy đáng ngờ trong thư mục người dùng: " + name, "Suspicious executable in a user folder: " + name); }
+            public static string FakeProcess(string name) { return T("Tiến trình mạo danh hệ thống: " + name, "Process impersonating a system process: " + name); }
             public static string StartupFile(string name) { return T("Tệp trong thư mục khởi động: " + name, "File in the startup folder: " + name); }
             public static string Task(string name) { return T("Tác vụ hẹn giờ đáng ngờ: " + name, "Suspicious scheduled task: " + name); }
             public static string Process(string name) { return T("Script đang chạy: " + name, "Script is running: " + name); }
@@ -562,6 +574,26 @@ namespace ShieldGate
             {
                 return T("Cách ly " + done + " tệp từ " + root + " (lỗi " + failed + ")",
                          "Quarantined " + done + " files from " + root + " (" + failed + " errors)");
+            }
+            public static string RestoreCopied(string name, int code)
+            {
+                return T("\"" + name + "\" bị từ chối khi đổi chỗ (lỗi " + code + "), đã chuyển bằng cách sao chép rồi xoá bản gốc.",
+                         "\"" + name + "\" was refused a direct move (error " + code + "); moved by copying and deleting the original.");
+            }
+            public static string RestoreOriginalLeft(string name, int code)
+            {
+                return T("\"" + name + "\" đã được sao chép ra gốc ổ nhưng không xoá được bản gốc (lỗi đổi chỗ " + code + "). Bản gốc còn trong thư mục không tên.",
+                         "\"" + name + "\" was copied to the drive root but the original could not be deleted (move error " + code + "). The original remains in the nameless folder.");
+            }
+            public static string RestoreMoveFailed(string name, int code)
+            {
+                return T("Không chuyển được \"" + name + "\" ra gốc ổ (mã lỗi Windows " + code + ").",
+                         "Could not move \"" + name + "\" to the drive root (Windows error " + code + ").");
+            }
+            public static string Restored(int moved, int removed, string root, int failed)
+            {
+                return T("Đã chuyển " + moved + " mục ra gốc " + root + ", xoá " + removed + " thư mục không tên" + (failed > 0 ? ", " + failed + " mục lỗi" : "") + ".",
+                         "Moved " + moved + " item(s) to the root of " + root + ", removed " + removed + " nameless folder(s)" + (failed > 0 ? ", " + failed + " failed" : "") + ".");
             }
             public static string Unhidden(int count, string root)
             {
@@ -809,8 +841,8 @@ namespace ShieldGate
             {
                 get
                 {
-                    return T("Mọi tệp và thư mục trên ổ này sẽ bỏ thuộc tính ẩn. Thao tác này không xoá dữ liệu.",
-                             "Every file and folder on this drive will lose the hidden attribute. This does not delete anything.");
+                    return T("Dữ liệu trong thư mục không tên (nếu có) sẽ được chuyển ra gốc ổ rồi thư mục đó bị xoá; mọi tệp và thư mục sẽ bỏ thuộc tính ẩn. Không ghi đè: trùng tên thì thêm (1). Không xoá dữ liệu của bạn.",
+                             "Data inside nameless folders (if any) will be moved to the drive root and the empty folder removed; every file and folder will lose the hidden attribute. Nothing is overwritten: name clashes get (1). Your data is not deleted.");
                 }
             }
             public static string UnhideOk { get { return T("Hiện tệp", "Unhide files"); } }
@@ -841,6 +873,7 @@ namespace ShieldGate
         // Chỉ dùng cho phần tự kiểm tra trên dòng lệnh.
         public static class Selftest
         {
+            public static string RestoreNameless { get { return T("chuyển dữ liệu ra khỏi thư mục không tên, không ghi đè", "move data out of a nameless folder without overwriting"); } }
             public static string FakeUsb { get { return T("tạo được USB giả và shortcut thử", "create a fake USB drive and test shortcuts"); } }
             public static string Detected { get { return T("phát hiện đúng 3 mục độc hại", "detect exactly 3 malicious items"); } }
             public static string NoFalsePositive { get { return T("shortcut sạch không bị báo nhầm", "clean shortcut is not reported"); } }

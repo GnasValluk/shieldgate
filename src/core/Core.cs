@@ -447,7 +447,14 @@ namespace ShieldGate
                 error = e.Message;
                 // Nếu nguồn vẫn còn thì bản sao trong vùng cách ly là mồ côi.
                 try { if (File.Exists(path) && File.Exists(dest)) File.Delete(dest); } catch { }
-                return false;
+                // Antivirus (Defender) chặn đọc tệp này vì nó là mã độc: không sao lưu được,
+                // nên xoá thẳng khỏi ổ. Antivirus vẫn giữ bản của nó trong lịch sử bảo vệ.
+                if (IsVirusBlock(e) && RemoveFlagged(path))
+                {
+                    error = "";
+                    reason = reason + "; antivirus-blocked, deleted";
+                }
+                else return false;
             }
 
             string row = string.Join(",", new string[]
@@ -464,6 +471,28 @@ namespace ShieldGate
             catch { }
             Log.Write(S.Log.Quarantined(path, reason), "WARN");
             return true;
+        }
+
+        private static bool IsVirusBlock(Exception e)
+        {
+            // ERROR_VIRUS_INFECTED (225) và ERROR_VIRUS_DELETED (226).
+            try
+            {
+                int code = Marshal.GetHRForException(e) & 0xFFFF;
+                return code == 225 || code == 226;
+            }
+            catch { return false; }
+        }
+
+        private static bool RemoveFlagged(string path)
+        {
+            try
+            {
+                File.SetAttributes(path, FileAttributes.Normal);
+                File.Delete(path);
+                return !File.Exists(path);
+            }
+            catch { return false; }
         }
 
         public static List<BatchInfo> ListBatches()

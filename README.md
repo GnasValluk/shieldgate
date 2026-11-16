@@ -8,6 +8,8 @@ ShieldGate là công cụ nhỏ để chặn kiểu lây đó và dọn những 
 
 - Kiểm tra một ổ USB và liệt kê shortcut, script, autorun có dấu hiệu độc hại.
 - Để bạn xem danh sách trước, bỏ chọn tệp muốn giữ, rồi mới cách ly. Tệp bị cách ly vẫn khôi phục được.
+- Nhận ra **thư mục không tên** (nơi virus giấu dữ liệu) và **tệp .exe giả thư mục** (kiểu "Documents", "Docsument"). Khi bạn bấm **Cách ly**, tệp giả bị cách ly, dữ liệu trong thư mục không tên được chuyển ra gốc ổ (không ghi đè, trùng tên thì thêm `(1)`), rồi thư mục rỗng đó bị xoá.
+- Quét máy: ngoài script, còn bắt tệp chạy không chữ ký đặt thẳng trong AppData/Temp/ProgramData, tệp mạo danh tiến trình hệ thống (`svchost.exe`...) chạy ngoài thư mục Windows, và mục khởi động trỏ vào thùng rác hoặc USB.
 - Có nút **Hiện tệp bị ẩn** để bỏ thuộc tính ẩn cho cả ổ, dùng khi virus đã giấu dữ liệu của bạn.
 - Tắt tự chạy của Windows, chặn tệp `autorun.inf`, và tùy chọn chặn Windows Script Host.
 - Chạy nền để kiểm tra USB ngay khi cắm vào, nếu bạn bật mục này. Bảo vệ nền chỉ tự cách ly dấu hiệu mạnh; mục yếu hơn để bạn xem lại, tránh xoá nhầm. Khi bảo vệ nền đang chạy, ShieldGate có biểu tượng trong khay hệ thống (vùng biểu tượng ẩn cạnh đồng hồ): nhấn đúp để mở ứng dụng, chuột phải để xem trạng thái, và bóng thông báo sẽ hiện khi vừa cách ly hoặc còn mục cần xem.

@@ -2,3 +2,6 @@ dist/
 *.user
 *.suo
 .vs/
+
+# Mẫu virus thật: giữ trên máy để phân tích, không đưa mã độc lên GitHub.
+viruts/

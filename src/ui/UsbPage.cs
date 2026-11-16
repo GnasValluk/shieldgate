@@ -567,7 +567,13 @@ namespace ShieldGate
             Thread t = new Thread(delegate()
             {
                 int count = 0;
-                try { count = UsbScan.Unhide(drive, delegate { return _cancelFlag; }); }
+                try
+                {
+                    List<string> nameless = UsbRestore.FindNameless(drive);
+                    if (nameless.Count > 0)
+                        count += UsbRestore.Restore(drive, nameless, delegate { return _cancelFlag; }).Moved;
+                    count += UsbScan.Unhide(drive, delegate { return _cancelFlag; });
+                }
                 catch (Exception e) { Log.Write(S.Log.UnhideError(e.Message), "ERROR"); }
                 if (IsDisposed || !IsHandleCreated) return;
                 _unhiding = false;

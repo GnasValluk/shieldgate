@@ -25,7 +25,7 @@ namespace ShieldGate
             Environment.SetEnvironmentVariable("SHIELDGATE_HOME", root);
 
             int passed = 0;
-            int total = 15;
+            int total = 16;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -116,6 +116,34 @@ namespace ShieldGate
             int unhidden = UsbScan.Unhide(usb, null);
             bool visible = (File.GetAttributes(photo) & FileAttributes.Hidden) == 0;
             check(S.Selftest.Unhidden, unhidden > 0 && visible);
+
+            // 9b. Thư mục không tên: chuyển dữ liệu ra, không ghi đè, xoá thư mục rỗng
+            try
+            {
+                string usb2 = Path.Combine(root, "usb2");
+                string ghost = Path.Combine(usb2, "\u00A0");
+                Directory.CreateDirectory(Path.Combine(ghost, "Sub"));
+                File.WriteAllText(Path.Combine(ghost, "a.txt"), "trong", new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(ghost, "Sub", "b.txt"), "b", new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(usb2, "a.txt"), "goc", new UTF8Encoding(false));
+                File.SetAttributes(ghost, FileAttributes.Hidden | FileAttributes.System);
+                List<string> found = UsbRestore.FindNameless(usb2);
+                RestoreResult rr = UsbRestore.Restore(usb2, found, null);
+                // Directory.Exists cắt khoảng trắng cuối tên nên luôn thấy thư mục cha;
+                // kiểm tra bằng đường dẫn mở rộng của chính chương trình.
+                bool ghostGone = !WinPath.Exists(WinPath.Ext(ghost));
+                bool okRestore = found.Count == 1 && rr.Failed == 0 && rr.DirsRemoved == 1
+                    && ghostGone
+                    && File.ReadAllText(Path.Combine(usb2, "a.txt")) == "goc"
+                    && File.Exists(Path.Combine(usb2, "a (1).txt"))
+                    && File.Exists(Path.Combine(usb2, "Sub", "b.txt"));
+                check(S.Selftest.RestoreNameless, okRestore);
+            }
+            catch (Exception e)
+            {
+                check(S.Selftest.RestoreNameless, false);
+                Console.WriteLine("  " + e.Message);
+            }
 
             // 10. Thiết lập lưu và đọc lại
             Settings.SetDriveScan("Z:\\", 123, 4);

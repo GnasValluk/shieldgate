@@ -65,6 +65,106 @@ namespace ShieldGate
             new[] { @"\\appdata\\local\\temp\\|\\windows\\temp\\", "temp-path" }
         };
 
+        // Ten tien trinh he thong: chay ngoai thu muc Windows la gia mao.
+        public static readonly HashSet<string> SystemNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "svchost.exe", "csrss.exe", "lsass.exe", "services.exe", "smss.exe", "winlogon.exe",
+            "wininit.exe", "explorer.exe", "spoolsv.exe", "taskhost.exe", "taskhostw.exe",
+            "conhost.exe", "dwm.exe", "ctfmon.exe", "lsm.exe", "userinit.exe", "taskmgr.exe"
+        };
+
+        // Thu muc nguoi dung ghi duoc, noi virus hay tha tep chay.
+        public static List<string> DropDirs()
+        {
+            List<string> dirs = new List<string>();
+            string[] raw =
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                System.IO.Path.GetTempPath(),
+                Environment.GetEnvironmentVariable("PUBLIC")
+            };
+            foreach (string d in raw)
+            {
+                if (string.IsNullOrEmpty(d)) continue;
+                string t = d.TrimEnd('\\');
+                bool dup = false;
+                foreach (string e in dirs)
+                    if (string.Equals(e, t, StringComparison.OrdinalIgnoreCase)) dup = true;
+                if (!dup && Directory.Exists(t)) dirs.Add(t);
+            }
+            return dirs;
+        }
+
+        // Chi kiem tra tep co chu ky so hay khong (khong xac minh chuoi tin cay).
+        public static bool IsSigned(string path)
+        {
+            try
+            {
+                System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(path);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        private static string ExePathOf(string cmd)
+        {
+            string c = (cmd ?? "").Trim();
+            if (c.Length == 0) return "";
+            string p;
+            if (c[0] == '"')
+            {
+                int e = c.IndexOf('"', 1);
+                p = e > 1 ? c.Substring(1, e - 1) : c.Substring(1);
+            }
+            else
+            {
+                Match m = Regex.Match(c, @"^(.+?\.(exe|scr|com|pif))(\s|$)", RegexOptions.IgnoreCase);
+                p = m.Success ? m.Groups[1].Value : c.Split(' ')[0];
+            }
+            return Environment.ExpandEnvironmentVariables(p.Trim());
+        }
+
+        // Lenh khoi dong tro vao tep chay co vi tri / ten dang ngo, du khong co script.
+        public static string ExeLocationReason(string cmd)
+        {
+            try
+            {
+                string exe = ExePathOf(cmd);
+                if (exe.Length < 4) return null;
+                string ext = Path.GetExtension(exe).ToLowerInvariant();
+                if (ext != ".exe" && ext != ".scr" && ext != ".com" && ext != ".pif") return null;
+                string leaf = Path.GetFileName(exe);
+                string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                bool inWin = win.Length > 0 && exe.StartsWith(win + "\\", StringComparison.OrdinalIgnoreCase);
+                if (SystemNames.Contains(leaf) && !inWin) return "fake-system-name";
+
+                string low = exe.ToLowerInvariant();
+                if (low.Contains("\\$recycle.bin\\") || low.Contains("\\recycler\\")) return "run-from-recycler";
+
+                if (exe.Length > 2 && exe[1] == ':')
+                {
+                    try
+                    {
+                        if (new DriveInfo(exe.Substring(0, 1)).DriveType == DriveType.Removable)
+                            return "run-from-removable";
+                    }
+                    catch { }
+                }
+
+                string dir = (Path.GetDirectoryName(exe) ?? "").TrimEnd('\\');
+                foreach (string d in DropDirs())
+                    if (string.Equals(d, dir, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (File.Exists(exe) && !IsSigned(exe)) return "unsigned-exe-in-drop-folder";
+                        break;
+                    }
+            }
+            catch { }
+            return null;
+        }
+
         private static Encoding Cp1252()
         {
             try { return Encoding.GetEncoding(1252); }
@@ -249,6 +349,12 @@ namespace ShieldGate
         {
             if (string.IsNullOrWhiteSpace(cmd)) return null;
             CommandCheck c = new CommandCheck();
+            string loc = ExeLocationReason(cmd);
+            if (loc != null)
+            {
+                c.Reasons.Add(loc);
+                c.High = true;
+            }
             foreach (string[] p in HighPatterns)
                 if (Regex.IsMatch(cmd, p[0], RegexOptions.IgnoreCase))
                 {

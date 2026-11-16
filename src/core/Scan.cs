@@ -11,7 +11,7 @@ using Microsoft.Win32;
 
 namespace ShieldGate
 {
-    internal enum UsbKind { Shortcut, Script, Autorun, RootExe }
+    internal enum UsbKind { Shortcut, Script, Autorun, RootExe, HiddenFolder, FakeFolder }
 
     internal sealed class UsbItem
     {
@@ -20,6 +20,8 @@ namespace ShieldGate
         public UsbKind Kind;
         public List<string> Codes = new List<string>();
         public long Size;
+        // Chi dung cho HiddenFolder: ten that cua thu muc khong ten (co ky tu vo hinh).
+        public string FolderName;
         // Dấu hiệu đủ mạnh để bảo vệ nền tự cách ly mà không hỏi.
         public bool High;
 
@@ -40,6 +42,7 @@ namespace ShieldGate
         public int Scripts;
         public int Autoruns;
         public int RootExes;
+        public int Folders;
     }
 
     internal static class UsbScan
@@ -114,6 +117,8 @@ namespace ShieldGate
             result.Drive = root.Length >= 2 ? root.Substring(0, 2) : root;
             int seen = 0;
             WalkStats stats = new WalkStats();
+            List<string> nameless = UsbRestore.FindNameless(root);
+            List<TreeItem> rootExes = new List<TreeItem>();
 
             foreach (TreeItem f in Tree.Walk(root, stats))
             {
@@ -176,6 +181,7 @@ namespace ShieldGate
                 else if (f.Depth == 0 && (ext == ".exe" || ext == ".com" || ext == ".pif" || ext == ".scr"))
                 {
                     result.Warnings.Add(f.Name);
+                    rootExes.Add(f);
                 }
 
                 if (item != null)
@@ -187,6 +193,66 @@ namespace ShieldGate
                     else if (item.Kind == UsbKind.Script) result.Scripts++;
                     else if (item.Kind == UsbKind.Autorun) result.Autoruns++;
                     else result.RootExes++;
+                }
+            }
+
+            // Thu muc khong ten: noi virus giau du lieu that cua nguoi dung.
+            foreach (string nm in nameless)
+            {
+                UsbItem fi = new UsbItem();
+                fi.Path = System.IO.Path.Combine(root, nm);
+                fi.Rel = S.Usb.NamelessLabel(UsbRestore.Display(nm));
+                fi.Kind = UsbKind.HiddenFolder;
+                fi.FolderName = nm;
+                fi.Codes.Add("nameless-folder");
+                fi.High = false;   // chuyen du lieu cua nguoi dung luon can ho dong y
+                result.Items.Add(fi);
+                result.Folders++;
+            }
+
+            // Thu muc gia (vd "Docsument") nam canh thu muc khong ten.
+            if (nameless.Count > 0)
+            {
+                foreach (string fk in UsbRestore.FindFakeDirs(root))
+                {
+                    UsbItem fd = new UsbItem();
+                    fd.Path = System.IO.Path.Combine(root, fk);
+                    fd.Rel = fk;
+                    fd.Kind = UsbKind.FakeFolder;
+                    fd.FolderName = fk;
+                    fd.Codes.Add("fake-folder-dir");
+                    fd.High = false;
+                    result.Items.Add(fd);
+                    result.Folders++;
+                }
+            }
+
+            // Tep .exe gia thu muc ("Documents" co bieu tuong thu muc nhung la chuong trinh).
+            bool infected = nameless.Count > 0;
+            foreach (UsbItem x in result.Items)
+                if (x.High) infected = true;
+            foreach (TreeItem ex in rootExes)
+            {
+                string bn = System.IO.Path.GetFileNameWithoutExtension(ex.Name);
+                bool sameAsDir = false, dirHidden = false;
+                try
+                {
+                    string dp = System.IO.Path.Combine(root, bn);
+                    sameAsDir = Directory.Exists(dp);
+                    if (sameAsDir) dirHidden = (File.GetAttributes(dp) & FileAttributes.Hidden) != 0;
+                }
+                catch { }
+                bool folderLike = UsbRestore.LooksLikeFolderName(bn);
+                if ((sameAsDir && (dirHidden || infected)) || (infected && folderLike))
+                {
+                    UsbItem fx = MakeItem(ex, UsbKind.RootExe);
+                    fx.Codes.Add("fake-folder-exe");
+                    fx.High = true;
+                    try { fx.Size = new FileInfo(fx.Path).Length; }
+                    catch { }
+                    result.Items.Add(fx);
+                    result.RootExes++;
+                    result.Warnings.Remove(ex.Name);
                 }
             }
 
@@ -228,9 +294,23 @@ namespace ShieldGate
             stopped = StopProcesses(scan.Root);
             batch = Quarantine.NewBatch("usb_" + (scan.Drive.Length > 0 ? scan.Drive.Substring(0, 1) : "x"), "");
             int done = 0;
+            List<string> folders = new List<string>();
+            List<string> fakes = new List<string>();
             for (int i = 0; i < selected.Count; i++)
             {
                 UsbItem it = selected[i];
+                if (it.Kind == UsbKind.FakeFolder)
+                {
+                    fakes.Add(it.FolderName);
+                    if (progress != null) progress(i + 1);
+                    continue;
+                }
+                if (it.Kind == UsbKind.HiddenFolder)
+                {
+                    folders.Add(it.FolderName);
+                    if (progress != null) progress(i + 1);
+                    continue;
+                }
                 string err;
                 if (Quarantine.Add(it.Path, scan.Root, batch, KindName(it.Kind), out err))
                     done++;
@@ -241,8 +321,68 @@ namespace ShieldGate
                 }
                 if (progress != null) progress(i + 1);
             }
+
+            // Thu muc gia: cach ly tung tep (khoi phuc duoc), roi go thu muc rong.
+            foreach (string fk in fakes)
+            {
+                done += QuarantineTree(System.IO.Path.Combine(scan.Root, fk), scan.Root, batch, ref failed);
+                UsbRestore.RemoveWrapper(scan.Root, fk);
+            }
+
+            // Tra du lieu tu thu muc khong ten ra goc o, roi xoa thu muc rong do.
+            if (folders.Count > 0)
+            {
+                RestoreResult rr = UsbRestore.Restore(scan.Root, folders, null);
+                done += rr.DirsRemoved;
+                failed += rr.DirsLeft;
+                if (rr.Moved > 0) done += SweepRestored(scan.Root, batch);
+            }
+
             Log.Write(S.Log.QuarantineSummary(done, scan.Root, failed));
             return done;
+        }
+
+        private static int QuarantineTree(string dir, string root, string batch, ref int failed)
+        {
+            int n = 0;
+            List<string> dirs = new List<string>();
+            foreach (TreeItem t in Tree.Walk(dir))
+            {
+                if (t.IsDir) { dirs.Add(t.Path); continue; }
+                string err;
+                if (Quarantine.Add(t.Path, root, batch, "fake-folder", out err)) n++;
+                else
+                {
+                    failed++;
+                    Log.Write(S.Log.QuarantineFailed(t.Path, err), "ERROR");
+                }
+            }
+            dirs.Sort(delegate(string a, string b) { return b.Length.CompareTo(a.Length); });
+            foreach (string d in dirs)
+            {
+                try { File.SetAttributes(d, FileAttributes.Normal); Directory.Delete(d, false); }
+                catch { }
+            }
+            bool removed = false;
+            try { File.SetAttributes(dir, FileAttributes.Normal); Directory.Delete(dir, false); removed = true; }
+            catch { }
+            return n > 0 ? n : (removed ? 1 : 0);
+        }
+
+        // Sau khi du lieu ra ngoai, quet lai va cach ly nhung dau hieu manh (shortcut /
+        // script / autorun) vua lo ra. Khong dong vao tep .exe de khong xoa nham phan mem that.
+        private static int SweepRestored(string root, string batch)
+        {
+            int n = 0;
+            UsbScanResult again = UsbScan.Detect(root, null, null);
+            foreach (UsbItem it in again.Items)
+            {
+                if (!it.High) continue;
+                if (it.Kind != UsbKind.Shortcut && it.Kind != UsbKind.Script && it.Kind != UsbKind.Autorun) continue;
+                string err;
+                if (Quarantine.Add(it.Path, root, batch, KindName(it.Kind), out err)) n++;
+            }
+            return n;
         }
 
         private static string KindName(UsbKind kind)
@@ -296,7 +436,8 @@ namespace ShieldGate
     internal enum PcKind
     {
         RunValue, WinlogonShell, WinlogonUserinit, AppInit,
-        MountPoint, StartupFile, Task, Process, Defender
+        MountPoint, StartupFile, Task, Process, Defender,
+        DroppedFile, FakeProcess
     }
 
     internal sealed class PcItem
@@ -456,6 +597,9 @@ namespace ShieldGate
             }
             catch { }
 
+            ScanDropDirs(list);
+            ScanImpostors(list);
+
             if (stage != null) stage(S.Pc.StageDefender);
             try
             {
@@ -501,6 +645,73 @@ namespace ShieldGate
                 ManagementObject mo = o as ManagementObject;
                 if (mo != null) yield return mo;
             }
+        }
+
+        // Tep .exe tha thang vao AppData / Temp / ProgramData: cach virus shortcut hay dung.
+        private static void ScanDropDirs(List<PcItem> findings)
+        {
+            foreach (string dir in ShieldGate.Detect.DropDirs())
+            {
+                string[] files;
+                try { files = Directory.GetFiles(dir); }
+                catch { continue; }
+                foreach (string path in files)
+                {
+                    try
+                    {
+                        string ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+                        if (ext != ".exe" && ext != ".scr" && ext != ".com" && ext != ".pif") continue;
+                        string leaf = System.IO.Path.GetFileName(path).ToLowerInvariant();
+                        FileAttributes a = File.GetAttributes(path);
+                        bool hid = (a & (FileAttributes.Hidden | FileAttributes.System)) != 0;
+                        string why = null;
+                        if (ShieldGate.Detect.SystemNames.Contains(leaf)) why = "fake-system-name";
+                        else if (hid && !ShieldGate.Detect.IsSigned(path)) why = "hidden-unsigned-exe";
+                        if (why == null) continue;
+                        PcItem i = New(PcKind.DroppedFile, true, System.IO.Path.GetFileName(path), why + "  ->  " + path);
+                        i.Data["path"] = path;
+                        i.Data["root"] = dir;
+                        findings.Add(i);
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        // Tien trinh mang ten tien trinh he thong (svchost.exe...) nhung chay ngoai thu muc Windows.
+        private static void ScanImpostors(List<PcItem> findings)
+        {
+            try
+            {
+                string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                List<string> conds = new List<string>();
+                foreach (string n in ShieldGate.Detect.SystemNames) conds.Add("Name='" + n + "'");
+                ManagementScope scope = new ManagementScope(@"\\.\root\cimv2");
+                scope.Connect();
+                ManagementObjectSearcher s = new ManagementObjectSearcher(scope, new ObjectQuery(
+                    "SELECT ProcessId, Name, ExecutablePath FROM Win32_Process WHERE " +
+                    string.Join(" OR ", conds.ToArray())));
+                s.Options.Timeout = TimeSpan.FromSeconds(10);
+                foreach (ManagementBaseObject o in s.Get())
+                {
+                    ManagementObject mo = o as ManagementObject;
+                    if (mo == null) continue;
+                    try
+                    {
+                        string path = Convert.ToString(mo["ExecutablePath"]);
+                        if (string.IsNullOrEmpty(path)) continue;
+                        if (path.StartsWith(win + "\\", StringComparison.OrdinalIgnoreCase)) continue;
+                        int pid = Convert.ToInt32(mo["ProcessId"]);
+                        PcItem i = New(PcKind.FakeProcess, true, Convert.ToString(mo["Name"]),
+                                       path + "  [PID " + pid + "]");
+                        i.Data["pid"] = pid;
+                        findings.Add(i);
+                    }
+                    catch { }
+                    finally { try { mo.Dispose(); } catch { } }
+                }
+            }
+            catch { }
         }
 
         private static void ScanStartupDir(string folder, List<PcItem> findings)
@@ -639,7 +850,11 @@ namespace ShieldGate
                             ok = Native.Run("schtasks.exe", "/Change /TN \"" + tn + "\" /DISABLE", 20000, out outp) == 0;
                             err = outp;
                             break;
+                        case PcKind.DroppedFile:
+                            ok = Quarantine.Add(Str(f, "path"), Str(f, "root"), batch, "dropped", out err);
+                            break;
                         case PcKind.Process:
+                        case PcKind.FakeProcess:
                             try
                             {
                                 using (Process p = Process.GetProcessById(Convert.ToInt32(f.Data["pid"])))
