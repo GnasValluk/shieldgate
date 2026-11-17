@@ -124,6 +124,14 @@ namespace ShieldGate
             RefreshAsync();
         }
 
+        // Trang Tổng quan được tạo trước khi cửa sổ có handle, nên lần làm mới
+        // đầu bị bỏ. Có handle thì chạy lại để trạng thái không bị trống.
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            RefreshAsync();
+        }
+
         // ------------------------------------------------------------ trạng thái
 
         private void UpdateState()
@@ -304,7 +312,7 @@ namespace ShieldGate
 
         private void RefreshAsync()
         {
-            if (_refreshing) return;
+            if (_refreshing || !IsHandleCreated) return;
             _refreshing = true;
 
             Thread t = new Thread(delegate()
@@ -316,7 +324,11 @@ namespace ShieldGate
                 try { drives = Native.RemovableDrives(); }
                 catch { }
 
-                if (IsDisposed || !IsHandleCreated) return;
+                if (IsDisposed || !IsHandleCreated)
+                {
+                    _refreshing = false;
+                    return;
+                }
                 try
                 {
                     BeginInvoke((MethodInvoker)delegate { ApplyStatus(st, drives); });

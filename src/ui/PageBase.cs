@@ -37,6 +37,15 @@ namespace ShieldGate
         public virtual bool Busy { get { return false; } }
         public virtual void CancelWork() { }
 
+        // Trang tự cuộn control vào khung khi control nhận focus. Nếu người dùng
+        // đang giữ chuột, cú cuộn đó dời control ngay giữa lúc nhấn và lúc nhả,
+        // làm cú bấm bị nuốt. Giữ nguyên vị trí cuộn khi chuột còn nhấn.
+        protected override Point ScrollToControl(Control activeControl)
+        {
+            if (Control.MouseButtons != MouseButtons.None) return AutoScrollPosition;
+            return base.ScrollToControl(activeControl);
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);

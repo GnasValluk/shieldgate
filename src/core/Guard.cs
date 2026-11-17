@@ -21,6 +21,8 @@ namespace ShieldGate
         public bool Registry;
         public bool Task;
         public bool Running;
+        public bool WriteProtect;
+        public bool BlockExec;
         public int QuarantineFiles;
         public int QuarantineBatches;
 
@@ -36,6 +38,8 @@ namespace ShieldGate
         public bool Ini = true;
         public bool Wsh;
         public bool Registry;
+        public bool WriteProtect;
+        public bool BlockExec;
     }
 
     internal static class Guard
@@ -116,13 +120,16 @@ namespace ShieldGate
                     else if (string.Equals(key, "ini", StringComparison.OrdinalIgnoreCase)) c.Ini = on;
                     else if (string.Equals(key, "wsh", StringComparison.OrdinalIgnoreCase)) c.Wsh = on;
                     else if (string.Equals(key, "registry", StringComparison.OrdinalIgnoreCase)) c.Registry = on;
+                    else if (string.Equals(key, "writeprotect", StringComparison.OrdinalIgnoreCase)) c.WriteProtect = on;
+                    else if (string.Equals(key, "blockexec", StringComparison.OrdinalIgnoreCase)) c.BlockExec = on;
                 }
             }
             catch { }
             return c;
         }
 
-        public static void SaveConfig(bool autorun, bool ini, bool wsh, bool registry)
+        public static void SaveConfig(bool autorun, bool ini, bool wsh, bool registry,
+                                      bool writeProtect = false, bool blockExec = false)
         {
             try
             {
@@ -131,7 +138,9 @@ namespace ShieldGate
                     "autorun=" + (autorun ? "1" : "0") + "\r\n" +
                     "ini=" + (ini ? "1" : "0") + "\r\n" +
                     "wsh=" + (wsh ? "1" : "0") + "\r\n" +
-                    "registry=" + (registry ? "1" : "0") + "\r\n",
+                    "registry=" + (registry ? "1" : "0") + "\r\n" +
+                    "writeprotect=" + (writeProtect ? "1" : "0") + "\r\n" +
+                    "blockexec=" + (blockExec ? "1" : "0") + "\r\n",
                     new UTF8Encoding(false));
             }
             catch (Exception e)
@@ -165,6 +174,8 @@ namespace ShieldGate
                 ok &= Reg.Write(RegistryHive.LocalMachine, WshPath32, "Enabled", 0, RegistryValueKind.DWord);
             }
             if (c.Registry) ok &= RegistryGuard.Ensure(true);
+            // Chặn ghi ổ USB là chính sách toàn máy: bật/tắt đều idempotent.
+            if (Native.IsAdmin()) ok &= Policy.ApplyWriteProtect(c.WriteProtect);
             return ok;
         }
 
@@ -617,6 +628,9 @@ namespace ShieldGate
             }
             Paths.EnsureDirs();
             Paths.HardenRoot();
+            // Giữ lựa chọn chặn ghi / chặn thực thi đã bật trong GUI; --install
+            // không được âm thầm tắt chúng khi cài lại hoặc cập nhật.
+            GuardConfig prior = LoadConfig();
             RemoveLegacyTask();
             EnsureSnapshot();
             if (log != null) log(S.Cli.SnapshotSaved);
@@ -629,7 +643,7 @@ namespace ShieldGate
             {
                 if (log != null) log(S.Cli.PolicyPartial);
             }
-            SaveConfig(true, true, blockWsh, true);
+            SaveConfig(true, true, blockWsh, true, prior.WriteProtect, prior.BlockExec);
             RegistryGuard.Ensure(true);
 
             string output;
@@ -681,6 +695,11 @@ namespace ShieldGate
             bool restored = RestoreFromSnapshot();
             if (log != null) log(restored ? S.Cli.PolicyRestored : S.Cli.PolicyRestoreFailed);
 
+            // Trả lại giá trị StorageDevicePolicies trước khi xoá guard.cfg và
+            // repair\write-protect.txt; nếu không, WriteProtect=1 sẽ kẹt lại.
+            if (!Policy.ApplyWriteProtect(false))
+                Log.Write(S.Log.WriteProtect(false, false), "WARN");
+
             try { File.Delete(Paths.StopFlag); } catch { }
             try { File.Delete(Paths.Heartbeat); } catch { }
             try { File.Delete(Paths.GuardConfig); } catch { }
@@ -712,6 +731,9 @@ namespace ShieldGate
             st.Wsh = Reg.Read(RegistryHive.LocalMachine, WshPath, "Enabled", out value, out kind)
                      && Convert.ToInt32(value) == 0;
             st.Registry = LoadConfig().Registry;
+            GuardConfig cfg = LoadConfig();
+            st.WriteProtect = cfg.WriteProtect && Policy.WriteProtectActive;
+            st.BlockExec = cfg.BlockExec;
             st.Running = HeartbeatAge() < 30;
             foreach (BatchInfo b in Quarantine.ListBatches())
             {
@@ -798,10 +820,20 @@ namespace ShieldGate
 
                 HashSet<string> known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 HashSet<string> scanning = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                HashSet<string> warnedBlocked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                int[] deviceBusy = new int[1];
                 DateTime lastPolicy = DateTime.MinValue;
                 DateTime lastBeat = DateTime.MinValue;
                 DateTime lastRoot = DateTime.MinValue;
+                DateTime lastDevices = DateTime.MinValue;
+                DateTime lastExec = DateTime.MinValue;
+                GuardConfig lastConfig = null;
 
+                BehaviorMonitor behavior = new BehaviorMonitor();
+                behavior.Suspicious += delegate(string drive) { StartVolumeScan(scanning, drive); };
+
+                try
+                {
                 while (true)
                 {
                     if (File.Exists(Paths.StopFlag)) break;
@@ -811,7 +843,8 @@ namespace ShieldGate
                         if ((now - lastPolicy).TotalSeconds >= 60)
                         {
                             // Chỉ áp phần người dùng đang bật; công tắc đã tắt phải ở yên.
-                            ApplyConfig(LoadConfig());
+                            lastConfig = LoadConfig();
+                            ApplyConfig(lastConfig);
                             lastPolicy = now;
                         }
                         if ((now - lastBeat).TotalSeconds >= 4)
@@ -821,6 +854,7 @@ namespace ShieldGate
                         }
 
                         List<string> drives = Native.RemovableDrives();
+                        behavior.Update(drives);
                         foreach (string vol in drives)
                         {
                             if (known.Contains(vol)) continue;
@@ -835,6 +869,25 @@ namespace ShieldGate
                             lastRoot = now;
                             foreach (string vol in drives) StartRootCheck(scanning, vol);
                         }
+
+                        // Kiem ke thiet bi: chi doc WMI, chay o luong rieng de khong treo vong lap.
+                        if ((now - lastDevices).TotalSeconds >= 15)
+                        {
+                            lastDevices = now;
+                            StartDeviceCheck(deviceBusy, warnedBlocked);
+                        }
+
+                        // Chặn thực thi từ ổ rời là opt-in; kiểm tra mỗi 4 giây.
+                        if ((now - lastExec).TotalSeconds >= 4)
+                        {
+                            lastExec = now;
+                            if (lastConfig != null && lastConfig.BlockExec)
+                            {
+                                string detail;
+                                Policy.StopRemovableProcesses(drives, out detail);
+                            }
+                        }
+
                         known.RemoveWhere(delegate(string v) { return !drives.Contains(v); });
                         lock (ReadOnlyLogged)
                             ReadOnlyLogged.RemoveWhere(delegate(string v) { return !drives.Contains(v); });
@@ -842,6 +895,8 @@ namespace ShieldGate
                     catch (Exception e) { Log.Write(S.Log.WatchLoopError(e.Message), "ERROR"); }
                     Thread.Sleep(2000);
                 }
+                }
+                finally { behavior.Stop(); }
 
                 Log.Write(S.Log.WatchStopped);
                 try { File.Delete(Paths.StopFlag); } catch { }
@@ -872,8 +927,95 @@ namespace ShieldGate
             t.Start();
         }
 
-        private static void StartRootCheck(HashSet<string> scanning, string vol)
+        // ------------------------------------------------------ kiểm kê thiết bị
+
+        private static void StartDeviceCheck(int[] busy, HashSet<string> warnedBlocked)
         {
+            if (busy == null) return;
+            if (Interlocked.CompareExchange(ref busy[0], 1, 0) != 0) return;
+            Thread t = new Thread(delegate()
+            {
+                try { CheckDevices(warnedBlocked); }
+                catch (Exception e) { Log.Write(S.Log.DeviceScanError(e.Message), "WARN"); }
+                finally { busy[0] = 0; }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        // WMI chạy ở luồng riêng. Lần đầu chỉ lập kho, không báo cả máy là thiết bị mới.
+        private static void CheckDevices(HashSet<string> warnedBlocked)
+        {
+            DeviceScanResult ds = Devices.Scan();
+            if (ds == null) return;
+            if (!string.IsNullOrEmpty(ds.Error))
+            {
+                Log.Write(S.Log.DeviceScanError(ds.Error), "WARN");
+                return;
+            }
+
+            if (ds.FirstRun)
+            {
+                Log.Write(S.Log.DeviceBaseline(ds.Devices.Count));
+                Events.Add(Events.KindDevice, "INFO", S.Events.DeviceBaseline(ds.Devices.Count), "");
+            }
+
+            foreach (DeviceInfo d in ds.NewDevices)
+            {
+                string ids = d.HardwareId;
+                if (ids.Length == 0) ids = d.InstanceId;
+                Log.Write(S.Log.DeviceNew(d.Name, d.DeviceClass));
+                Events.Add(Events.KindDevice, "INFO", d.Name,
+                           S.Events.DeviceNew(d.Name, d.DeviceClass, ids));
+                Settings.SetDeviceEvent(S.Tray.DeviceNew(d.Name));
+
+                if (d.CompositeSuspect)
+                {
+                    Log.Write(S.Log.DeviceComposite(d.Name), "WARN");
+                    Events.Add(Events.KindDevice, "WARN", d.Name, S.Events.DeviceComposite(d.Name));
+                    Settings.SetDeviceEvent(S.Tray.Composite(d.Name));
+                }
+
+                // Chỉ là heuristic: bàn phím mới + shell trong 20 giây. Không tự tắt thiết bị.
+                if (d.Keyboard && ds.NewKeyboard && !Devices.IsInternalKeyboard(d))
+                {
+                    int pid;
+                    string shell = Devices.RecentShellProcess(DateTime.Now.AddSeconds(-20), out pid);
+                    if (shell.Length > 0)
+                    {
+                        Log.Write(S.Log.DeviceBadUsb(d.Name, shell), "WARN");
+                        Events.Add(Events.KindDevice, "WARN", d.Name, S.Events.DeviceBadUsb(d.Name));
+                        Settings.SetDeviceEvent(S.Tray.BadUsb(d.Name));
+                    }
+                }
+            }
+
+            HashSet<string> present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DeviceInfo d in ds.Devices)
+            {
+                present.Add(d.Key);
+                if (d.Trust != DeviceTrust.Blocked) continue;
+                bool warn = false;
+                lock (warnedBlocked)
+                {
+                    if (!warnedBlocked.Contains(d.Key))
+                    {
+                        warnedBlocked.Add(d.Key);
+                        warn = true;
+                    }
+                }
+                if (warn)
+                {
+                    Log.Write(S.Log.DeviceBlocked(d.Name), "WARN");
+                    Events.Add(Events.KindDevice, "WARN", d.Name, S.Events.DeviceBlocked(d.Name));
+                    Settings.SetDeviceEvent(S.Tray.DeviceBlocked(d.Name));
+                }
+            }
+            lock (warnedBlocked)
+                warnedBlocked.RemoveWhere(delegate(string k) { return !present.Contains(k); });
+        }
+
+        private static void StartRootCheck(HashSet<string> scanning, string vol)        {
             lock (scanning)
             {
                 if (scanning.Contains(vol)) return;
@@ -985,7 +1127,8 @@ namespace ShieldGate
         // Áp dụng đúng năm lựa chọn của người dùng, phần nào tắt thì trả về giá trị gốc.
         // Riêng Registry: tắt chỉ ngừng theo dõi, không trả lại khoá đã hỏng.
         public static bool Configure(bool autorun, bool ini, bool wsh, bool registry,
-                                     bool guardOn, Action<string> log)
+                                     bool guardOn, Action<string> log,
+                                     bool writeProtect = false, bool blockExec = false)
         {
             if (!Native.IsAdmin())
             {
@@ -1022,6 +1165,7 @@ namespace ShieldGate
             else ok &= RestoreGroup(6, 7);
 
             if (registry) ok &= RegistryGuard.Ensure(true);
+            if (Native.IsAdmin()) ok &= Policy.ApplyWriteProtect(writeProtect);
 
             string output = "";
             if (guardOn)
@@ -1053,7 +1197,7 @@ namespace ShieldGate
                 try { File.Delete(Paths.Heartbeat); } catch { }
             }
 
-            SaveConfig(autorun, ini, wsh, registry);
+            SaveConfig(autorun, ini, wsh, registry, writeProtect, blockExec);
             Log.Write(S.Log.SettingsApplied(autorun, ini, wsh, registry, guardOn, ok));
             if (log != null) log(ok ? S.Cli.Configured : S.Cli.ConfigurePartial);
             return ok;

@@ -81,8 +81,98 @@ namespace ShieldGate
                             g.DrawLine(pen, ox + 11.9f * s, oy + 11.9f * s, ox + 16.8f * s, oy + 16.8f * s);
                             break;
 
+                        case "chip":
+                        {
+                            using (GraphicsPath body = RoundRect(ox + 5 * s, oy + 5 * s, 10 * s, 10 * s, 1.6f * s))
+                                g.DrawPath(pen, body);
+                            g.DrawRectangle(pen, ox + 8.3f * s, oy + 8.3f * s, 3.4f * s, 3.4f * s);
+                            for (int i = 0; i < 3; i++)
+                            {
+                                float p = (7f + i * 3f) * s;
+                                g.DrawLine(pen, ox + p, oy + 2.4f * s, ox + p, oy + 5 * s);
+                                g.DrawLine(pen, ox + p, oy + 15 * s, ox + p, oy + 17.6f * s);
+                                g.DrawLine(pen, ox + 2.4f * s, oy + p, ox + 5 * s, oy + p);
+                                g.DrawLine(pen, ox + 15 * s, oy + p, ox + 17.6f * s, oy + p);
+                            }
+                            break;
+                        }
+
+                        case "wrench":
+                        {
+                            // Đầu vặn hình chữ C mở, tay cầm chéo xuống góc trái.
+                            using (GraphicsPath head = new GraphicsPath())
+                            {
+                                head.AddArc(ox + 10.4f * s, oy + 2.4f * s, 6.6f * s, 6.6f * s, 30, 285);
+                                g.DrawPath(pen, head);
+                            }
+                            g.DrawLine(pen, ox + 11.2f * s, oy + 9.4f * s, ox + 3.6f * s, oy + 17f * s);
+                            g.DrawLine(pen, ox + 3.6f * s, oy + 17f * s, ox + 6.2f * s, oy + 17f * s);
+                            break;
+                        }
+
                         case "shield":
                             using (GraphicsPath sh = ShieldPath(s, ox, oy)) g.DrawPath(pen, sh);
+                            break;
+
+                        case "eye":
+                            // Con mắt: hai cung đối xứng + đồng tử, dùng cho "đọc thử".
+                            using (GraphicsPath eye = new GraphicsPath())
+                            {
+                                eye.AddBezier(ox + 2.6f * s, oy + 10f * s,
+                                              ox + 6.2f * s, oy + 4.6f * s,
+                                              ox + 13.8f * s, oy + 4.6f * s,
+                                              ox + 17.4f * s, oy + 10f * s);
+                                eye.AddBezier(ox + 17.4f * s, oy + 10f * s,
+                                              ox + 13.8f * s, oy + 15.4f * s,
+                                              ox + 6.2f * s, oy + 15.4f * s,
+                                              ox + 2.6f * s, oy + 10f * s);
+                                g.DrawPath(pen, eye);
+                            }
+                            g.DrawEllipse(pen, ox + 7.7f * s, oy + 7.7f * s, 4.6f * s, 4.6f * s);
+                            break;
+
+                        case "disk":
+                            // Trụ đĩa: elip trên, hai cạnh đứng, cung dưới — đọc ra "ổ/đĩa".
+                            using (GraphicsPath disk = new GraphicsPath())
+                            {
+                                disk.AddEllipse(ox + 3.4f * s, oy + 3.2f * s, 13.2f * s, 5.4f * s);
+                                disk.AddLine(ox + 3.4f * s, oy + 5.9f * s, ox + 3.4f * s, oy + 14.1f * s);
+                                disk.AddLine(ox + 16.6f * s, oy + 5.9f * s, ox + 16.6f * s, oy + 14.1f * s);
+                                disk.AddArc(ox + 3.4f * s, oy + 11.4f * s, 13.2f * s, 5.4f * s, 0, 180);
+                                g.DrawPath(pen, disk);
+                            }
+                            g.DrawArc(pen, ox + 3.4f * s, oy + 7.5f * s, 13.2f * s, 5.4f * s, 0, 180);
+                            break;
+
+                        case "save":
+                            // Mũi tên xuống vào khay: sao lưu.
+                            g.DrawLine(pen, ox + 10 * s, oy + 3.2f * s, ox + 10 * s, oy + 12.4f * s);
+                            g.DrawLines(pen, new PointF[]
+                            {
+                                new PointF(ox + 6.4f * s, oy + 8.8f * s),
+                                new PointF(ox + 10 * s, oy + 12.4f * s),
+                                new PointF(ox + 13.6f * s, oy + 8.8f * s)
+                            });
+                            g.DrawLine(pen, ox + 3.8f * s, oy + 16.4f * s, ox + 16.2f * s, oy + 16.4f * s);
+                            break;
+
+                        case "folder":
+                            g.DrawLines(pen, new PointF[]
+                            {
+                                new PointF(ox + 3f * s, oy + 16f * s),
+                                new PointF(ox + 3f * s, oy + 5.6f * s),
+                                new PointF(ox + 7.6f * s, oy + 5.6f * s),
+                                new PointF(ox + 9.2f * s, oy + 7.8f * s),
+                                new PointF(ox + 17f * s, oy + 7.8f * s),
+                                new PointF(ox + 17f * s, oy + 16f * s),
+                                new PointF(ox + 3f * s, oy + 16f * s)
+                            });
+                            break;
+
+                        case "ban":
+                            // Vòng tròn gạch chéo: đánh dấu chặn.
+                            g.DrawEllipse(pen, ox + 3f * s, oy + 3f * s, 14f * s, 14f * s);
+                            g.DrawLine(pen, ox + 5.5f * s, oy + 5.5f * s, ox + 14.5f * s, oy + 14.5f * s);
                             break;
 
                         case "check":

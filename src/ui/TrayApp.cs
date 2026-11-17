@@ -36,6 +36,8 @@ namespace ShieldGate
         private readonly System.Windows.Forms.Timer _timer;
         private readonly MenuItem _status;
         private DateTime _lastEvent = DateTime.MinValue;
+        private DateTime _lastDeviceEvent = DateTime.MinValue;
+        private DateTime _lastBehaviorEvent = DateTime.MinValue;
 
         public TrayContext()
         {
@@ -62,6 +64,8 @@ namespace ShieldGate
 
             // Bỏ qua sự kiện cũ trước khi biểu tượng này xuất hiện.
             _lastEvent = Settings.DriveEventTime;
+            _lastDeviceEvent = Settings.DeviceEventTime;
+            _lastBehaviorEvent = Settings.BehaviorEventTime;
             Refresh();
             try { _icon.ShowBalloonTip(5000); }
             catch { }
@@ -80,6 +84,35 @@ namespace ShieldGate
             _icon.Text = tooltip;
             _status.Text = running ? S.Tray.StatusOn : S.Tray.StatusOff;
             CheckDriveEvent();
+            CheckDeviceEvents();
+        }
+
+        private void ShowBalloon(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            try
+            {
+                _icon.BalloonTipText = text;
+                _icon.ShowBalloonTip(8000);
+            }
+            catch { }
+        }
+
+        private void CheckDeviceEvents()
+        {
+            DateTime device = Settings.DeviceEventTime;
+            if (device != DateTime.MinValue && device != _lastDeviceEvent)
+            {
+                _lastDeviceEvent = device;
+                ShowBalloon(Settings.DeviceEventText);
+            }
+
+            DateTime behavior = Settings.BehaviorEventTime;
+            if (behavior != DateTime.MinValue && behavior != _lastBehaviorEvent)
+            {
+                _lastBehaviorEvent = behavior;
+                ShowBalloon(S.Tray.Behavior(Settings.BehaviorEventDrive));
+            }
         }
 
         // Bảo vệ nền ghi sự kiện vào settings.txt. Chỉ báo một lần cho mỗi mốc thời gian.
@@ -98,12 +131,7 @@ namespace ShieldGate
             else if (review > 0) text = S.Tray.Attention(review);
             else return;
 
-            try
-            {
-                _icon.BalloonTipText = text;
-                _icon.ShowBalloonTip(8000);
-            }
-            catch { }
+            ShowBalloon(text);
         }
 
         private static bool UiRunning()

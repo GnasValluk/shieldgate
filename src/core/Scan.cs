@@ -11,7 +11,7 @@ using Microsoft.Win32;
 
 namespace ShieldGate
 {
-    internal enum UsbKind { Shortcut, Script, Autorun, RootExe, HiddenFolder, FakeFolder }
+    internal enum UsbKind { Shortcut, Script, Autorun, RootExe, HiddenFolder, FakeFolder, Other }
 
     internal sealed class UsbItem
     {
@@ -24,6 +24,10 @@ namespace ShieldGate
         public string FolderName;
         // Dấu hiệu đủ mạnh để bảo vệ nền tự cách ly mà không hỏi.
         public bool High;
+        // Điểm rủi ro 0..10, tính từ trọng số trong rules.json.
+        public int Score;
+        // Chỉ gắn cờ (macro Office, DLL nghi vấn): không tự cách ly, không chọn sẵn.
+        public bool FlagOnly;
 
         public string ReasonText { get { return S.Reason.Text(Codes); } }
     }
@@ -43,6 +47,7 @@ namespace ShieldGate
         public int Autoruns;
         public int RootExes;
         public int Folders;
+        public int Other;
         // O chi doc (USB co khoa ghi, dia CD, anh ISO): chi xem duoc, khong sua duoc.
         public bool ReadOnly;
     }
@@ -133,17 +138,27 @@ namespace ShieldGate
             result.ReadOnly = Native.IsReadOnlyVolume(root);
             int seen = 0;
             WalkStats stats = new WalkStats();
+            RulesData rules = Rules.Current;
+            ScanContext context = new ScanContext();
+            context.Root = root;
+            context.Rules = rules;
+            context.Stats = stats;
             List<string> nameless = UsbRestore.FindNameless(root);
             List<TreeItem> rootExes = new List<TreeItem>();
+            List<string> dirs = new List<string>();
 
-            foreach (TreeItem f in Tree.Walk(root, stats, 150000, 300, maxDepth))
+            foreach (TreeItem f in Tree.Walk(root, stats, rules.MaxFiles, rules.MaxSeconds, maxDepth))
             {
                 if (cancelled != null && cancelled())
                 {
                     result.Cancelled = true;
                     break;
                 }
-                if (f.IsDir) continue;
+                if (f.IsDir)
+                {
+                    if (f.Depth <= 2 && dirs.Count < 400) dirs.Add(f.Path);
+                    continue;
+                }
 
                 seen++;
                 if (progress != null && (seen % 25 == 0)) progress(seen, f.Path);
@@ -200,15 +215,80 @@ namespace ShieldGate
                     rootExes.Add(f);
                 }
 
+                // Detector 2.0 chỉ chạy khi các luật 1.0 chưa kết luận, để không
+                // thay đổi hành vi cũ và không nhân đôi cảnh báo.
+                if (item == null && !f.IsDir)
+                {
+                    List<Finding> found = DetectorPipeline.InspectFile(context, f);
+                    if (found.Count > 0)
+                    {
+                        item = MakeItem(f, UsbKind.Other);
+                        int sum = 0;
+                        bool strong = false;
+                        bool flagOnly = true;
+                        foreach (Finding fd in found)
+                        {
+                            string code = fd.Code;
+                            if (!string.IsNullOrEmpty(fd.Detail)) code += "=" + fd.Detail;
+                            if (!item.Codes.Contains(code)) item.Codes.Add(code);
+                            sum += fd.Score;
+                            if (fd.Strong) strong = true;
+                            if (!fd.FlagOnly) flagOnly = false;
+                        }
+                        if (sum > 10) sum = 10;
+                        item.Score = sum;
+                        item.FlagOnly = flagOnly;
+                        // Chỉ dấu hiệu mạnh mới đủ để bảo vệ nền tự cách ly.
+                        item.High = strong && !flagOnly;
+                    }
+                }
+
                 if (item != null)
                 {
+                    if (item.Score == 0) item.Score = Scoring.Evaluate(item.Codes, rules);
+                    if (item.High && item.Score < rules.ScoreThreshold)
+                        item.Score = rules.ScoreThreshold;
                     try { item.Size = new FileInfo(item.Path).Length; }
                     catch { }
                     result.Items.Add(item);
                     if (item.Kind == UsbKind.Shortcut) result.Shortcuts++;
                     else if (item.Kind == UsbKind.Script) result.Scripts++;
                     else if (item.Kind == UsbKind.Autorun) result.Autoruns++;
+                    else if (item.Kind == UsbKind.Other) result.Other++;
                     else result.RootExes++;
+                }
+            }
+
+            // Detector theo thư mục: DLL sideloading cần nhìn cả thư mục.
+            if (!stats.Truncated && dirs.Count > 0)
+            {
+                HashSet<string> seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (UsbItem it in result.Items) seenPaths.Add(it.Path);
+                int inspected = 0;
+                foreach (string dir in dirs)
+                {
+                    if (cancelled != null && cancelled()) { result.Cancelled = true; break; }
+                    if (++inspected > 300) break;
+                    List<Finding> found = DetectorPipeline.InspectDirectory(context, dir);
+                    foreach (Finding fd in found)
+                    {
+                        string path = fd.Path;
+                        if (string.IsNullOrEmpty(path)) continue;
+                        if (seenPaths.Contains(path)) continue;
+                        UsbItem di = new UsbItem();
+                        di.Path = path;
+                        di.Rel = path.StartsWith(root, StringComparison.OrdinalIgnoreCase)
+                            ? path.Substring(root.Length).TrimStart('\\') : Path.GetFileName(path);
+                        di.Kind = UsbKind.Other;
+                        di.Codes.Add(fd.Code + (string.IsNullOrEmpty(fd.Detail) ? "" : "=" + fd.Detail));
+                        di.Score = fd.Score;
+                        di.FlagOnly = fd.FlagOnly;
+                        di.High = false;
+                        try { di.Size = new FileInfo(path).Length; } catch { }
+                        result.Items.Add(di);
+                        result.Other++;
+                        seenPaths.Add(path);
+                    }
                 }
             }
 
@@ -343,6 +423,13 @@ namespace ShieldGate
                     if (progress != null) progress(i + 1);
                     continue;
                 }
+                // Macro/DLL chỉ gắn cờ: người dùng phải tự quyết định, không cách ly.
+                if (it.FlagOnly)
+                {
+                    Log.Write(S.Log.FlagOnlyKept(it.Path), "INFO");
+                    if (progress != null) progress(i + 1);
+                    continue;
+                }
                 // Danh sach co the da cu: bao ve nen hoac nguoi dung vua xu ly tep nay
                 // truoc khi bam nut. Bo qua, khong ghi loi "Could not find file".
                 if (!WinPath.Exists(WinPath.Ext(it.Path)))
@@ -431,6 +518,7 @@ namespace ShieldGate
                 case UsbKind.Shortcut: return "shortcut";
                 case UsbKind.Script: return "script";
                 case UsbKind.Autorun: return "autorun";
+                case UsbKind.Other: return "detector";
                 default: return "exe-an";
             }
         }

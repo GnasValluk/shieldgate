@@ -61,6 +61,10 @@ namespace ShieldGate
                     case "uninstall": return Uninstall();
                     case "status": return Status();
                     case "scan": return Scan(args);
+                    case "devices": return DevicesCommand();
+                    case "events": return EventsCommand(args);
+                    case "repair": return RepairCommand(args);
+                    case "defender": return DefenderCommand(args);
                     case "selftest": return SelfTest.Run();
                     case "":
                         break;
@@ -258,6 +262,8 @@ namespace ShieldGate
             Console.WriteLine(S.Cli.StatusWsh(st.Wsh));
             Console.WriteLine(S.Cli.StatusRegistry(st.Registry));
             Console.WriteLine(S.Cli.StatusGuard(st.Running));
+            Console.WriteLine(S.Cli.StatusWriteProtect(st.WriteProtect));
+            Console.WriteLine(S.Cli.StatusBlockExec(st.BlockExec));
             Console.WriteLine(S.Cli.StatusAdmin(st.Admin));
             Console.WriteLine(S.Cli.StatusQuarantine(st.QuarantineFiles, st.QuarantineBatches));
             return 0;
@@ -289,6 +295,89 @@ namespace ShieldGate
                 Console.WriteLine(S.Cli.ScanItem(item.Rel, item.ReasonText));
             // Mã 2: tìm thấy mục cần xử lý, khác với lỗi chạy (1).
             return 2;
+        }
+
+        // ------------------------------------------------------- lệnh ngoại vi
+
+        private static int DevicesCommand()
+        {
+            DeviceScanResult result = Devices.Scan();
+            Console.WriteLine(S.Cli.DevicesTitle);
+            if (result.Devices.Count == 0) Console.WriteLine(S.Cli.NoDevices);
+            foreach (DeviceInfo d in result.Devices)
+            {
+                Console.WriteLine(S.Cli.DeviceLine(d.Name, S.Devices.TypeName(d.DeviceClass),
+                    S.Devices.TrustName(d.Trust), string.Join(" ", d.Drives.ToArray())));
+            }
+            if (result.Error.Length > 0)
+            {
+                Console.WriteLine(result.Error);
+                return 1;
+            }
+            return 0;
+        }
+
+        private static int EventsCommand(string[] args)
+        {
+            int max = 40;
+            if (args.Length > 1)
+            {
+                int parsed;
+                if (int.TryParse(args[1], out parsed) && parsed > 0) max = Math.Min(parsed, 2000);
+            }
+            List<EventEntry> entries = ShieldGate.Events.Read(max);
+            Console.WriteLine(S.Cli.EventsTitle);
+            if (entries.Count == 0) Console.WriteLine(S.Cli.NoEvents);
+            foreach (EventEntry e in entries)
+            {
+                Console.WriteLine(S.Cli.EventLine(e.TimeText, e.Kind, e.Severity,
+                                                 e.Subject, e.Detail));
+            }
+            return 0;
+        }
+
+        // Chỉ chẩn đoán và in thông tin. Dòng lệnh không bao giờ sao lưu, không chạy
+        // chkdsk và không ghi lên ổ; các thao tác đó chỉ có trong giao diện.
+        private static int RepairCommand(string[] args)
+        {
+            if (args.Length < 2 || args[1].Trim().Length < 2)
+            {
+                Console.WriteLine(S.Cli.RepairUsage);
+                return 1;
+            }
+            RepairInfo info = Repair.Inspect(args[1]);
+            Console.WriteLine(S.Cli.RepairSummary(info.Drive, info.FileSystem, info.FreeBytes,
+                                                  info.TotalBytes, info.ReadOnly, info.SystemDrive));
+            if (info.DirtyKnown)
+            {
+                Console.WriteLine(S.Repair.Info(S.Repair.InfoStatus,
+                    info.Dirty ? S.Repair.DirtyLabel : S.Repair.CleanLabel));
+            }
+            if (info.Problem.Length > 0) Console.WriteLine(S.Cli.RepairProblem(info.Problem));
+            return info.Problem.Length > 0 ? 1 : 0;
+        }
+
+        private static int DefenderCommand(string[] args)
+        {
+            if (args.Length < 2 || args[1].Trim().Length == 0)
+            {
+                Console.WriteLine(S.Cli.DefenderUsage);
+                return 1;
+            }
+            string path = args[1].Trim();
+            if (!File.Exists(path) && !Directory.Exists(path))
+            {
+                Console.WriteLine(S.Cli.DefenderResult(false, -1));
+                return 1;
+            }
+            DefenderResult result = Defender.Scan(path, 30 * 60 * 1000);
+            if (!result.Ran)
+            {
+                Console.WriteLine(result.Error.Length > 0 ? result.Error : S.Err.Unknown);
+                return 1;
+            }
+            Console.WriteLine(S.Cli.DefenderResult(result.Clean, result.ExitCode));
+            return result.Clean ? 0 : 2;
         }
     }
 }

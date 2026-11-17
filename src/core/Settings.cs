@@ -197,6 +197,48 @@ namespace ShieldGate
         public static int DriveEventCleaned { get { return Int("event.cleaned"); } }
         public static int DriveEventReview { get { return Int("event.review"); } }
 
+        // Sự kiện thiết bị (mới/chặn/BadUSB) cho biểu tượng khay.
+        public static void SetDeviceEvent(string text)
+        {
+            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            v["device.time"] = DateTime.Now.ToString("o");
+            v["device.text"] = text ?? "";
+            SetMany(v);
+        }
+
+        public static DateTime DeviceEventTime
+        {
+            get
+            {
+                DateTime t;
+                return DateTime.TryParse(Get("device.time", ""), out t) ? t : DateTime.MinValue;
+            }
+        }
+
+        public static string DeviceEventText { get { return Get("device.text", ""); } }
+
+        // Sự kiện hành vi: ghi hàng loạt trên một ổ.
+        public static void SetBehaviorEvent(string drive, string text)
+        {
+            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            v["behavior.time"] = DateTime.Now.ToString("o");
+            v["behavior.drive"] = drive ?? "";
+            v["behavior.text"] = text ?? "";
+            SetMany(v);
+        }
+
+        public static DateTime BehaviorEventTime
+        {
+            get
+            {
+                DateTime t;
+                return DateTime.TryParse(Get("behavior.time", ""), out t) ? t : DateTime.MinValue;
+            }
+        }
+
+        public static string BehaviorEventDrive { get { return Get("behavior.drive", ""); } }
+        public static string BehaviorEventText { get { return Get("behavior.text", ""); } }
+
         private static int Int(string key)
         {
             int n;

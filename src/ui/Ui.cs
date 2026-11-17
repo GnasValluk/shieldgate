@@ -68,6 +68,15 @@ namespace ShieldGate
                 TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
         }
 
+        // Con trỏ gần như đứng yên giữa lúc nhấn và lúc nhả. Dùng để vẫn nhận cú
+        // bấm khi control bị cuộn/dời chỗ trong lúc giữ chuột (nếu không, điểm nhả
+        // rơi ra ngoài control và cú bấm bị nuốt).
+        public static bool SameSpot(Point a, Point b)
+        {
+            int slack = Math.Max(3, Px(2));
+            return Math.Abs(a.X - b.X) <= slack && Math.Abs(a.Y - b.Y) <= slack;
+        }
+
         public static GraphicsPath Round(Rectangle r, int radius)
         {
             GraphicsPath p = new GraphicsPath();
@@ -140,6 +149,8 @@ namespace ShieldGate
     {
         private ButtonKind _kind = ButtonKind.Primary;
         private bool _hot, _down;
+        private Point _downPoint;
+        private string _icon = "";
 
         public FlatButton()
         {
@@ -157,6 +168,14 @@ namespace ShieldGate
         {
             get { return _kind; }
             set { _kind = value; Invalidate(); }
+        }
+
+        // Có biểu tượng thì nút vẽ icon (kèm chữ nếu có); nút chỉ có icon vẫn
+        // giữ AccessibleName và tooltip do trang đặt.
+        public string IconName
+        {
+            get { return _icon; }
+            set { _icon = value ?? ""; Invalidate(); }
         }
 
         protected override void OnTextChanged(EventArgs e)
@@ -206,9 +225,26 @@ namespace ShieldGate
             if (fill != Color.Empty) Ui.RoundFill(g, inner, Ui.Px(3), fill);
             if (border != Color.Empty) Ui.RoundStroke(g, Rectangle.Inflate(inner, 0, 0), Ui.Px(3), border, 1f);
 
-            Ui.Text(g, Text, Font, fore, inner,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            if (_icon.Length > 0)
+            {
+                int s = Ui.Px(18);
+                int gap = Text.Length == 0 ? 0 : Ui.Px(6);
+                Size textSize = Text.Length == 0 ? Size.Empty : Ui.Measure(Text, Font);
+                int total = s + gap + textSize.Width;
+                int x = (Width - total) / 2;
+                Icons.Draw(g, _icon, new Rectangle(x, (Height - s) / 2, s, s), fore);
+                if (textSize.Width > 0)
+                    Ui.Text(g, Text, Font, fore,
+                        new Rectangle(x + s + gap, 0, Width - (x + s + gap), Height),
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                        TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            }
+            else
+            {
+                Ui.Text(g, Text, Font, fore, inner,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            }
 
             if (Focused && ShowFocusCues && Enabled)
             {
@@ -238,6 +274,7 @@ namespace ShieldGate
         {
             base.OnMouseDown(e);
             if (!Enabled || e.Button != MouseButtons.Left) return;
+            _downPoint = PointToScreen(e.Location);
             Focus();
             _down = true;
             Invalidate();
@@ -253,8 +290,11 @@ namespace ShieldGate
             // của hộp thoại chạy khi cửa sổ cũ còn giữ chuột, và cú nhấn đầu tiên
             // trong hộp thoại bị nuốt (phải bấm hai lần).
             Capture = false;
+            // Trang cuộn/dời control ngay sau khi Focus() có thể làm điểm nhả rơi ra
+            // ngoài. Con trỏ không di chuyển thì đây vẫn là một cú bấm.
+            bool sameSpot = Ui.SameSpot(_downPoint, PointToScreen(e.Location));
             Invalidate();
-            if (click && ClientRectangle.Contains(e.Location)) OnClick(EventArgs.Empty);
+            if (click && (ClientRectangle.Contains(e.Location) || sameSpot)) OnClick(EventArgs.Empty);
         }
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
@@ -300,6 +340,8 @@ namespace ShieldGate
     internal sealed class LinkText : Control
     {
         private bool _hot;
+        private bool _down;
+        private Point _downPoint;
         private string _icon = "";
         private int _iconSize = 13;
 
@@ -383,10 +425,22 @@ namespace ShieldGate
         {
             base.OnMouseUp(e);
             if (!Enabled || e.Button != MouseButtons.Left) return;
+            bool click = _down;
+            _down = false;
             // Nhả capture trước khi báo Click, cùng lý do như FlatButton: tránh
             // cú nhấn đầu tiên trong hộp thoại vừa mở bị nuốt.
             Capture = false;
-            if (ClientRectangle.Contains(e.Location)) OnClick(EventArgs.Empty);
+            if (click && (ClientRectangle.Contains(e.Location) ||
+                          Ui.SameSpot(_downPoint, PointToScreen(e.Location))))
+                OnClick(EventArgs.Empty);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (!Enabled || e.Button != MouseButtons.Left) return;
+            _downPoint = PointToScreen(e.Location);
+            _down = true;
         }
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
@@ -531,6 +585,8 @@ namespace ShieldGate
         private string[] _options = new string[0];
         private int _selected;
         private int _hot = -1;
+        private int _downHit = -1;
+        private Point _downPoint;
 
         public Segment()
         {
@@ -628,11 +684,23 @@ namespace ShieldGate
             Invalidate();
         }
 
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            _downHit = Hit(e.Location);
+            _downPoint = PointToScreen(e.Location);
+        }
+
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
             if (e.Button != MouseButtons.Left) return;
-            int h = Hit(e.Location);
+            // Con trỏ đứng yên thì giữ lựa chọn ghi lúc nhấn: control có thể đã
+            // dời chỗ vì trang cuộn khi nhận focus.
+            int h = Ui.SameSpot(_downPoint, PointToScreen(e.Location))
+                ? _downHit : Hit(e.Location);
+            _downHit = -1;
             if (h >= 0) SelectedIndex = h;
         }
 

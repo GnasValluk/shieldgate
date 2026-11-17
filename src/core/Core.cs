@@ -16,12 +16,13 @@ namespace ShieldGate
     internal static class AppInfo
     {
         public const string Name = "ShieldGate";
-        public const string Version = "1.0";
+        public const string Version = "2.0";
         public const string TaskName = "ShieldGate USB Guard";
         public const string TrayTaskName = "ShieldGate Tray";
-        public const string MutexName = "Global\\ShieldGate_USBGuard_1";
-        public const string UiMutexName = "Local\\ShieldGate_UI_1";
-        public const string TrayMutexName = "Local\\ShieldGate_Tray_1";
+        // Tên mutex nội bộ đổi theo phiên bản lớn để bản 1.0 và 2.0 không tranh nhau.
+        public const string MutexName = "Global\\ShieldGate_USBGuard_2";
+        public const string UiMutexName = "Local\\ShieldGate_UI_2";
+        public const string TrayMutexName = "Local\\ShieldGate_Tray_2";
     }
 
     internal static class Paths
@@ -41,6 +42,10 @@ namespace ShieldGate
         public static string LastScan;
         public static string GuardConfig;
         public static string SystemDrive;
+        public static string RulesFile;
+        public static string DevicesFile;
+        public static string EventsFile;
+        public static string RepairDir;
 
         static Paths()
         {
@@ -88,6 +93,10 @@ namespace ShieldGate
             PolicyBackup = Path.Combine(BakDir, "immunize.txt");
             LastScan = Path.Combine(Root, "last_scan.txt");
             GuardConfig = Path.Combine(Root, "guard.cfg");
+            RulesFile = Path.Combine(Root, "rules.json");
+            DevicesFile = Path.Combine(Root, "devices.json");
+            EventsFile = Path.Combine(Root, "events.tsv");
+            RepairDir = Path.Combine(Root, "repair");
             EnsureDirs();
         }
 
@@ -110,6 +119,8 @@ namespace ShieldGate
                 Grant(BakDir, false, out ignored);
                 // Tệp cách ly là mẫu virus sống: người dùng thường không cần đọc.
                 Grant(QuarDir, false, out ignored);
+                // Bản sao lưu ổ và marker chkdsk không được để người dùng thường sửa.
+                Grant(RepairDir, false, out ignored);
             }
             catch { }
         }
@@ -128,7 +139,7 @@ namespace ShieldGate
 
         public static void EnsureDirs()
         {
-            foreach (string d in new[] { Root, LogDir, QuarDir, BakDir, BinDir })
+            foreach (string d in new[] { Root, LogDir, QuarDir, BakDir, BinDir, RepairDir })
             {
                 try { Directory.CreateDirectory(d); }
                 catch { }
@@ -344,6 +355,16 @@ namespace ShieldGate
         public bool IsDir;
         public int Depth;
         public string Rel;
+
+        // Chỉ đọc khi detector cần; không gọi FileInfo cho mọi tệp trong lúc walk.
+        public long Size
+        {
+            get
+            {
+                try { return new FileInfo(Path).Length; }
+                catch { return -1; }
+            }
+        }
     }
 
     internal sealed class WalkStats

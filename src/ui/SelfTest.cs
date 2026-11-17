@@ -26,7 +26,7 @@ namespace ShieldGate
             Environment.SetEnvironmentVariable("SHIELDGATE_HOME", root);
 
             int passed = 0;
-            int total = 22;
+            int total = 35;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -395,6 +395,233 @@ namespace ShieldGate
             if (longSeed.Length > 0) { try { File.Delete(longSeed); } catch { } }
             check(S.Selftest.LongPathQuarantine, longOk);
 
+            // 18. JSON: chú thích, mảng, số, null và ký tự thoát; ghi lại rồi đọc lần nữa.
+            bool jsonOk = false;
+            try
+            {
+                object parsed = Json.Parse("// chu thich\r\n{ \"a\": [1, true, null, \"x\\ny\"], \"b\": 2.5 }");
+                Dictionary<string, object> obj = Json.AsObject(parsed);
+                List<object> arr = Json.AsArray(Json.Get(obj, "a"));
+                string round = Json.Serialize(obj, false);
+                Dictionary<string, object> again = Json.AsObject(Json.Parse(round));
+                jsonOk = arr != null && arr.Count == 4 && arr[2] == null
+                      && arr[1] is bool && (bool)arr[1]
+                      && arr[3] as string == "x\ny"
+                      && Json.Str(again, "b", "") == "2.5";
+            }
+            catch { }
+            check(S.Selftest.JsonRoundTrip, jsonOk);
+
+            // 19. JSON hỏng phải ném lỗi, không được trả về nửa chừng.
+            bool jsonReject = false;
+            try { Json.Parse("{ \"a\": [1, }"); }
+            catch { jsonReject = true; }
+            check(S.Selftest.JsonReject, jsonReject);
+
+            // 20. Luật mặc định: ngưỡng, trọng số và bộ đuôi tệp.
+            bool rulesDefault = false;
+            try
+            {
+                RulesData d = Rules.Current;
+                rulesDefault = d.ScoreThreshold == 3 && d.Weight("double-extension") == 5
+                            && d.IsScriptExt(".vbs") && d.IsDangerousExt(".exe")
+                            && d.BehaviorWindowSeconds >= 3;
+            }
+            catch { }
+            check(S.Selftest.RulesDefaults, rulesDefault);
+
+            // 21. rules.json trong thư mục dữ liệu đổi được ngưỡng và trọng số.
+            bool rulesCustom = false;
+            try
+            {
+                Paths.EnsureDirs();
+                File.WriteAllText(Paths.RulesFile,
+                    "{ \"scoreThreshold\": 7, \"weights\": { \"double-extension\": 9 }, " +
+                    "\"scriptExts\": [\"abc\"] }", new UTF8Encoding(false));
+                Rules.Reload();
+                RulesData d = Rules.Current;
+                rulesCustom = d.ScoreThreshold == 7 && d.Weight("double-extension") == 9
+                           && d.IsScriptExt(".abc") && !d.IsScriptExt(".vbs");
+            }
+            catch { }
+            check(S.Selftest.RulesCustom, rulesCustom);
+
+            // 22. Tệp luật hỏng: quay về mặc định, không ném lỗi ra ngoài.
+            bool rulesCorrupt = false;
+            try
+            {
+                File.WriteAllText(Paths.RulesFile, "{ khong phai json ",
+                                  new UTF8Encoding(false));
+                Rules.Reload();
+                RulesData d = Rules.Current;
+                rulesCorrupt = d.ScoreThreshold == 3 && d.Weight("double-extension") == 5
+                            && d.IsScriptExt(".vbs");
+            }
+            catch { }
+            check(S.Selftest.RulesCorrupt, rulesCorrupt);
+            try
+            {
+                File.WriteAllText(Paths.RulesFile, Rules.DefaultJson, new UTF8Encoding(false));
+                Rules.Reload();
+            }
+            catch { }
+
+            // 23. Điểm cộng theo trọng số và luôn chặn ở 10.
+            bool scoringOk = false;
+            try
+            {
+                RulesData d = Rules.Current;
+                int two = Scoring.Evaluate(new List<string>(new string[] { "target", "args" }), d);
+                int many = Scoring.Evaluate(new List<string>(new string[]
+                    { "target", "args", "args-relative-exe", "autorun-payload", "ntlm-leak" }), d);
+                scoringOk = two == 6 && many == 10 && Scoring.Evaluate(null, d) == 0;
+            }
+            catch { }
+            check(S.Selftest.Scoring, scoringOk);
+
+            // 24. Detector 2.0 trên ổ giả riêng: đuôi kép, RLO, NTLM, desktop.ini,
+            //     script gốc và macro chỉ gắn cờ.
+            bool pipelineOk = false;
+            try
+            {
+                string detect = Path.Combine(root, "detect");
+                Directory.CreateDirectory(detect);
+                File.WriteAllText(Path.Combine(detect, "baocao.pdf.exe"), "MZ",
+                                  new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(detect, "tailieu\u202Etxt.exe"), "MZ",
+                                  new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(detect, "leak.url"),
+                    "[InternetShortcut]\r\nURL=http://example.invalid/\r\n" +
+                    "IconFile=\\\\evil.invalid\\share\\icon.ico\r\n",
+                    new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(detect, "desktop.ini"),
+                    "[.ShellClassInfo]\r\nCLSID={88C6C381-2E85-11D0-94DE-444553540000}\r\n",
+                    new UTF8Encoding(true));
+                File.SetAttributes(Path.Combine(detect, "desktop.ini"),
+                    FileAttributes.Hidden | FileAttributes.System);
+                File.WriteAllText(Path.Combine(detect, "fix.reg"),
+                    "Windows Registry Editor Version 5.00\r\n", new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(detect, "hopdong.docm"), "x",
+                                  new UTF8Encoding(false));
+
+                UsbScanResult dr = UsbScan.Detect(detect, null, null);
+                bool doubleExt = false, rlo = false, ntlm = false;
+                bool desktop = false, macroFlag = false, rootScript = false;
+                foreach (UsbItem it in dr.Items)
+                {
+                    if (HasCode(it, "double-extension")) doubleExt = it.High;
+                    if (HasCode(it, "rlo-name")) rlo = it.High;
+                    if (HasCode(it, "ntlm-leak")) ntlm = it.High;
+                    if (HasCode(it, "root-desktop-ini")) desktop = true;
+                    if (HasCode(it, "root-script")) rootScript = true;
+                    if (HasCode(it, "office-macro")) macroFlag = it.FlagOnly && !it.High;
+                }
+                pipelineOk = doubleExt && rlo && ntlm && desktop && rootScript && macroFlag;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("  " + e.Message);
+            }
+            check(S.Selftest.DetectorPipeline, pipelineOk);
+
+            // 25. Dòng thời gian: ghi, đọc lại và xuất CSV/HTML.
+            bool eventsOk = false;
+            try
+            {
+                ShieldGate.Events.Add("selftest", "INFO", "selftest-subject", "selftest-detail");
+                List<EventEntry> list = ShieldGate.Events.Read(20);
+                bool seen = false;
+                foreach (EventEntry e in list)
+                {
+                    if (e.Kind == "selftest" && e.Severity == "INFO"
+                        && e.Subject == "selftest-subject" && e.Detail == "selftest-detail")
+                        seen = true;
+                }
+                string csv = Path.Combine(root, "events.csv");
+                string html = Path.Combine(root, "events.html");
+                bool exported = ShieldGate.Events.ExportCsv(csv)
+                             && ShieldGate.Events.ExportHtml(html)
+                             && File.ReadAllText(csv).IndexOf("selftest-subject",
+                                    StringComparison.Ordinal) >= 0
+                             && File.ReadAllText(html).IndexOf("selftest-subject",
+                                    StringComparison.Ordinal) >= 0;
+                eventsOk = seen && exported;
+            }
+            catch { }
+            check(S.Selftest.EventTimeline, eventsOk);
+
+            // 26. Kho thiết bị: ghi/đọc/xoá theo khoá ổn định, không theo ký tự ổ.
+            bool trustOk = false;
+            string trustKey = "selftest:vid_0000&pid_0000:serial";
+            try
+            {
+                bool set = DeviceStore.SetTrust(trustKey, DeviceTrust.Blocked);
+                bool found = false;
+                foreach (DeviceRecord r in DeviceStore.All())
+                    if (string.Equals(r.Key, trustKey, StringComparison.OrdinalIgnoreCase)
+                        && r.Trust == DeviceTrust.Blocked) found = true;
+                bool forgot = DeviceStore.Forget(trustKey);
+                bool gone = true;
+                foreach (DeviceRecord r in DeviceStore.All())
+                    if (string.Equals(r.Key, trustKey, StringComparison.OrdinalIgnoreCase)) gone = false;
+                trustOk = set && found && forgot && gone;
+            }
+            catch { try { DeviceStore.Forget(trustKey); } catch { } }
+            check(S.Selftest.DeviceTrustStore, trustOk);
+
+            // 27. Sửa ổ: từ chối ổ hệ thống và đường dẫn không dùng được.
+            bool repairGuards = false;
+            try
+            {
+                string reason;
+                bool system = Repair.RefuseReason(Paths.SystemDrive, out reason)
+                           && reason.Length > 0;
+                bool empty = Repair.RefuseReason("", out reason);
+                bool badPath = Repair.RefuseReason("Z:\\shieldgate-selftest-missing", out reason);
+                repairGuards = system && empty && badPath;
+            }
+            catch { }
+            check(S.Selftest.RepairGuards, repairGuards);
+
+            // 28. Đọc thử chỉ đọc trên thư mục tạm; không ghi, không xoá.
+            bool readOk = false;
+            try
+            {
+                ReadTestResult r = Repair.ReadTest(usb, 5, 8L * 1024 * 1024);
+                readOk = r.Bytes > 0 && r.Errors == 0;
+            }
+            catch { }
+            check(S.Selftest.RepairReadTest, readOk);
+
+            // 29. Marker sao lưu: chỉ báo đã sao lưu khi tệp đánh dấu tồn tại.
+            bool markerOk = false;
+            string marker = Path.Combine(Paths.RepairDir, "backup-Z.ok");
+            try
+            {
+                Paths.EnsureDirs();
+                if (File.Exists(marker)) File.Delete(marker);
+                bool before = !Repair.HasBackup("Z:\\");
+                File.WriteAllText(marker, "x", new UTF8Encoding(false));
+                bool after = Repair.HasBackup("Z:\\");
+                File.Delete(marker);
+                bool gone = !Repair.HasBackup("Z:\\");
+                markerOk = before && after && gone;
+            }
+            catch { try { File.Delete(marker); } catch { } }
+            check(S.Selftest.RepairBackupMarker, markerOk);
+
+            // 30. Xem trước sao lưu: đếm dự phòng bằng Tree.Walk khi không đọc
+            // được bản tổng kết robocopy (Windows bản địa hoá).
+            bool countOk = false;
+            try
+            {
+                long files, bytes;
+                Repair.CountTree(usb, out files, out bytes);
+                countOk = files >= 3 && bytes > 0;
+            }
+            catch { }
+            check(S.Selftest.RepairPreviewCount, countOk);
+
             try { Directory.Delete(root, true); }
             catch { }
 
@@ -405,6 +632,17 @@ namespace ShieldGate
             }
             Console.WriteLine(S.Cli.SelftestFail(passed, total, firstError));
             return 1;
+        }
+
+        // Mã có thể kèm chi tiết dạng "code=detail"; so khớp cả hai dạng.
+        private static bool HasCode(UsbItem item, string code)
+        {
+            foreach (string c in item.Codes)
+            {
+                if (string.Equals(c, code, StringComparison.Ordinal)) return true;
+                if (c.StartsWith(code + "=", StringComparison.Ordinal)) return true;
+            }
+            return false;
         }
 
         // Tạo shortcut .lnk qua WScript.Shell, không cần thư viện ngoài.

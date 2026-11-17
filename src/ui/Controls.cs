@@ -8,7 +8,7 @@ using System.Windows.Forms;
 
 namespace ShieldGate
 {
-    internal enum PageId { Overview = 0, Usb = 1, Protect = 2, Log = 3, About = 4 }
+    internal enum PageId { Overview = 0, Usb = 1, Protect = 2, Devices = 3, Repair = 4, Log = 5, About = 6 }
 
     // ------------------------------------------------------------ điều hướng
 
@@ -16,6 +16,8 @@ namespace ShieldGate
     {
         private bool _active;
         private bool _hot;
+        private bool _down;
+        private Point _downPoint;
         private string _icon = "grid";
 
         public NavButton(string text, string icon)
@@ -89,8 +91,20 @@ namespace ShieldGate
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
-            if (e.Button == MouseButtons.Left && ClientRectangle.Contains(e.Location))
+            if (e.Button != MouseButtons.Left) return;
+            bool click = _down;
+            _down = false;
+            if (click && (ClientRectangle.Contains(e.Location) ||
+                          Ui.SameSpot(_downPoint, PointToScreen(e.Location))))
                 OnClick(EventArgs.Empty);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            _downPoint = PointToScreen(e.Location);
+            _down = true;
         }
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
@@ -140,6 +154,8 @@ namespace ShieldGate
             Add("grid", S.Nav.Overview, PageId.Overview);
             Add("usb", S.Nav.Usb, PageId.Usb);
             Add("shield", S.Nav.Protect, PageId.Protect);
+            Add("chip", S.Nav.Devices, PageId.Devices);
+            Add("wrench", S.Nav.Repair, PageId.Repair);
             Add("list", S.Nav.Log, PageId.Log);
 
             _about = new NavButton(S.Nav.About, "info");
@@ -255,6 +271,8 @@ namespace ShieldGate
         private readonly List<Row> _rows = new List<Row>();
         private int _focus = -1;
         private int _hot = -1;
+        private int _downRow = -1;
+        private Point _downPoint;
         private string _empty = "";
 
         public UsbListControl()
@@ -285,7 +303,7 @@ namespace ShieldGate
                 {
                     Row r = new Row();
                     r.Item = i;
-                    r.Checked = true;
+                    r.Checked = !i.FlagOnly;
                     _rows.Add(r);
                 }
             }
@@ -326,7 +344,7 @@ namespace ShieldGate
 
         public void SetAll(bool value)
         {
-            foreach (Row r in _rows) r.Checked = value;
+            foreach (Row r in _rows) r.Checked = value && !r.Item.FlagOnly;
             Invalidate();
             if (SelectionChanged != null) SelectionChanged(this, EventArgs.Empty);
         }
@@ -365,7 +383,7 @@ namespace ShieldGate
                 }
 
                 DrawCheck(g, new Rectangle(Ui.Px(4), r.Y + (rh - Ui.Px(16)) / 2, Ui.Px(16), Ui.Px(16)),
-                          row.Checked);
+                          row.Checked, row.Item.FlagOnly);
 
                 int textX = Ui.Px(32);
                 int right = Width - Ui.Px(12);
@@ -386,8 +404,16 @@ namespace ShieldGate
             }
         }
 
-        private void DrawCheck(Graphics g, Rectangle box, bool on)
+        private void DrawCheck(Graphics g, Rectangle box, bool on, bool flagged)
         {
+            if (flagged)
+            {
+                Ui.RoundFill(g, box, Ui.Px(3), Theme.Surface);
+                Ui.RoundStroke(g, box, Ui.Px(3), Theme.BorderStrong, 1f);
+                int y = box.Top + box.Height / 2;
+                Ui.HLine(g, box.Left + Ui.Px(4), box.Right - Ui.Px(4), y, Theme.BorderStrong);
+                return;
+            }
             if (on)
             {
                 Ui.RoundFill(g, box, Ui.Px(3), Theme.Accent);
@@ -429,17 +455,25 @@ namespace ShieldGate
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Left) Focus();
+            if (e.Button != MouseButtons.Left) return;
+            // Ghi nhớ dòng ngay lúc nhấn: Focus() có thể làm trang cuộn và đổi
+            // dòng nằm dưới con trỏ trước khi nhả chuột.
+            _downRow = HitRow(e.Location);
+            _downPoint = PointToScreen(e.Location);
+            Focus();
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
             if (e.Button != MouseButtons.Left) return;
-            int idx = HitRow(e.Location);
+            int idx = Ui.SameSpot(_downPoint, PointToScreen(e.Location))
+                ? _downRow : HitRow(e.Location);
+            _downRow = -1;
             if (idx < 0) return;
-            _rows[idx].Checked = !_rows[idx].Checked;
             _focus = idx;
+            if (_rows[idx].Item.FlagOnly) { Invalidate(); return; }
+            _rows[idx].Checked = !_rows[idx].Checked;
             Invalidate();
             if (SelectionChanged != null) SelectionChanged(this, EventArgs.Empty);
         }
@@ -475,9 +509,12 @@ namespace ShieldGate
             {
                 if (_focus >= 0 && _focus < _rows.Count)
                 {
-                    _rows[_focus].Checked = !_rows[_focus].Checked;
-                    Invalidate();
-                    if (SelectionChanged != null) SelectionChanged(this, EventArgs.Empty);
+                    if (!_rows[_focus].Item.FlagOnly)
+                    {
+                        _rows[_focus].Checked = !_rows[_focus].Checked;
+                        Invalidate();
+                        if (SelectionChanged != null) SelectionChanged(this, EventArgs.Empty);
+                    }
                 }
                 e.Handled = true;
             }
@@ -503,6 +540,7 @@ namespace ShieldGate
     {
         private bool _checked;
         private bool _hot;
+        private Point _downPoint;
         private string _detail = "";
 
         public SwitchRow()
@@ -606,7 +644,16 @@ namespace ShieldGate
         {
             base.OnMouseUp(e);
             if (!Enabled || e.Button != MouseButtons.Left) return;
-            if (ClientRectangle.Contains(e.Location)) Checked = !Checked;
+            if (ClientRectangle.Contains(e.Location) ||
+                Ui.SameSpot(_downPoint, PointToScreen(e.Location)))
+                Checked = !Checked;
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (!Enabled || e.Button != MouseButtons.Left) return;
+            _downPoint = PointToScreen(e.Location);
         }
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
@@ -638,6 +685,8 @@ namespace ShieldGate
         private string[] _items = new string[0];
         private int _selected = -1;
         private bool _hot;
+        private bool _down;
+        private Point _downPoint;
         private ContextMenuStrip _menu;
 
         public SelectBox()
@@ -761,8 +810,21 @@ namespace ShieldGate
         {
             base.OnMouseUp(e);
             if (e.Button != MouseButtons.Left) return;
+            bool click = _down;
+            _down = false;
+            if (!click) return;
+            if (!ClientRectangle.Contains(e.Location) &&
+                !Ui.SameSpot(_downPoint, PointToScreen(e.Location))) return;
             Focus();
             OpenMenu();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            _downPoint = PointToScreen(e.Location);
+            _down = true;
         }
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
@@ -811,6 +873,8 @@ namespace ShieldGate
     {
         private readonly List<DriveRow> _rows = new List<DriveRow>();
         private int _hot = -1;
+        private int _downRow = -1;
+        private Point _downPoint;
 
         public DriveList()
         {
@@ -892,12 +956,523 @@ namespace ShieldGate
             Invalidate();
         }
 
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            _downRow = HitRow(e.Location);
+            _downPoint = PointToScreen(e.Location);
+        }
+
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
             if (e.Button != MouseButtons.Left) return;
-            int idx = HitRow(e.Location);
+            int idx = Ui.SameSpot(_downPoint, PointToScreen(e.Location))
+                ? _downRow : HitRow(e.Location);
+            _downRow = -1;
             if (idx >= 0 && RowClicked != null) RowClicked(_rows[idx].Drive);
+        }
+    }
+
+    // ------------------------------------------------------- danh sách thiết bị
+
+    internal sealed class DeviceListControl : ScrollableControl
+    {
+        private readonly List<DeviceInfo> _rows = new List<DeviceInfo>();
+        private int _focus = -1;
+        private int _hot = -1;
+        private int _downRow = -1;
+        private Point _downPoint;
+        private string _empty = "";
+
+        public DeviceListControl()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            AutoScroll = true;
+            BackColor = Theme.Surface;
+            TabStop = true;
+            AccessibleRole = AccessibleRole.List;
+            AccessibleName = S.Devices.ConnectedTitle;
+        }
+
+        public int RowHeight { get { return Ui.Px(58); } }
+
+        public string EmptyText
+        {
+            get { return _empty; }
+            set { _empty = value ?? ""; Invalidate(); }
+        }
+
+        public DeviceInfo Selected
+        {
+            get { return _focus >= 0 && _focus < _rows.Count ? _rows[_focus] : null; }
+        }
+
+        public event EventHandler SelectionChanged;
+
+        public void SetItems(IList<DeviceInfo> items)
+        {
+            // Giữ lựa chọn theo khoá thiết bị: quét lại không nhảy về dòng đầu.
+            string keep = Selected == null ? "" : Selected.Key;
+            _rows.Clear();
+            if (items != null) _rows.AddRange(items);
+            _focus = -1;
+            for (int i = 0; i < _rows.Count && keep.Length > 0; i++)
+            {
+                if (!string.Equals(_rows[i].Key, keep, StringComparison.OrdinalIgnoreCase)) continue;
+                _focus = i;
+                break;
+            }
+            if (_focus < 0 && _rows.Count > 0) _focus = 0;
+            AutoScrollPosition = new Point(0, 0);
+            UpdateScroll();
+            Invalidate();
+            RaiseSelection();
+        }
+
+        private void UpdateScroll()
+        {
+            AutoScrollMinSize = new Size(0, _rows.Count * RowHeight);
+        }
+
+        private void RaiseSelection()
+        {
+            if (SelectionChanged != null) SelectionChanged(this, EventArgs.Empty);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(Theme.Surface);
+
+            if (_rows.Count == 0)
+            {
+                if (_empty.Length > 0)
+                    Ui.Text(g, _empty, Theme.Body, Theme.InkMuted,
+                        new Rectangle(Ui.Px(4), Ui.Px(16), Width - Ui.Px(8), Ui.Px(40)),
+                        TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak);
+                return;
+            }
+
+            // Thanh cuộn dọc nằm đè lên vùng vẽ: chừa chỗ để chip không bị cắt.
+            int sb = VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
+            int areaW = Width - sb;
+            int oy = AutoScrollPosition.Y;
+            int rh = RowHeight;
+            int first = Math.Max(0, (-oy) / rh);
+            int last = Math.Min(_rows.Count - 1, (-oy + Height) / rh + 1);
+
+            for (int i = first; i <= last; i++)
+            {
+                DeviceInfo d = _rows[i];
+                Rectangle r = new Rectangle(0, oy + i * rh, Width, rh);
+                bool selected = i == _focus;
+
+                if (selected) Ui.Fill(g, r, Theme.AccentSoft);
+                else if (i == _hot) Ui.Fill(g, r, Theme.HoverSoft);
+                if (selected) Ui.Fill(g, new Rectangle(0, r.Y + 1, Ui.Px(2), rh - 3), Theme.Accent);
+
+                // Đo chip trước để chừa chỗ cho tên; chip nằm bên phải, cùng hàng.
+                int chipH = Ui.Px(20);
+                int chipTop = r.Y + (rh - chipH) / 2;
+                int right = areaW - Ui.Px(12);
+
+                string trust = S.Devices.TrustName(d.Trust);
+                Color trustFore = Theme.InkMuted, trustBack = Theme.HoverSoft;
+                if (d.Trust == DeviceTrust.Trusted) { trustFore = Theme.Safe; trustBack = Theme.SafeSoft; }
+                else if (d.Trust == DeviceTrust.Blocked) { trustFore = Theme.Danger; trustBack = Theme.DangerSoft; }
+                int trustW = Ui.Measure(trust, Theme.SmallStrong).Width + Ui.Px(14);
+                Rectangle trustBox = new Rectangle(right - trustW, chipTop, trustW, chipH);
+                Ui.Chip(g, trust, Theme.SmallStrong, trustBox, trustBack, trustFore);
+
+                int textRight = trustBox.Left - Ui.Px(8);
+                if (d.CompositeSuspect)
+                {
+                    string note = S.Devices.CompositeChip;
+                    int noteW = Ui.Measure(note, Theme.SmallStrong).Width + Ui.Px(14);
+                    Rectangle noteBox = new Rectangle(textRight - noteW, chipTop, noteW, chipH);
+                    Ui.Chip(g, note, Theme.SmallStrong, noteBox, Theme.WarnSoft, Theme.Warn);
+                    textRight = noteBox.Left - Ui.Px(8);
+                }
+
+                int icon = Ui.Px(18);
+                Icons.Draw(g, d.Removable ? "usb" : "chip",
+                    new Rectangle(Ui.Px(14), r.Y + Ui.Px(13), icon, icon),
+                    selected ? Theme.Accent : Theme.InkMuted);
+
+                int textX = Ui.Px(40);
+                int textW = Math.Max(Ui.Px(40), textRight - textX);
+                Ui.Text(g, d.Name, Theme.BodyStrong, Theme.Ink,
+                    new Rectangle(textX, r.Y + Ui.Px(8), textW, Ui.Px(22)),
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.PathEllipsis);
+                Ui.Text(g, Detail(d), Theme.Small, Theme.InkMuted,
+                    new Rectangle(textX, r.Y + Ui.Px(29), textW, Ui.Px(20)),
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+
+                if (i < _rows.Count - 1) Ui.HLine(g, 0, areaW, r.Bottom - 1, Theme.LineSoft);
+            }
+        }
+
+        // Dòng phụ: loại thiết bị · ổ · VID/PID. Chỉ để nhận diện, không phải dữ liệu mật.
+        private static string Detail(DeviceInfo d)
+        {
+            string text = S.Devices.TypeName(d.DeviceClass);
+            if (d.Drives != null && d.Drives.Count > 0)
+                text += " · " + string.Join(" ", d.Drives.ToArray());
+            string hw = d.HardwareId;
+            if (hw.Length > 0) text += " · " + hw.Replace('&', ' ');
+            return text;
+        }
+
+        private int HitRow(Point p)
+        {
+            int idx = (p.Y - AutoScrollPosition.Y) / RowHeight;
+            return (idx >= 0 && idx < _rows.Count) ? idx : -1;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int idx = HitRow(e.Location);
+            if (idx != _hot)
+            {
+                _hot = idx;
+                Cursor = idx >= 0 ? Cursors.Hand : Cursors.Default;
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            _hot = -1;
+            Cursor = Cursors.Default;
+            Invalidate();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            // Ghi nhớ dòng ngay lúc nhấn: Focus() có thể làm trang cuộn.
+            _downRow = HitRow(e.Location);
+            _downPoint = PointToScreen(e.Location);
+            Focus();
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (e.Button != MouseButtons.Left) return;
+            int idx = Ui.SameSpot(_downPoint, PointToScreen(e.Location))
+                ? _downRow : HitRow(e.Location);
+            _downRow = -1;
+            if (idx < 0 || idx == _focus)
+            {
+                Invalidate();
+                return;
+            }
+            _focus = idx;
+            EnsureVisible(idx);
+            Invalidate();
+            RaiseSelection();
+        }
+
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+        protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            Keys k = keyData & Keys.KeyCode;
+            if (k == Keys.Up || k == Keys.Down || k == Keys.Home || k == Keys.End) return true;
+            return base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            if (_rows.Count == 0) return;
+            if (e.KeyCode == Keys.Up) { SelectIndex(_focus - 1); e.Handled = true; }
+            else if (e.KeyCode == Keys.Down) { SelectIndex(_focus + 1); e.Handled = true; }
+            else if (e.KeyCode == Keys.Home) { SelectIndex(0); e.Handled = true; }
+            else if (e.KeyCode == Keys.End) { SelectIndex(_rows.Count - 1); e.Handled = true; }
+        }
+
+        private void SelectIndex(int index)
+        {
+            int v = Math.Max(0, Math.Min(_rows.Count - 1, index));
+            EnsureVisible(v);
+            if (v == _focus) return;
+            _focus = v;
+            Invalidate();
+            RaiseSelection();
+        }
+
+        private void EnsureVisible(int index)
+        {
+            int top = -AutoScrollPosition.Y;
+            int want = index * RowHeight;
+            if (want < top) AutoScrollPosition = new Point(0, want);
+            else if (want + RowHeight > top + Height)
+                AutoScrollPosition = new Point(0, want + RowHeight - Height);
+        }
+    }
+
+    // ------------------------------------------------------ dòng thời gian
+
+    internal sealed class EventListControl : ScrollableControl
+    {
+        private readonly List<EventEntry> _rows = new List<EventEntry>();
+        private string _empty = "";
+
+        public EventListControl()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            AutoScroll = true;
+            BackColor = Theme.Surface;
+            TabStop = true;
+            AccessibleRole = AccessibleRole.List;
+            AccessibleName = S.Devices.EventsTitle;
+        }
+
+        public int RowHeight { get { return Ui.Px(50); } }
+
+        public string EmptyText
+        {
+            get { return _empty; }
+            set { _empty = value ?? ""; Invalidate(); }
+        }
+
+        public void SetItems(IList<EventEntry> items)
+        {
+            _rows.Clear();
+            if (items != null) _rows.AddRange(items);
+            AutoScrollPosition = new Point(0, 0);
+            AutoScrollMinSize = new Size(0, _rows.Count * RowHeight);
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(Theme.Surface);
+
+            if (_rows.Count == 0)
+            {
+                if (_empty.Length > 0)
+                    Ui.Text(g, _empty, Theme.Body, Theme.InkMuted,
+                        new Rectangle(Ui.Px(4), Ui.Px(14), Width - Ui.Px(8), Ui.Px(36)),
+                        TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak);
+                return;
+            }
+
+            int sb = VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
+            int areaW = Width - sb;
+            int oy = AutoScrollPosition.Y;
+            int rh = RowHeight;
+            int first = Math.Max(0, (-oy) / rh);
+            int last = Math.Min(_rows.Count - 1, (-oy + Height) / rh + 1);
+            int timeW = Ui.Px(118);
+
+            for (int i = first; i <= last; i++)
+            {
+                EventEntry ev = _rows[i];
+                Rectangle r = new Rectangle(0, oy + i * rh, Width, rh);
+
+                Color levelFore = Theme.InkMuted, levelBack = Theme.HoverSoft;
+                if (string.Equals(ev.Severity, "ERROR", StringComparison.OrdinalIgnoreCase))
+                { levelFore = Theme.Danger; levelBack = Theme.DangerSoft; }
+                else if (string.Equals(ev.Severity, "WARN", StringComparison.OrdinalIgnoreCase))
+                { levelFore = Theme.Warn; levelBack = Theme.WarnSoft; }
+
+                Ui.TextLeft(g, ev.TimeText, Theme.Small, Theme.InkFaint,
+                    new Rectangle(0, r.Y + Ui.Px(5), timeW, Ui.Px(22)));
+
+                string level = string.IsNullOrEmpty(ev.Severity) ? "INFO" : ev.Severity.ToUpperInvariant();
+                int chipH = Ui.Px(18);
+                int chipW = Ui.Measure(level, Theme.Tiny).Width + Ui.Px(12);
+                Rectangle chip = new Rectangle(timeW + Ui.Px(8), r.Y + Ui.Px(7), chipW, chipH);
+                Ui.Chip(g, level, Theme.Tiny, chip, levelBack, levelFore);
+
+                int textX = chip.Right + Ui.Px(10);
+                int textW = Math.Max(Ui.Px(60), areaW - textX - Ui.Px(6));
+                Ui.Text(g, ev.Subject, Theme.BodyStrong, Theme.Ink,
+                    new Rectangle(textX, r.Y + Ui.Px(5), textW, Ui.Px(22)),
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+                Ui.Text(g, ev.Detail, Theme.Small, Theme.InkMuted,
+                    new Rectangle(timeW + Ui.Px(8), r.Y + Ui.Px(27), areaW - timeW - Ui.Px(14), Ui.Px(20)),
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+
+                if (i < _rows.Count - 1) Ui.HLine(g, 0, areaW, r.Bottom - 1, Theme.LineSoft);
+            }
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            Focus();
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            Keys k = keyData & Keys.KeyCode;
+            if (k == Keys.Up || k == Keys.Down || k == Keys.PageUp ||
+                k == Keys.PageDown || k == Keys.Home || k == Keys.End) return true;
+            return base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            if (e.KeyCode == Keys.Up) ScrollBy(-RowHeight);
+            else if (e.KeyCode == Keys.Down) ScrollBy(RowHeight);
+            else if (e.KeyCode == Keys.PageUp) ScrollBy(-Height);
+            else if (e.KeyCode == Keys.PageDown) ScrollBy(Height);
+            else if (e.KeyCode == Keys.Home) ScrollTo(0);
+            else if (e.KeyCode == Keys.End) ScrollTo(_rows.Count * RowHeight - Height);
+            else return;
+            e.Handled = true;
+        }
+
+        private void ScrollBy(int dy)
+        {
+            ScrollTo(-AutoScrollPosition.Y + dy);
+        }
+
+        private void ScrollTo(int y)
+        {
+            int max = Math.Max(0, _rows.Count * RowHeight - Height);
+            int v = Math.Max(0, Math.Min(max, y));
+            if (v == -AutoScrollPosition.Y) return;
+            AutoScrollPosition = new Point(0, v);
+            Invalidate();
+        }
+    }
+
+    // ---------------------------------------------------------- thông tin ổ
+
+    internal sealed class InfoField
+    {
+        public string Label;
+        public string Value;
+        public int Span;
+        public Color ValueColor;
+
+        public InfoField(string label, string value)
+            : this(label, value, 1, Theme.Ink) { }
+
+        public InfoField(string label, string value, Color color)
+            : this(label, value, 1, color) { }
+
+        public InfoField(string label, string value, int span, Color color)
+        {
+            Label = label ?? "";
+            Value = value ?? "";
+            Span = span < 1 ? 1 : span;
+            ValueColor = color;
+        }
+    }
+
+    internal sealed class InfoCard : Control
+    {
+        private readonly List<InfoField> _fields = new List<InfoField>();
+
+        public InfoCard()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Surface;
+            TabStop = false;
+            AccessibleRole = AccessibleRole.Grouping;
+        }
+
+        public int RowHeight { get { return Ui.Px(26); } }
+
+        public void SetFields(IList<InfoField> fields)
+        {
+            _fields.Clear();
+            if (fields != null) _fields.AddRange(fields);
+            // Một dòng có thể chứa hai ô (Span = 1); tính đúng số dòng để thẻ
+            // không cao hơn nội dung.
+            int rows = 0, col = 0;
+            foreach (InfoField f in _fields)
+            {
+                if (f.Span >= 2)
+                {
+                    if (col != 0) { rows++; col = 0; }
+                    rows++;
+                }
+                else
+                {
+                    col++;
+                    if (col > 1) { rows++; col = 0; }
+                }
+            }
+            if (col != 0) rows++;
+            Height = Ui.Px(14) * 2 + rows * RowHeight + Ui.Px(2);
+            List<string> lines = new List<string>();
+            foreach (InfoField f in _fields) lines.Add(f.Label + ": " + f.Value);
+            AccessibleDescription = string.Join("; ", lines.ToArray());
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(Theme.Surface);
+            using (Pen pen = new Pen(Theme.Line))
+                g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+            if (_fields.Count == 0) return;
+
+            int pad = Ui.Px(14);
+            int gap = Ui.Px(16);
+            int labelW = Ui.Px(78);
+            int left = pad;
+            int innerW = Math.Max(Ui.Px(80), Width - pad * 2);
+            int colW = (innerW - gap) / 2;
+
+            int y = pad;
+            int col = 0;
+            bool firstRow = true;
+            foreach (InfoField f in _fields)
+            {
+                bool full = f.Span >= 2;
+                if (full && col != 0) { y += RowHeight; col = 0; }
+                if (col == 0)
+                {
+                    if (!firstRow) Ui.HLine(g, left, left + innerW, y, Theme.LineSoft);
+                    firstRow = false;
+                }
+                if (full)
+                {
+                    DrawField(g, f, left, y, innerW, labelW);
+                    y += RowHeight;
+                }
+                else
+                {
+                    DrawField(g, f, col == 0 ? left : left + colW + gap, y, colW, labelW);
+                    col++;
+                    if (col > 1) { col = 0; y += RowHeight; }
+                }
+            }
+        }
+
+        private void DrawField(Graphics g, InfoField f, int x, int y, int width, int labelW)
+        {
+            Ui.Text(g, f.Label, Theme.Small, Theme.InkMuted,
+                new Rectangle(x, y, labelW - Ui.Px(4), RowHeight),
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+            Ui.Text(g, f.Value, Theme.Body, f.ValueColor,
+                new Rectangle(x + labelW, y, Math.Max(Ui.Px(20), width - labelW), RowHeight),
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
         }
     }
 

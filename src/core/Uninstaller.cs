@@ -52,6 +52,13 @@ namespace ShieldGate
             Add(list, Paths.Heartbeat);
             Add(list, Paths.StopFlag);
             Add(list, Paths.PolicyBackup + ".bad");
+            // Dữ liệu 2.0: luật, kho thiết bị, timeline, bản sao lưu ổ và marker.
+            Add(list, Paths.RulesFile);
+            Add(list, Paths.DevicesFile);
+            Add(list, Paths.DevicesFile + ".tmp");
+            Add(list, Paths.EventsFile);
+            Add(list, Paths.EventsFile + ".1");
+            Add(list, Paths.RepairDir);
             return list;
         }
 

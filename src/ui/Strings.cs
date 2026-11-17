@@ -33,6 +33,8 @@ namespace ShieldGate
             public static string Overview { get { return T("Tổng quan", "Overview"); } }
             public static string Usb { get { return T("Xử lý USB", "USB scan"); } }
             public static string Protect { get { return T("Bảo vệ", "Protection"); } }
+            public static string Devices { get { return T("Thiết bị", "Devices"); } }
+            public static string Repair { get { return T("Sửa ổ", "Drive repair"); } }
             public static string Log { get { return T("Nhật ký", "Log"); } }
             public static string About { get { return T("Giới thiệu", "About"); } }
         }
@@ -306,6 +308,16 @@ namespace ShieldGate
                 if (code == "desktop-ini-clsid") return DesktopIniClsid;
                 if (code == "fake-folder-clsid") return FakeFolderClsid;
                 if (code == "payload-bundle") return PayloadBundle;
+                if (code.StartsWith("double-extension=", StringComparison.Ordinal)) return DoubleExtension(code.Substring(17));
+                if (code.StartsWith("rlo-name=", StringComparison.Ordinal)) return RloName;
+                if (code.StartsWith("root-script=", StringComparison.Ordinal)) return RootScript;
+                if (code.StartsWith("hidden-root-script=", StringComparison.Ordinal)) return HiddenRootScript;
+                if (code.StartsWith("ntlm-leak=", StringComparison.Ordinal)) return NtlmLeak;
+                if (code.StartsWith("root-desktop-ini=", StringComparison.Ordinal)) return RootDesktopIni;
+                if (code.StartsWith("alternate-data-stream=", StringComparison.Ordinal)) return AlternateDataStream(code.Substring(22));
+                if (code.StartsWith("hidden-ads=", StringComparison.Ordinal)) return HiddenAds(code.Substring(11));
+                if (code.StartsWith("sideload-dll=", StringComparison.Ordinal)) return SideloadDll(code.Substring(13));
+                if (code.StartsWith("office-macro=", StringComparison.Ordinal)) return OfficeMacro(code.Substring(13));
                 return "";
             }
 
@@ -336,6 +348,38 @@ namespace ShieldGate
             public static string DesktopIniClsid { get { return T("Thư mục có desktop.ini đặt CLSID để giả dạng thư mục hệ thống.", "Folder has a desktop.ini CLSID that makes it pose as a system folder."); } }
             public static string FakeFolderClsid { get { return T("Thư mục giả dạng thư mục hệ thống bằng desktop.ini và có tên gõ sai. Nội dung sẽ được cách ly.", "Folder poses as a system folder via desktop.ini and has a misspelled name. Its contents will be quarantined."); } }
             public static string PayloadBundle { get { return T("Thư mục chứa đúng bộ tệp của virus shortcut (1.exe, opera_elf.dll, adback.dat, link.dat, icudtl.dat). Nội dung sẽ được cách ly.", "Folder contains the shortcut virus payload set (1.exe, opera_elf.dll, adback.dat, link.dat, icudtl.dat). Its contents will be quarantined."); } }
+
+            // ---------------------------------------------------------- 2.0
+            public static string DoubleExtension(string name)
+            {
+                return T("Tên tệp có hai đuôi (" + name + "): đuôi đầu đánh lừa, đuôi cuối là tệp chạy.",
+                         "File has a double extension (" + name + "): the first looks harmless, the last one is executable.");
+            }
+            public static string RloName { get { return T("Tên tệp chứa ký tự đảo chiều U+202E để hiển thị sai đuôi thật.", "File name contains the U+202E right-to-left override so the real extension looks different."); } }
+            public static string RootScript { get { return T("Script nằm ngay gốc ổ: bấm vào là chạy, vị trí virus hay dùng.", "Script sits at the drive root: one click runs it, a common virus location."); } }
+            public static string HiddenRootScript { get { return T("Script bị ẩn ở gốc ổ — dấu hiệu mạnh của mã độc lây qua USB.", "A hidden script at the drive root — a strong sign of USB-borne malware."); } }
+            public static string NtlmLeak { get { return T("Tệp trỏ biểu tượng về đường dẫn mạng \\\\... có thể làm lộ hash đăng nhập Windows (NTLM).", "File points its icon to a network path \\\\... which can leak the Windows login hash (NTLM)."); } }
+            public static string RootDesktopIni { get { return T("desktop.ini ở gốc ổ đặt CLSID để thay đổi cách Windows hiển thị cả ổ.", "desktop.ini at the drive root sets a CLSID that changes how Windows displays the whole drive."); } }
+            public static string AlternateDataStream(string stream)
+            {
+                return T("Tệp có luồng dữ liệu ẩn (:" + stream + ") — nơi giấu nội dung ngoài phần nhìn thấy.",
+                         "File has a hidden data stream (:" + stream + ") — a place to stash content outside the visible file.");
+            }
+            public static string HiddenAds(string stream)
+            {
+                return T("Luồng ẩn (:" + stream + ") trên tệp ẩn hoặc mang tên tệp chạy — rất đáng ngờ.",
+                         "Hidden stream (:" + stream + ") on a hidden file or one with an executable name — highly suspicious.");
+            }
+            public static string SideloadDll(string name)
+            {
+                return T("DLL " + name + " không có chữ ký nằm cạnh EXE có chữ ký — kiểu DLL sideloading. Chỉ gắn cờ.",
+                         "Unsigned DLL " + name + " sits beside a signed EXE — a DLL sideloading pattern. Flagged only.");
+            }
+            public static string OfficeMacro(string name)
+            {
+                return T("Tài liệu Office có macro (" + name + "). Chỉ gắn cờ, không cách ly; chỉ mở nếu bạn tin nguồn.",
+                         "Office document contains macros (" + name + "). Flagged only, not quarantined; open it only if you trust the source.");
+            }
         }
 
         public static class Protect
@@ -394,6 +438,24 @@ namespace ShieldGate
                              "Repair folder, .exe and hidden-file keys if a virus damages them. Turning off only stops checking.");
                 }
             }
+            public static string SwitchWriteProtect { get { return T("Chặn ghi ổ USB", "Block writes to USB drives"); } }
+            public static string SwitchWriteProtectDetail
+            {
+                get
+                {
+                    return T("Bật khoá WriteProtect toàn máy cho ổ nhớ USB. Tắt sẽ trả lại giá trị cũ. Có thể ảnh hưởng ổ gắn ngoài.",
+                             "Enable the machine-wide WriteProtect policy for USB storage. Turning it off restores the previous value. May affect external drives.");
+                }
+            }
+            public static string SwitchBlockExec { get { return T("Chặn chạy tệp từ ổ rời", "Block programs running from removable drives"); } }
+            public static string SwitchBlockExecDetail
+            {
+                get
+                {
+                    return T("Theo dõi tiến trình đang chạy từ ổ rời và dừng tiến trình đó. Đây là lớp theo thời điểm, không phải chặn tuyệt đối.",
+                             "Watch processes running from removable drives and stop them. This is a point-in-time layer, not an absolute block.");
+                }
+            }
             public static string On { get { return T("Bật bảo vệ", "Turn on protection"); } }
             public static string Off { get { return T("Tắt bảo vệ", "Turn off protection"); } }
             public static string Tech { get { return T("Chi tiết kỹ thuật", "Technical details"); } }
@@ -409,6 +471,228 @@ namespace ShieldGate
             public static string Reload { get { return T("Chạy lại với quyền quản trị", "Restart as administrator"); } }
             public static string Applying { get { return T("Đang áp dụng thiết lập…", "Applying settings…"); } }
             public static string TechHide { get { return T("Ẩn chi tiết kỹ thuật", "Hide technical details"); } }
+        }
+
+        public static class Devices
+        {
+            public static string Title { get { return T("Thiết bị ngoại vi", "Peripheral devices"); } }
+            public static string Intro
+            {
+                get
+                {
+                    return T("Danh sách ổ, bàn phím, chuột, điện thoại và Bluetooth đang kết nối. Đánh dấu tin cậy để biết thiết bị quen; chặn chỉ là cảnh báo, không tự tắt thiết bị.",
+                             "Drives, keyboards, mice, phones and Bluetooth devices currently connected. Mark a device as trusted to recognise it; blocking only warns, it never disables the device.");
+                }
+            }
+            public static string Refresh { get { return T("Quét lại", "Scan again"); } }
+            public static string Scanning { get { return T("Đang kiểm tra thiết bị…", "Checking devices…"); } }
+            public static string ConnectedTitle { get { return T("Thiết bị đang kết nối", "Connected devices"); } }
+            public static string CompositeChip { get { return T("Nghi composite", "Composite?"); } }
+            public static string Empty { get { return T("Chưa thấy thiết bị ngoại vi nào.", "No peripheral device found."); } }
+            public static string ColumnName { get { return T("Tên", "Name"); } }
+            public static string ColumnType { get { return T("Loại", "Type"); } }
+            public static string ColumnDrives { get { return T("Ổ", "Drive"); } }
+            public static string ColumnTrust { get { return T("Tin cậy", "Trust"); } }
+            public static string TypeStorage { get { return T("Ổ nhớ", "Storage"); } }
+            public static string TypeKeyboard { get { return T("Bàn phím", "Keyboard"); } }
+            public static string TypeMouse { get { return T("Chuột", "Mouse"); } }
+            public static string TypeHid { get { return T("HID", "HID"); } }
+            public static string TypeBluetooth { get { return T("Bluetooth", "Bluetooth"); } }
+            public static string TypePhone { get { return T("Điện thoại", "Phone"); } }
+            public static string TypeNetwork { get { return T("Mạng", "Network"); } }
+            public static string TypeOther { get { return T("Khác", "Other"); } }
+            public static string Trusted { get { return T("Tin cậy", "Trusted"); } }
+            public static string Unknown { get { return T("Chưa rõ", "Unknown"); } }
+            public static string Blocked { get { return T("Đã chặn", "Blocked"); } }
+            public static string TrustName(DeviceTrust trust)
+            {
+                if (trust == DeviceTrust.Trusted) return Trusted;
+                if (trust == DeviceTrust.Blocked) return Blocked;
+                return Unknown;
+            }
+            public static string TypeName(string cls)
+            {
+                if (cls == "storage") return TypeStorage;
+                if (cls == "keyboard") return TypeKeyboard;
+                if (cls == "mouse") return TypeMouse;
+                if (cls == "hid") return TypeHid;
+                if (cls == "bluetooth") return TypeBluetooth;
+                if (cls == "mtp") return TypePhone;
+                if (cls == "network") return TypeNetwork;
+                return TypeOther;
+            }
+            public static string MarkTrusted { get { return T("Tin cậy", "Trust"); } }
+            public static string MarkUnknown { get { return T("Bỏ đánh dấu", "Clear mark"); } }
+            public static string MarkBlocked { get { return T("Chặn", "Block"); } }
+            public static string Forget { get { return T("Quên thiết bị", "Forget device"); } }
+            public static string NoSelection { get { return T("Chọn một thiết bị trong danh sách.", "Select a device in the list."); } }
+            public static string TrustedDone(string name) { return T("Đã đánh dấu tin cậy: " + name, "Marked as trusted: " + name); }
+            public static string UnknownDone(string name) { return T("Đã bỏ đánh dấu: " + name, "Mark cleared: " + name); }
+            public static string BlockedDone(string name) { return T("Đã đánh dấu chặn: " + name, "Marked as blocked: " + name); }
+            public static string ForgottenDone(string name) { return T("Đã quên thiết bị: " + name, "Device forgotten: " + name); }
+            public static string ActionFailed { get { return T("Không ghi được trạng thái thiết bị. Kiểm tra quyền và nhật ký.", "Could not save the device state. Check permissions and the log."); } }
+            public static string BlockedNotice(string name)
+            {
+                return T("Cảnh báo: thiết bị đã chặn đang kết nối — " + name,
+                         "Warning: a blocked device is connected — " + name);
+            }
+            public static string CompositeNotice(string name)
+            {
+                return T("Cùng một thiết bị vừa có ổ nhớ vừa có bàn phím (dấu hiệu composite/BadUSB): " + name,
+                         "One device exposes both storage and a keyboard (possible composite/BadUSB): " + name);
+            }
+            public static string NewNotice(string name)
+            {
+                return T("Thiết bị mới: " + name, "New device: " + name);
+            }
+
+            public static string EventsTitle { get { return T("Dòng thời gian", "Timeline"); } }
+            public static string EventsEmpty { get { return T("Chưa có sự kiện nào.", "No events yet."); } }
+            public static string ExportCsv { get { return T("Xuất CSV", "Export CSV"); } }
+            public static string ExportHtml { get { return T("Xuất HTML", "Export HTML"); } }
+            public static string Exported(string path) { return T("Đã xuất: " + path, "Exported: " + path); }
+            public static string ExportFailed { get { return T("Không xuất được tệp sự kiện.", "Could not export the event file."); } }
+            public static string ColumnTime { get { return T("Thời gian", "Time"); } }
+            public static string ColumnKind { get { return T("Loại", "Kind"); } }
+            public static string ColumnLevel { get { return T("Mức", "Level"); } }
+            public static string ColumnSubject { get { return T("Đối tượng", "Subject"); } }
+            public static string ColumnDetail { get { return T("Chi tiết", "Detail"); } }
+            public static string Count(int n) { return T(n + " thiết bị", n + " devices"); }
+            // Dải thông báo luôn có chữ: tránh khoảng trống lớn giữa tiêu đề và danh sách.
+            public static string AllClear
+            {
+                get { return T("Chưa thấy dấu hiệu bất thường ở các thiết bị đang kết nối.",
+                             "No unusual sign on the connected devices."); }
+            }
+            public static string EventCount(int n) { return T(n + " sự kiện gần nhất", n + " most recent events"); }
+            public static string AdminHint { get { return T("Cần quyền quản trị để đọc đầy đủ thông tin thiết bị.", "Administrator rights are needed to read full device details."); } }
+            public static string DisabledHint { get { return T("Chặn không tắt thiết bị. Muốn tắt, dùng Device Manager của Windows.", "Blocking does not disable a device. To disable it, use Windows Device Manager."); } }
+        }
+
+        public static class Repair
+        {
+            public static string Title { get { return T("Sửa ổ", "Drive repair"); } }
+            public static string Intro
+            {
+                get
+                {
+                    return T("Chẩn đoán, đọc thử và sửa lỗi ổ rời. Mọi thao tác ghi đều từ chối ổ hệ thống; sửa bằng chkdsk cần sao lưu trước và xác nhận hai lần.",
+                             "Diagnose, read-test and repair removable drives. Every write refuses the system drive; chkdsk repair needs a backup first and two confirmations.");
+                }
+            }
+            public static string ChooseDrive { get { return T("Chọn ổ", "Choose drive"); } }
+            public static string Refresh { get { return T("Làm mới", "Refresh"); } }
+            public static string NoDrives { get { return T("Không có ổ rời nào.", "No removable drive."); } }
+            public static string EmptyHint { get { return T("Chọn ổ rồi bấm Chẩn đoán để xem thông tin.", "Choose a drive, then run Diagnose to see details."); } }
+            public static string DetailsTitle { get { return T("Thông tin ổ", "Drive details"); } }
+            public static string GroupCheck { get { return T("Kiểm tra", "Check"); } }
+            public static string GroupBackup { get { return T("Sao lưu", "Backup"); } }
+            public static string GroupRepair { get { return T("Sửa chữa", "Repair"); } }
+            public static string DiagnoseHint { get { return T("Đọc thông tin ổ, không ghi gì lên ổ.", "Read drive details without writing to it."); } }
+            public static string ReadTestHint { get { return T("Đọc thử vài tệp trong giới hạn thời gian, không sửa tệp.", "Read a sample within a time limit; no file is changed."); } }
+            public static string BootHint { get { return T("Chỉ đọc 512 byte đầu tiên của ổ.", "Read only the first 512 bytes of the drive."); } }
+            public static string BackupHint { get { return T("Sao chép dữ liệu vào thư mục sửa chữa của ShieldGate.", "Copy data into ShieldGate's repair folder."); } }
+            public static string OpenFolderHint { get { return T("Mở thư mục chứa các bản sao lưu.", "Open the folder that holds backups."); } }
+            public static string ChkdskReadHint { get { return T("Kiểm tra hệ tệp, không sửa gì.", "Check the file system without changing it."); } }
+            public static string ChkdskFixHint { get { return T("Sửa lỗi hệ tệp. Cần sao lưu trước và xác nhận hai lần.", "Repair the file system. A backup and two confirmations are required."); } }
+            public static string DefenderHint { get { return T("Quét ổ bằng Windows Defender (MpCmdRun).", "Scan the drive with Windows Defender (MpCmdRun)."); } }
+            public static string PreviewHint { get { return T("Đếm tệp và dung lượng sẽ sao lưu, không ghi gì.", "Count the files and size a backup would copy; nothing is written."); } }
+            // Gợi ý khi rê chuột: dòng đầu là tên chức năng, dòng sau là giải thích.
+            public static string HoverHint(string name, string hint) { return name + "\r\n" + hint; }
+            public static string IconHint { get { return T("Rê chuột để xem tên", "Hover for names"); } }
+            public static string NoProblem { get { return T("Không phát hiện vấn đề trên ổ.", "No problem detected on the drive."); } }
+            public static string OutputEmpty { get { return T("Chưa có kết quả. Các thao tác sẽ ghi vào đây.", "No output yet. Actions will write here."); } }
+            public static string ClearOutput { get { return T("Xoá kết quả", "Clear output"); } }
+            public static string DefenderShort { get { return T("Quét Defender", "Defender scan"); } }
+            public static string Diagnose { get { return T("Chẩn đoán", "Diagnose"); } }
+            public static string Diagnosing { get { return T("Đang chẩn đoán…", "Diagnosing…"); } }
+            public static string ReadTest { get { return T("Đọc thử", "Read test"); } }
+            public static string ReadTesting { get { return T("Đang đọc thử (có giới hạn thời gian)…", "Read test running (time limited)…"); } }
+            public static string Backup { get { return T("Sao lưu", "Back up"); } }
+            public static string Preview { get { return T("Xem trước sao lưu", "Preview backup"); } }
+            public static string PreviewFirst { get { return T("Hãy xem trước sao lưu để biết số tệp và dung lượng trước khi chạy.", "Preview the backup first to see the file count and size before running it."); } }
+            public static string BackingUp { get { return T("Đang sao lưu…", "Backing up…"); } }
+            public static string ChkdskRead { get { return T("Kiểm tra ổ (chỉ đọc)", "Check drive (read-only)"); } }
+            public static string ChkdskFix { get { return T("Sửa lỗi ổ (chkdsk /f)", "Repair drive (chkdsk /f)"); } }
+            public static string BootSector { get { return T("Xem boot sector", "Read boot sector"); } }
+            public static string OpenFolder { get { return T("Mở thư mục sửa chữa", "Open repair folder"); } }
+            public static string Defender { get { return T("Quét bằng Windows Defender", "Scan with Windows Defender"); } }
+            public static string DefenderRunning { get { return T("Đang quét bằng Windows Defender…", "Windows Defender scan running…"); } }
+            public static string DefenderMissing { get { return T("Không tìm thấy Windows Defender (MpCmdRun.exe) trên máy này.", "Windows Defender (MpCmdRun.exe) was not found on this computer."); } }
+            public static string NoPath { get { return T("Chưa chọn đường dẫn để quét.", "No path selected to scan."); } }
+            public static string DefenderExit(int code) { return T("Windows Defender trả mã " + code + ".", "Windows Defender returned code " + code + "."); }
+            public static string DefenderClean { get { return T("Windows Defender: không phát hiện gì.", "Windows Defender: nothing found."); } }
+            public static string DefenderFound { get { return T("Windows Defender phát hiện mối nguy. Xem lịch sử bảo vệ của Windows.", "Windows Defender found a threat. Check Windows protection history."); } }
+            public static string NoDrive { get { return T("Chưa chọn ổ.", "No drive selected."); } }
+            public static string InvalidDrive { get { return T("Đường dẫn ổ không hợp lệ.", "Invalid drive path."); } }
+            public static string SystemDrive { get { return T("Từ chối: đây là ổ hệ thống. Không bao giờ ghi lên ổ hệ thống.", "Refused: this is the system drive. ShieldGate never writes to the system drive."); } }
+            public static string NotReady { get { return T("Ổ chưa sẵn sàng hoặc đã rút.", "The drive is not ready or was removed."); } }
+            public static string UnsupportedDrive { get { return T("Không hỗ trợ ổ mạng hoặc ổ quang.", "Network and optical drives are not supported."); } }
+            public static string BackupRequired { get { return T("Phải sao lưu ổ trước khi chạy chkdsk /f.", "Back up the drive before running chkdsk /f."); } }
+            public static string BackupExit(int code) { return T("robocopy trả mã " + code + ".", "robocopy returned code " + code + "."); }
+            public static string BackupOutside { get { return T("Thư mục đích phải nằm trong thư mục sửa chữa của ShieldGate.", "The destination must be inside the ShieldGate repair folder."); } }
+            public static string BackupOnSource { get { return T("Không sao lưu ổ vào chính nó.", "Refusing to back up a drive onto itself."); } }
+            public static string BackupPreviewDone(long files, long bytes)
+            {
+                return T("Xem trước: " + files.ToString("#,0") + " tệp · " + Size(bytes),
+                         "Preview: " + files.ToString("#,0") + " files · " + Size(bytes));
+            }
+            public static string BackupDone(string path) { return T("Đã sao lưu vào " + path, "Backed up to " + path); }
+            public static string BackupFailed(string detail) { return T("Sao lưu thất bại: " + detail, "Backup failed: " + detail); }
+            public static string ChkdskReadRunning { get { return T("Đang chạy chkdsk chế độ chỉ đọc…", "Running chkdsk in read-only mode…"); } }
+            public static string ChkdskFixRunning { get { return T("Đang chạy chkdsk /f…", "Running chkdsk /f…"); } }
+            public static string ChkdskDone(int code) { return T("chkdsk xong, mã " + code + ".", "chkdsk finished with code " + code + "."); }
+            public static string BootReading { get { return T("Đang đọc boot sector (chỉ đọc)…", "Reading boot sector (read-only)…"); } }
+            public static string BootReport(string fs, bool signature)
+            {
+                return T("Hệ tệp nhận ra: " + fs + " · chữ ký 55AA: " + (signature ? "có" : "không"),
+                         "Detected file system: " + fs + " · 55AA signature: " + (signature ? "yes" : "no"));
+            }
+            public static string BootShort(int read) { return T("Chỉ đọc được " + read + "/512 byte.", "Only " + read + "/512 bytes could be read."); }
+            public static string BootEmpty { get { return T("Vùng đọc được toàn số 0 (có thể trống hoặc hỏng).", "The read area is all zeroes (empty or damaged)."); } }
+            public static string BootUnknown { get { return T("Không nhận ra hệ tệp.", "Unknown file system."); } }
+            public static string SystemDriveLabel { get { return T("Ổ hệ thống", "System drive"); } }
+            public static string Ready { get { return T("Sẵn sàng", "Ready"); } }
+            public static string NotReadyLabel { get { return T("Chưa sẵn sàng", "Not ready"); } }
+            public static string ReadOnlyLabel { get { return T("Chỉ đọc", "Read-only"); } }
+            public static string WritableLabel { get { return T("Ghi được", "Writable"); } }
+            public static string DirtyLabel { get { return T("Có cờ dirty", "Dirty bit set"); } }
+            public static string CleanLabel { get { return T("Không có cờ dirty", "No dirty bit"); } }
+            public static string DirtyUnknown { get { return T("Không đọc được cờ dirty", "Dirty bit unknown"); } }
+            public static string FreeOf(long free, long total)
+            {
+                return T("Trống " + Size(free) + " / " + Size(total), Size(free) + " free of " + Size(total));
+            }
+            public static string Info(string label, string value) { return label + ": " + value; }
+            public static string InfoDrive { get { return T("Ổ", "Drive"); } }
+            public static string InfoLabel { get { return T("Nhãn", "Label"); } }
+            public static string InfoFileSystem { get { return T("Hệ tệp", "File system"); } }
+            public static string InfoStatus { get { return T("Trạng thái", "Status"); } }
+            public static string InfoBoot { get { return T("Boot sector", "Boot sector"); } }
+            public static string ProblemLabel { get { return T("Vấn đề", "Problem"); } }
+            public static string InfoBackup { get { return T("Sao lưu", "Backup"); } }
+            public static string InfoCapacity { get { return T("Dung lượng", "Capacity"); } }
+            public static string BootReadFailed(string detail) { return T("Không đọc được boot sector: " + detail, "Could not read the boot sector: " + detail); }
+            public static string OutputTitle { get { return T("Kết quả", "Output"); } }
+            public static string ReadDone(int files, long bytes, int errors, bool timedOut)
+            {
+                return T("Đọc " + files + " tệp · " + Size(bytes) + " · lỗi " + errors
+                         + (timedOut ? " · dừng theo giới hạn thời gian" : ""),
+                         "Read " + files + " files · " + Size(bytes) + " · errors " + errors
+                         + (timedOut ? " · stopped at the time limit" : ""));
+            }
+            public static string Size(long bytes)
+            {
+                if (bytes < 1024) return bytes + " B";
+                double kb = bytes / 1024.0;
+                if (kb < 1024) return kb.ToString("0.0") + " KB";
+                double mb = kb / 1024.0;
+                if (mb < 1024) return mb.ToString("0.0") + " MB";
+                return (mb / 1024.0).ToString("0.0") + " GB";
+            }
+            public static string LastBackup(string path) { return T("Bản sao lưu gần nhất: " + path, "Last backup: " + path); }
+            public static string NoBackup { get { return T("Chưa có bản sao lưu cho ổ này.", "No backup for this drive yet."); } }
+            public static string RunFinished { get { return T("Xong.", "Finished."); } }
         }
 
         public static class Restore
@@ -678,6 +962,11 @@ namespace ShieldGate
                 return T("Cách ly " + done + " tệp từ " + root + " (lỗi " + failed + ")",
                          "Quarantined " + done + " files from " + root + " (" + failed + " errors)");
             }
+            public static string FlagOnlyKept(string path)
+            {
+                return T("Giữ nguyên (chỉ gắn cờ): " + path,
+                         "Kept (flagged only): " + path);
+            }
             public static string DriveNotWritable(string root)
             {
                 return T("Ổ " + root + " chỉ đọc hoặc không có quyền ghi; không thay đổi gì.",
@@ -805,6 +1094,104 @@ namespace ShieldGate
             {
                 return T("Lỗi khi bỏ ẩn: " + detail, "Error while unhiding: " + detail);
             }
+
+            public static string WriteProtect(bool on, bool ok)
+            {
+                return T((on ? "Bật" : "Tắt") + " chặn ghi ổ USB (ok=" + ok + ")",
+                         (on ? "Enabled" : "Disabled") + " USB write protection (ok=" + ok + ")");
+            }
+            public static string PolicyError(string detail)
+            {
+                return T("Lỗi chính sách bảo vệ: " + detail, "Protection policy error: " + detail);
+            }
+            public static string BehaviorBurst(string drive, int total, int risky)
+            {
+                return T("Bùng nổ ghi trên " + drive + ": " + total + " mục, " + risky + " .lnk/script",
+                         "Write burst on " + drive + ": " + total + " items, " + risky + " .lnk/script files");
+            }
+            public static string BehaviorWatcherError(string detail)
+            {
+                return T("Lỗi giám sát hành vi: " + detail, "Behaviour monitor error: " + detail);
+            }
+            public static string DeviceScanError(string detail)
+            {
+                return T("Không kiểm kê được thiết bị: " + detail,
+                         "Could not inventory devices: " + detail);
+            }
+            public static string DeviceNew(string name, string cls)
+            {
+                return T("Thiết bị mới: " + name + " (" + cls + ")",
+                         "New device: " + name + " (" + cls + ")");
+            }
+            public static string DeviceBlocked(string name)
+            {
+                return T("Thiết bị đã chặn đang kết nối: " + name,
+                         "Blocked device is connected: " + name);
+            }
+            public static string DeviceBadUsb(string name, string detail)
+            {
+                return T("Bàn phím mới kèm tiến trình shell: " + name + " | " + detail,
+                         "New keyboard with a shell process: " + name + " | " + detail);
+            }
+            public static string DeviceComposite(string name)
+            {
+                return T("Nghi composite/BadUSB (vừa ổ vừa bàn phím): " + name,
+                         "Composite/BadUSB suspect (storage and keyboard): " + name);
+            }
+            public static string DeviceBaseline(int count)
+            {
+                return T("Lập kho thiết bị lần đầu: " + count + " thiết bị",
+                         "Device inventory baseline: " + count + " devices");
+            }
+            public static string DeviceTrustChanged(string name, string trust)
+            {
+                return T("Đổi trạng thái tin cậy: " + name + " -> " + trust,
+                         "Device trust changed: " + name + " -> " + trust);
+            }
+            public static string ChkdskDone(string drive, bool fix, int code)
+            {
+                return T("chkdsk " + drive + (fix ? " /f" : " (chỉ đọc)") + " -> " + code,
+                         "chkdsk " + drive + (fix ? " /f" : " (read-only)") + " -> " + code);
+            }
+            public static string BackupDone(string drive, string dest)
+            {
+                return T("Sao lưu " + drive + " vào " + dest,
+                         "Backed up " + drive + " to " + dest);
+            }
+            public static string BackupFailed(string drive, int code)
+            {
+                return T("Sao lưu " + drive + " thất bại (mã " + code + ")",
+                         "Backup of " + drive + " failed (code " + code + ")");
+            }
+            public static string DefenderScan(string path, int code)
+            {
+                return T("Windows Defender quét " + path + " -> " + code,
+                         "Windows Defender scanned " + path + " -> " + code);
+            }
+        }
+
+        // Chi tiết ngắn ghi vào events.tsv; không chứa nội dung tệp.
+        public static class Events
+        {
+            public static string ExecBlocked { get { return T("Dừng tiến trình chạy từ ổ rời", "Stopped a process running from a removable drive"); } }
+            public static string BehaviorBurst(int total, int risky, int window)
+            {
+                return T("Trong " + window + " giây: " + total + " mục mới, " + risky + " tệp .lnk/script",
+                         "Within " + window + " seconds: " + total + " new items, " + risky + " .lnk/script files");
+            }
+            public static string DefenderClean { get { return T("Windows Defender: không phát hiện gì", "Windows Defender: nothing found"); } }
+            public static string DefenderThreat { get { return T("Windows Defender: phát hiện mối nguy", "Windows Defender: threat found"); } }
+            public static string BackupDone(string dest) { return T("Sao lưu vào " + dest, "Backed up to " + dest); }
+            public static string DeviceNew(string name, string cls, string ids)
+            {
+                return T("Thiết bị mới " + name + " · " + cls + " · " + ids,
+                         "New device " + name + " · " + cls + " · " + ids);
+            }
+            public static string DeviceBlocked(string name) { return T("Thiết bị đã chặn: " + name, "Blocked device: " + name); }
+            public static string DeviceBadUsb(string name) { return T("Nghi BadUSB: bàn phím mới + shell", "BadUSB suspect: new keyboard + shell"); }
+            public static string DeviceComposite(string name) { return T("Nghi composite: " + name, "Composite suspect: " + name); }
+            public static string DeviceBaseline(int count) { return T("Kho thiết bị ban đầu: " + count, "Initial device inventory: " + count); }
+            public static string DeviceTrust(string name, string trust) { return T(name + " -> " + trust, name + " -> " + trust); }
         }
 
         public static class About
@@ -1024,6 +1411,50 @@ namespace ShieldGate
                 }
             }
             public static string UnhideOk { get { return T("Hiện tệp", "Unhide files"); } }
+            public static string BackupTitle { get { return T("Sao lưu toàn bộ ổ?", "Back up the entire drive?"); } }
+            public static string BackupBody(string drive, long files, long bytes)
+            {
+                return T("Sao lưu " + drive + " (" + files.ToString("#,0") + " tệp, " + S.Repair.Size(bytes)
+                         + ") vào thư mục sửa chữa. Không xoá gì trên ổ nguồn.",
+                         "Back up " + drive + " (" + files.ToString("#,0") + " files, " + S.Repair.Size(bytes)
+                         + ") into the repair folder. Nothing is deleted from the source drive.");
+            }
+            public static string BackupOk { get { return T("Sao lưu", "Back up"); } }
+            public static string ChkdskReadTitle { get { return T("Kiểm tra ổ ở chế độ chỉ đọc?", "Check the drive in read-only mode?"); } }
+            public static string ChkdskReadBody(string drive)
+            {
+                return T("chkdsk " + drive + " chỉ đọc và báo lỗi, không sửa gì. Có thể mất vài phút.",
+                         "chkdsk " + drive + " will only read and report; nothing is repaired. This can take a few minutes.");
+            }
+            public static string ChkdskReadOk { get { return T("Kiểm tra", "Check"); } }
+            public static string ChkdskFixTitle { get { return T("Sửa lỗi ổ bằng chkdsk /f?", "Repair the drive with chkdsk /f?"); } }
+            public static string ChkdskFixBody(string drive)
+            {
+                return T("chkdsk " + drive + " /f GHI lên ổ và có thể thay đổi dữ liệu. Chỉ tiếp tục khi đã sao lưu và hiểu rủi ro.",
+                         "chkdsk " + drive + " /f WRITES to the drive and may change data. Continue only after a backup and if you understand the risk.");
+            }
+            public static string ChkdskFixOk { get { return T("Tiếp tục", "Continue"); } }
+            public static string ChkdskFixAgainTitle { get { return T("Xác nhận lần hai", "Confirm again"); } }
+            public static string ChkdskFixAgainBody(string drive)
+            {
+                return T("Đây là lần xác nhận cuối. Chạy chkdsk /f trên " + drive + "?",
+                         "This is the final confirmation. Run chkdsk /f on " + drive + "?");
+            }
+            public static string ChkdskFixAgainOk { get { return T("Chạy chkdsk /f", "Run chkdsk /f"); } }
+            public static string DefenderTitle { get { return T("Quét bằng Windows Defender?", "Scan with Windows Defender?"); } }
+            public static string DefenderBody(string drive)
+            {
+                return T("Gọi Windows Defender quét " + drive + ". Quá trình có thể lâu và Defender có thể tự xử lý mối nguy theo chính sách của máy.",
+                         "Ask Windows Defender to scan " + drive + ". This can take a while and Defender may act on threats according to this computer's policy.");
+            }
+            public static string DefenderOk { get { return T("Quét", "Scan"); } }
+            public static string ForgetTitle { get { return T("Quên thiết bị?", "Forget this device?"); } }
+            public static string ForgetBody(string name)
+            {
+                return T("Xoá trạng thái tin cậy của " + name + ". Lần sau cắm vào, thiết bị sẽ được coi là mới.",
+                         "Remove the trust state of " + name + ". The next time it is connected it will be treated as new.");
+            }
+            public static string ForgetOk { get { return T("Quên", "Forget"); } }
         }
 
         public static class Tech
@@ -1054,6 +1485,22 @@ namespace ShieldGate
                              "Scheduled task “ShieldGate USB Guard”, runs as SYSTEM at startup");
                 }
             }
+            public static string WriteProtect
+            {
+                get
+                {
+                    return T("HKLM\\SYSTEM\\…\\StorageDevicePolicies: WriteProtect = 1 (tuỳ chọn)",
+                             "HKLM\\SYSTEM\\…\\StorageDevicePolicies: WriteProtect = 1 (opt-in)");
+                }
+            }
+            public static string BlockExec
+            {
+                get
+                {
+                    return T("Theo dõi Win32_Process và dừng tiến trình có tệp chạy trên ổ rời (tuỳ chọn)",
+                             "Watches Win32_Process and stops processes whose executable is on a removable drive (opt-in)");
+                }
+            }
         }
 
         // Chỉ dùng cho phần tự kiểm tra trên dòng lệnh.
@@ -1081,6 +1528,19 @@ namespace ShieldGate
             public static string RegDeleteMissing { get { return T("xoá khoá đăng ký chưa tồn tại không báo lỗi", "deleting a registry key that never existed does not fail"); } }
             public static string RegistryScan { get { return T("quét Registry File Explorer không gây lỗi", "the File Explorer registry check runs without errors"); } }
             public static string LongPathQuarantine { get { return T("cách ly và khôi phục tệp có đường dẫn dài hơn 260 ký tự", "quarantine and restore a file whose path is longer than 260 characters"); } }
+            public static string JsonRoundTrip { get { return T("đọc và ghi lại JSON có chú thích, mảng và ký tự thoát", "parse and re-serialise JSON with comments, arrays and escapes"); } }
+            public static string JsonReject { get { return T("từ chối JSON hỏng thay vì đọc sai", "reject broken JSON instead of misreading it"); } }
+            public static string RulesDefaults { get { return T("luật mặc định có ngưỡng và trọng số đúng", "default rules carry the expected threshold and weights"); } }
+            public static string RulesCustom { get { return T("đọc rules.json để đổi ngưỡng, trọng số và đuôi tệp", "load rules.json to change threshold, weights and extensions"); } }
+            public static string RulesCorrupt { get { return T("rules.json hỏng thì dùng lại mặc định", "a corrupt rules.json falls back to the defaults"); } }
+            public static string Scoring { get { return T("cộng điểm theo trọng số và chặn ở 10", "sum scores by weight and cap at 10"); } }
+            public static string DetectorPipeline { get { return T("detector 2.0 bắt đuôi kép, RLO, NTLM, desktop.ini, script gốc và chỉ gắn cờ macro", "2.0 detectors catch double extension, RLO, NTLM, desktop.ini, root scripts and only flag macros"); } }
+            public static string EventTimeline { get { return T("ghi, đọc và xuất dòng thời gian", "write, read and export the event timeline"); } }
+            public static string DeviceTrustStore { get { return T("lưu, đọc và quên trạng thái tin cậy theo khoá ổn định", "store, read and forget device trust by stable key"); } }
+            public static string RepairGuards { get { return T("sửa ổ từ chối ổ hệ thống và đường dẫn không hợp lệ", "drive repair refuses the system drive and invalid paths"); } }
+            public static string RepairReadTest { get { return T("đọc thử chỉ đọc trên thư mục tạm", "read-only test reads files in the temporary folder"); } }
+            public static string RepairBackupMarker { get { return T("chỉ báo đã sao lưu khi có tệp đánh dấu", "report a backup only when the marker exists"); } }
+            public static string RepairPreviewCount { get { return T("đếm tệp dự phòng cho xem trước sao lưu", "fallback file count for the backup preview"); } }
         }
 
         // Biểu tượng khay hệ thống của bản chạy nền.
@@ -1107,6 +1567,29 @@ namespace ShieldGate
                 }
             }
             public static string AlreadyOpen { get { return T("ShieldGate đang mở.", "ShieldGate is already open."); } }
+            public static string DeviceNew(string name)
+            {
+                return T("Thiết bị mới vừa kết nối: " + name, "A new device was connected: " + name);
+            }
+            public static string DeviceBlocked(string name)
+            {
+                return T("Thiết bị đã chặn đang kết nối: " + name, "A blocked device is connected: " + name);
+            }
+            public static string BadUsb(string name)
+            {
+                return T("Nghi BadUSB: bàn phím mới " + name + " kèm tiến trình shell. Kiểm tra ngay.",
+                         "BadUSB suspect: new keyboard " + name + " with a shell process. Check now.");
+            }
+            public static string Composite(string name)
+            {
+                return T("Thiết bị " + name + " vừa có ổ nhớ vừa có bàn phím. Kiểm tra ngay.",
+                         "Device " + name + " exposes both storage and a keyboard. Check now.");
+            }
+            public static string Behavior(string drive)
+            {
+                return T("Ghi bất thường trên " + drive + ". Đang kiểm tra lại.",
+                         "Unusual write activity on " + drive + ". Checking the drive again.");
+            }
             public static string Attention(int n)
             {
                 return T("Có " + n + " mục trên USB cần bạn xem lại. Nhấn để mở ShieldGate.",
@@ -1164,11 +1647,43 @@ namespace ShieldGate
                          "Files in quarantine: " + files + " in " + batches + " batches");
             }
             public static string ScanUsage { get { return T("Cách dùng: ShieldGate.exe --scan E:\\", "Usage: ShieldGate.exe --scan E:\\"); } }
+            public static string DevicesUsage { get { return T("Cách dùng: ShieldGate.exe --devices", "Usage: ShieldGate.exe --devices"); } }
+            public static string EventsUsage { get { return T("Cách dùng: ShieldGate.exe --events [số dòng]", "Usage: ShieldGate.exe --events [count]"); } }
+            public static string RepairUsage { get { return T("Cách dùng: ShieldGate.exe --repair E:\\", "Usage: ShieldGate.exe --repair E:\\"); } }
+            public static string DefenderUsage { get { return T("Cách dùng: ShieldGate.exe --defender <tệp hoặc thư mục>", "Usage: ShieldGate.exe --defender <file or folder>"); } }
+            public static string DevicesTitle { get { return T("Thiết bị ngoại vi:", "Peripheral devices:"); } }
+            public static string NoDevices { get { return T("Không thấy thiết bị ngoại vi nào.", "No peripheral device found."); } }
+            public static string DeviceLine(string name, string type, string trust, string drives)
+            {
+                return "  " + name + " · " + type + " · " + trust + (drives.Length > 0 ? " · " + drives : "");
+            }
+            public static string EventsTitle { get { return T("Sự kiện gần nhất:", "Recent events:"); } }
+            public static string NoEvents { get { return T("Chưa có sự kiện nào.", "No events yet."); } }
+            public static string EventLine(string time, string kind, string level, string subject, string detail)
+            {
+                return "  " + time + " [" + level + "] " + kind + " · " + subject
+                       + (detail.Length > 0 ? " · " + detail : "");
+            }
+            public static string RepairSummary(string drive, string fs, long free, long total, bool readOnly, bool system)
+            {
+                return T(drive + ": " + (fs.Length > 0 ? fs : "?") + " · trống " + S.Repair.Size(free) + "/" + S.Repair.Size(total)
+                         + (readOnly ? " · chỉ đọc" : "") + (system ? " · Ổ HỆ THỐNG (từ chối ghi)" : ""),
+                         drive + ": " + (fs.Length > 0 ? fs : "?") + " · free " + S.Repair.Size(free) + "/" + S.Repair.Size(total)
+                         + (readOnly ? " · read-only" : "") + (system ? " · SYSTEM DRIVE (writes refused)" : ""));
+            }
+            public static string RepairProblem(string detail) { return T("Vấn đề: " + detail, "Problem: " + detail); }
+            public static string DefenderResult(bool clean, int code)
+            {
+                return T(clean ? "Windows Defender: không phát hiện gì." : "Windows Defender trả mã " + code + ".",
+                         clean ? "Windows Defender: nothing found." : "Windows Defender returned code " + code + ".");
+            }
+            public static string StatusWriteProtect(bool on) { return T("Chặn ghi USB: " + (on ? "bật" : "tắt"), "USB write protection: " + (on ? "on" : "off")); }
+            public static string StatusBlockExec(bool on) { return T("Chặn chạy từ ổ rời: " + (on ? "bật" : "tắt"), "Removable execution block: " + (on ? "on" : "off")); }
             public static string Usage
             {
                 get
                 {
-                    return "ShieldGate.exe --watch | --status | --install | --uninstall | --scan <drive> | --selftest";
+                    return "ShieldGate.exe --watch | --status | --install | --uninstall | --scan <drive> | --devices | --events [n] | --repair <drive> | --defender <path> | --selftest";
                 }
             }
             public static string TempDir(string path) { return T("Thư mục tạm: " + path, "Temporary folder: " + path); }

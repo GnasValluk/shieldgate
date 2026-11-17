@@ -12,7 +12,7 @@ namespace ShieldGate
         private readonly RailPanel _rail;
         private readonly Panel _host;
         private readonly FooterBar _footer;
-        private readonly PageBase[] _pages = new PageBase[5];
+        private readonly PageBase[] _pages = new PageBase[7];
         private PageId _current = (PageId)(-1);
         private bool _syncing;
 
@@ -116,6 +116,8 @@ namespace ShieldGate
                 case PageId.Overview: return new OverviewPage();
                 case PageId.Usb: return new UsbPage();
                 case PageId.Protect: return new ProtectPage();
+                case PageId.Devices: return new DevicesPage();
+                case PageId.Repair: return new RepairPage();
                 case PageId.Log: return new LogPage();
                 case PageId.About: return new AboutPage();
                 default: return null;
@@ -135,7 +137,7 @@ namespace ShieldGate
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (keyData >= (Keys.Control | Keys.D1) && keyData <= (Keys.Control | Keys.D5))
+            if (keyData >= (Keys.Control | Keys.D1) && keyData <= (Keys.Control | Keys.D7))
             {
                 ShowPage((PageId)(keyData - (Keys.Control | Keys.D1)));
                 return true;
