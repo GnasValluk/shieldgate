@@ -132,7 +132,7 @@ namespace ShieldGate
             try
             {
                 Paths.EnsureDirs();
-                Process.Start("explorer.exe", "\"" + Paths.Root + "\"");
+                Process.Start(Native.ShellExe("explorer.exe"), "\"" + Paths.Root + "\"");
             }
             catch { }
         }
@@ -148,8 +148,15 @@ namespace ShieldGate
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+
+            long quarantine, repair;
+            Uninstaller.KeptSizes(out quarantine, out repair);
+            bool keep = true;
             if (!ConfirmDialog.Ask(FindForm(), S.Dlg.UninstallTitle, S.Dlg.UninstallBody,
-                                   S.Dlg.UninstallOk, S.Dlg.Close, ButtonKind.Danger, false))
+                                   S.Dlg.UninstallOk, S.Dlg.Close, ButtonKind.Danger, false,
+                                   S.Dlg.UninstallKeep,
+                                   S.Dlg.UninstallKeepDetail(quarantine, repair),
+                                   true, out keep))
                 return;
 
             _removing = true;
@@ -161,12 +168,12 @@ namespace ShieldGate
             {
                 bool stopped = false;
                 bool clean = false;
-                try { stopped = Uninstaller.Run(out clean); }
+                try { stopped = Uninstaller.Run(keep, out clean); }
                 catch { }
                 if (IsDisposed || !IsHandleCreated) return;
                 try
                 {
-                    BeginInvoke((MethodInvoker)delegate { FinishRemove(stopped, clean); });
+                    BeginInvoke((MethodInvoker)delegate { FinishRemove(stopped, clean, keep); });
                 }
                 catch { }
             });
@@ -174,7 +181,7 @@ namespace ShieldGate
             t.Start();
         }
 
-        private void FinishRemove(bool stopped, bool clean)
+        private void FinishRemove(bool stopped, bool clean, bool keep)
         {
             _removing = false;
             if (!stopped)
@@ -187,8 +194,12 @@ namespace ShieldGate
                 return;
             }
 
-            MessageBox.Show(FindForm(), clean ? S.About.RemoveDone : S.About.RemoveCleanupPending,
-                S.App.Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            string message;
+            if (!clean) message = S.About.RemoveCleanupPending;
+            else if (keep) message = S.About.RemoveDoneKept;
+            else message = S.About.RemoveDone;
+            MessageBox.Show(FindForm(), message, S.App.Name,
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
 
             Form owner = FindForm();
             if (owner != null) owner.Close();

@@ -382,7 +382,10 @@ namespace ShieldGate
 
         private static string BackupText(string drive)
         {
-            if (!Repair.HasBackup(drive)) return S.Repair.NoBackup;
+            // Ly do cu the (khac serial, qua han, ban sao mat) huu ich hon cau chung.
+            string reason;
+            bool have = Repair.CheckBackup(drive, out reason);
+            if (!have) return reason.Length > 0 ? reason : S.Repair.NoBackup;
             string last = Repair.LastBackup(drive);
             return last.Length == 0 ? S.Repair.NoBackup : S.Repair.LastBackup(last);
         }
@@ -499,9 +502,11 @@ namespace ShieldGate
 
             if (fix)
             {
-                if (!Repair.HasBackup(drive))
+                string backupReason;
+                if (!Repair.CheckBackup(drive, out backupReason))
                 {
-                    _notice.SetMessage(S.Repair.BackupRequired, true);
+                    _notice.SetMessage(backupReason.Length > 0
+                        ? backupReason : S.Repair.BackupRequired, true);
                     return;
                 }
                 if (!Native.IsAdmin())
@@ -614,7 +619,7 @@ namespace ShieldGate
             try
             {
                 Paths.EnsureDirs();
-                Process.Start("explorer.exe", "\"" + Paths.RepairDir + "\"");
+                Process.Start(Native.ShellExe("explorer.exe"), "\"" + Paths.RepairDir + "\"");
             }
             catch (Exception e)
             {

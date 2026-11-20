@@ -38,6 +38,7 @@ namespace ShieldGate
         private DateTime _lastEvent = DateTime.MinValue;
         private DateTime _lastDeviceEvent = DateTime.MinValue;
         private DateTime _lastBehaviorEvent = DateTime.MinValue;
+        private DateTime _lastReinfectEvent = DateTime.MinValue;
 
         public TrayContext()
         {
@@ -66,6 +67,7 @@ namespace ShieldGate
             _lastEvent = Settings.DriveEventTime;
             _lastDeviceEvent = Settings.DeviceEventTime;
             _lastBehaviorEvent = Settings.BehaviorEventTime;
+            _lastReinfectEvent = Settings.ReinfectEventTime;
             Refresh();
             try { _icon.ShowBalloonTip(5000); }
             catch { }
@@ -85,6 +87,7 @@ namespace ShieldGate
             _status.Text = running ? S.Tray.StatusOn : S.Tray.StatusOff;
             CheckDriveEvent();
             CheckDeviceEvents();
+            CheckReinfectEvents();
         }
 
         private void ShowBalloon(string text)
@@ -113,6 +116,18 @@ namespace ShieldGate
                 _lastBehaviorEvent = behavior;
                 ShowBalloon(S.Tray.Behavior(Settings.BehaviorEventDrive));
             }
+        }
+
+        // Ổ bị nhiễm lại vài lần trong vài phút: nguồn lây đang chạy trên máy.
+        private void CheckReinfectEvents()
+        {
+            DateTime when = Settings.ReinfectEventTime;
+            if (when == DateTime.MinValue || when == _lastReinfectEvent) return;
+            _lastReinfectEvent = when;
+            if (Settings.ReinfectEventAfterFix)
+                ShowBalloon(S.Tray.ReinfectedAfterFix(Settings.ReinfectEventDrive));
+            else
+                ShowBalloon(S.Tray.Reinfected(Settings.ReinfectEventDrive));
         }
 
         // Bảo vệ nền ghi sự kiện vào settings.txt. Chỉ báo một lần cho mỗi mốc thời gian.

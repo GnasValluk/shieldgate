@@ -322,6 +322,18 @@ namespace ShieldGate
             return rel.Substring(0, cut + 1) + Codes(rel.Substring(cut + 1));
         }
 
+        // Tep "payload" cua virus shortcut (1.exe, LMIGuardianDll.dll, adback.dat,
+        // link.dat, .lnk gia, desktop.ini gia dang thu muc he thong). Tai lieu cua
+        // nguoi dung bi virus doi ten Base64 KHONG nam trong danh sach nay.
+        public static bool IsPayloadFile(string name)
+        {
+            string n = (name ?? "").Trim();
+            if (n.Length == 0) return false;
+            if (string.Equals(n, "desktop.ini", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(n, "autorun.inf", StringComparison.OrdinalIgnoreCase)) return true;
+            return Rules.Current.IsPayloadExt(System.IO.Path.GetExtension(n));
+        }
+
         // Thu muc khong ten chi chua du lieu nguoi dung (khong co tep chay, shortcut,
         // script) thi co the tu dong tra du lieu ra goc o ma khong so mat an toan.
         public static bool HasRiskyContent(string dir)
@@ -333,13 +345,7 @@ namespace ShieldGate
                 {
                     if (t.IsDir) continue;
                     if (++seen > 800) return true;
-                    switch (System.IO.Path.GetExtension(t.Name).ToLowerInvariant())
-                    {
-                        case ".exe": case ".scr": case ".com": case ".pif": case ".lnk":
-                        case ".vbs": case ".vbe": case ".js": case ".jse": case ".wsf":
-                        case ".hta": case ".bat": case ".cmd": case ".dll":
-                            return true;
-                    }
+                    if (IsPayloadFile(t.Name)) return true;
                 }
             }
             catch { }

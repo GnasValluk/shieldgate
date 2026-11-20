@@ -9,7 +9,7 @@ namespace ShieldGate
 {
     internal sealed class RulesData
     {
-        public const int CurrentVersion = 2;
+        public const int CurrentVersion = 3;
 
         public int Version = CurrentVersion;
         public int ScoreThreshold = 3;
@@ -26,6 +26,10 @@ namespace ShieldGate
         public readonly HashSet<string> DoubleExtDecoys =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public readonly HashSet<string> DangerousExts =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Tep "payload" cua virus shortcut nam trong thu muc gia. Chi nhung duoi
+        // nay moi bi cach ly; tai lieu nguoi dung (doc/pdf/xls...) duoc giu lai.
+        public readonly HashSet<string> PayloadExts =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public readonly HashSet<string> MacroExts =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -81,6 +85,11 @@ namespace ShieldGate
             return !string.IsNullOrEmpty(ext) && DangerousExts.Contains(ext);
         }
 
+        public bool IsPayloadExt(string ext)
+        {
+            return !string.IsNullOrEmpty(ext) && PayloadExts.Contains(ext);
+        }
+
         public bool IsMacroExt(string ext)
         {
             return !string.IsNullOrEmpty(ext) && MacroExts.Contains(ext);
@@ -106,6 +115,7 @@ namespace ShieldGate
     {
         private static readonly object Gate = new object();
         private static RulesData _current;
+        private static bool _warnedBeside;
 
         public static RulesData Current
         {
@@ -124,8 +134,59 @@ namespace ShieldGate
             lock (Gate) _current = Load();
         }
 
+        // Ghi đè rules.json trong thư mục dữ liệu bằng tệp người dùng chọn. Chỉ
+        // nhận tệp parse được và nhỏ (luật không cần lớn); bản cũ giữ thành
+        // rules.json.bak để quay lại nếu nhập nhầm.
+        public static bool Import(string source, out string error)
+        {
+            error = "";
+            try
+            {
+                if (string.IsNullOrEmpty(source) || !File.Exists(source))
+                {
+                    error = S.Cli.ImportRulesMissing(source ?? "");
+                    return false;
+                }
+                if (new FileInfo(source).Length > 1024 * 1024)
+                {
+                    error = S.Cli.ImportRulesTooBig;
+                    return false;
+                }
+                if (Json.AsObject(Json.ParseFile(source)) == null)
+                {
+                    error = S.Cli.ImportRulesInvalid(source);
+                    return false;
+                }
+
+                Paths.EnsureDirs();
+                string from = Path.GetFullPath(source);
+                string dest = Path.GetFullPath(Paths.RulesFile);
+                if (string.Equals(from, dest, StringComparison.OrdinalIgnoreCase))
+                {
+                    Reload();
+                    return true;
+                }
+                if (File.Exists(dest))
+                {
+                    try { File.Copy(dest, dest + ".bak", true); }
+                    catch { }
+                }
+                File.Copy(from, dest, true);
+                Reload();
+                return true;
+            }
+            catch (Exception e)
+            {
+                error = S.Cli.ImportRulesInvalid(e.Message);
+                return false;
+            }
+        }
+
         public static string CandidatePath()
         {
+            // Luật chỉ đọc từ thư mục dữ liệu. rules.json cạnh exe bị bỏ qua: bản
+            // chạy từ USB thường nằm trên ổ do người khác quản lý, nên một tệp
+            // cạnh exe có thể bị thay mà người dùng không biết.
             try
             {
                 string exe = System.Reflection.Assembly.GetEntryAssembly().Location;
@@ -133,7 +194,11 @@ namespace ShieldGate
                 if (!string.IsNullOrEmpty(dir))
                 {
                     string beside = Path.Combine(dir, "rules.json");
-                    if (File.Exists(beside)) return beside;
+                    if (File.Exists(beside) && !_warnedBeside)
+                    {
+                        _warnedBeside = true;
+                        Log.Write(S.Log.RulesBesideIgnored(beside), "WARN");
+                    }
                 }
             }
             catch { }
@@ -164,7 +229,15 @@ namespace ShieldGate
                 if (root == null) throw new FormatException("rules.json phai la object");
 
                 data.Version = Json.Int(root, "version", data.Version);
-                data.ScoreThreshold = Math.Max(1, Json.Int(root, "scoreThreshold", data.ScoreThreshold));
+                if (data.Version < RulesData.CurrentVersion)
+                {
+                    // Tệp cũ thiếu khoá mới: giữ mặc định trong mã và chỉ thêm phần
+                    // người dùng có, không ghi đè lại tệp của họ.
+                    Log.Write(S.Log.RulesMerged(data.Version, RulesData.CurrentVersion), "INFO");
+                    data.Version = RulesData.CurrentVersion;
+                }
+                int threshold = Json.Int(root, "scoreThreshold", data.ScoreThreshold);
+                data.ScoreThreshold = threshold < 1 ? 1 : (threshold > 10 ? 10 : threshold);
 
                 Dictionary<string, object> limits = Json.AsObject(Json.Get(root, "limits"));
                 if (limits != null)
@@ -181,22 +254,28 @@ namespace ShieldGate
                     data.BehaviorWindowSeconds = Math.Max(3, Json.Int(behavior, "windowSeconds", data.BehaviorWindowSeconds));
                 }
 
-                FillSet(data.ScriptExts, Json.StringList(root, "scriptExts"));
-                FillSet(data.RootScriptExts, Json.StringList(root, "rootScriptExts"));
-                FillSet(data.DoubleExtDecoys, Json.StringList(root, "doubleExtDecoys"));
-                FillSet(data.DangerousExts, Json.StringList(root, "dangerousExts"));
-                FillSet(data.MacroExts, Json.StringList(root, "officeMacroExts"));
-                FillSet(data.NtlmExts, Json.StringList(root, "ntlmExts"));
-                FillSet(data.SideloadDlls, Json.StringList(root, "sideloadDlls"));
-                FillSet(data.AdsSkipStreams, Json.StringList(root, "adsSkipStreams"));
+                MergeSet(data.ScriptExts, Json.StringList(root, "scriptExts"));
+                MergeSet(data.RootScriptExts, Json.StringList(root, "rootScriptExts"));
+                MergeSet(data.DoubleExtDecoys, Json.StringList(root, "doubleExtDecoys"));
+                MergeSet(data.DangerousExts, Json.StringList(root, "dangerousExts"));
+                MergeSet(data.PayloadExts, Json.StringList(root, "payloadExts"));
+                MergeSet(data.MacroExts, Json.StringList(root, "officeMacroExts"));
+                MergeSet(data.NtlmExts, Json.StringList(root, "ntlmExts"));
+                MergeSet(data.SideloadDlls, Json.StringList(root, "sideloadDlls"));
+                MergeSet(data.AdsSkipStreams, Json.StringList(root, "adsSkipStreams"));
 
                 Dictionary<string, object> weights = Json.AsObject(Json.Get(root, "weights"));
                 if (weights != null)
                 {
                     foreach (KeyValuePair<string, object> kv in weights)
                     {
-                        try { data.AddWeight(kv.Key, Convert.ToInt32(kv.Value)); }
-                        catch { }
+                        int w;
+                        try { w = Convert.ToInt32(kv.Value); }
+                        catch { continue; }
+                        // Ngoài 0..10 là lỗi gõ: kẹp lại thay vì để điểm lệch.
+                        if (w < 0) w = 0;
+                        if (w > 10) w = 10;
+                        data.AddWeight(kv.Key, w);
                     }
                 }
             }
@@ -208,10 +287,11 @@ namespace ShieldGate
             return data;
         }
 
-        private static void FillSet(HashSet<string> set, List<string> values)
+        // Luật người dùng chỉ thêm vào mặc định: tệp cũ hay tệp thiếu khoá mới
+        // không làm mất đuôi mà bản này đã biết.
+        private static void MergeSet(HashSet<string> set, List<string> values)
         {
-            if (values == null || values.Count == 0) return;
-            set.Clear();
+            if (values == null) return;
             foreach (string v in values)
             {
                 string s = (v ?? "").Trim();
@@ -224,30 +304,37 @@ namespace ShieldGate
         private static RulesData Defaults()
         {
             RulesData d = new RulesData();
-            FillSet(d.ScriptExts, new List<string>(
+            MergeSet(d.ScriptExts, new List<string>(
                 new string[] { ".vbs", ".vbe", ".js", ".jse", ".wsf", ".hta", ".ps1",
                                ".bat", ".cmd", ".scr", ".cpl" }));
-            FillSet(d.RootScriptExts, new List<string>(
+            MergeSet(d.RootScriptExts, new List<string>(
                 new string[] { ".vbs", ".vbe", ".js", ".jse", ".wsf", ".hta", ".ps1",
                                ".bat", ".cmd", ".scr", ".cpl", ".reg", ".msi", ".msp" }));
-            FillSet(d.DoubleExtDecoys, new List<string>(
+            MergeSet(d.DoubleExtDecoys, new List<string>(
                 new string[] { ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
                                ".txt", ".rtf", ".csv", ".jpg", ".jpeg", ".png", ".gif",
                                ".bmp", ".mp3", ".mp4", ".avi", ".mkv", ".mov", ".zip",
                                ".rar", ".7z", ".iso", ".html", ".htm", ".xml", ".json" }));
-            FillSet(d.DangerousExts, new List<string>(
+            MergeSet(d.DangerousExts, new List<string>(
                 new string[] { ".exe", ".scr", ".com", ".pif", ".cpl", ".bat", ".cmd",
                                ".vbs", ".js", ".hta", ".ps1", ".msi", ".reg" }));
-            FillSet(d.MacroExts, new List<string>(
+            // Duoi tep cua goi payload trong thu muc gia: 1.exe, LMIGuardianDll.dll,
+            // adback.dat, link.dat, shortcut... Tai lieu nguoi dung khong nam o day.
+            MergeSet(d.PayloadExts, new List<string>(
+                new string[] { ".exe", ".scr", ".com", ".pif", ".cpl", ".dll", ".sys",
+                               ".drv", ".ocx", ".bat", ".cmd", ".vbs", ".vbe", ".js",
+                               ".jse", ".wsf", ".wsh", ".hta", ".ps1", ".msi", ".msp",
+                               ".reg", ".lnk", ".url", ".scf", ".inf", ".dat", ".jar" }));
+            MergeSet(d.MacroExts, new List<string>(
                 new string[] { ".docm", ".xlsm", ".pptm", ".dotm", ".xltm", ".potm" }));
-            FillSet(d.NtlmExts, new List<string>(new string[] { ".url", ".scf", ".lnk" }));
-            FillSet(d.SideloadDlls, new List<string>(
+            MergeSet(d.NtlmExts, new List<string>(new string[] { ".url", ".scf", ".lnk" }));
+            MergeSet(d.SideloadDlls, new List<string>(
                 new string[] { "version.dll", "winmm.dll", "dbghelp.dll", "uxtheme.dll",
                                "profapi.dll", "wlbsctrl.dll", "cryptbase.dll", "dwmapi.dll",
                                "msimg32.dll", "ole32.dll", "secur32.dll", "userenv.dll",
                                "wtsapi32.dll", "netapi32.dll", "ntmarta.dll", "samcli.dll",
                                "sspicli.dll", "winsta.dll", "d3d9.dll", "d3dx9_43.dll" }));
-            FillSet(d.AdsSkipStreams, new List<string>(
+            MergeSet(d.AdsSkipStreams, new List<string>(
                 new string[] { "Zone.Identifier", "SmartScreen", "SummaryInformation", "{4c8cc155-6c1e-11d1-8e41-00c04fb9386d}" }));
 
             d.SetWeights(new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
@@ -275,7 +362,7 @@ namespace ShieldGate
         // Tệp mẫu: người dùng có thể sửa trực tiếp. Giữ đồng bộ với Defaults().
         public const string DefaultJson =
 @"{
-  ""version"": 2,
+  ""version"": 3,
   ""scoreThreshold"": 3,
   ""limits"": { ""maxFiles"": 150000, ""maxSeconds"": 300 },
   ""behavior"": { ""lnkBurst"": 15, ""writeBurst"": 400, ""windowSeconds"": 10 },
@@ -283,6 +370,7 @@ namespace ShieldGate
   ""rootScriptExts"": [""vbs"", ""vbe"", ""js"", ""jse"", ""wsf"", ""hta"", ""ps1"", ""bat"", ""cmd"", ""scr"", ""cpl"", ""reg"", ""msi"", ""msp""],
   ""doubleExtDecoys"": [""pdf"", ""doc"", ""docx"", ""xls"", ""xlsx"", ""ppt"", ""pptx"", ""txt"", ""rtf"", ""csv"", ""jpg"", ""jpeg"", ""png"", ""gif"", ""bmp"", ""mp3"", ""mp4"", ""avi"", ""mkv"", ""mov"", ""zip"", ""rar"", ""7z"", ""iso"", ""html"", ""htm"", ""xml"", ""json""],
   ""dangerousExts"": [""exe"", ""scr"", ""com"", ""pif"", ""cpl"", ""bat"", ""cmd"", ""vbs"", ""js"", ""hta"", ""ps1"", ""msi"", ""reg""],
+  ""payloadExts"": [""exe"", ""scr"", ""com"", ""pif"", ""cpl"", ""dll"", ""sys"", ""drv"", ""ocx"", ""bat"", ""cmd"", ""vbs"", ""vbe"", ""js"", ""jse"", ""wsf"", ""wsh"", ""hta"", ""ps1"", ""msi"", ""msp"", ""reg"", ""lnk"", ""url"", ""scf"", ""inf"", ""dat"", ""jar""],
   ""officeMacroExts"": [""docm"", ""xlsm"", ""pptm"", ""dotm"", ""xltm"", ""potm""],
   ""ntlmExts"": [""url"", ""scf"", ""lnk""],
   ""sideloadDlls"": [""version.dll"", ""winmm.dll"", ""dbghelp.dll"", ""uxtheme.dll"", ""profapi.dll"", ""wlbsctrl.dll"", ""cryptbase.dll"", ""dwmapi.dll"", ""msimg32.dll"", ""ole32.dll"", ""secur32.dll"", ""userenv.dll"", ""wtsapi32.dll"", ""netapi32.dll"", ""ntmarta.dll"", ""samcli.dll"", ""sspicli.dll"", ""winsta.dll"", ""d3d9.dll"", ""d3dx9_43.dll""],

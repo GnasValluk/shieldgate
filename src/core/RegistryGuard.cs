@@ -205,7 +205,18 @@ namespace ShieldGate
                 string backupKey = i.Hive + "|" + i.Path + "|" + i.Name;
                 bool first;
                 lock (BackedUp) first = BackedUp.Add(backupKey);
-                if (first) PcScan.BackupReg(i.Hive, i.Path);
+                if (first)
+                {
+                    // Không có bản sao khoá thì không ghi đè giá trị đang có; bỏ khoá
+                    // khỏi danh sách đã sao lưu để lần kiểm tra sau thử lại.
+                    string backupError;
+                    if (!PcScan.BackupReg(i.Hive, i.Path, out backupError))
+                    {
+                        ok = false;
+                        lock (BackedUp) BackedUp.Remove(backupKey);
+                        continue;
+                    }
+                }
                 if (Write(i)) fixedCount++;
                 else
                 {

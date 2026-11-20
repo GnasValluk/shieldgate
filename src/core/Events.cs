@@ -184,7 +184,16 @@ namespace ShieldGate
 
         private static string Csv(string s)
         {
-            return "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
+            string v = s ?? "";
+            // CSV injection: Excel/Sheets thực thi ô mở đầu bằng = + - @ (và tab,
+            // CR). Thêm nháy đơn để bảng tính coi là chữ. Tệp TSV nội bộ không đổi.
+            if (v.Length > 0)
+            {
+                char c = v[0];
+                if (c == '=' || c == '+' || c == '-' || c == '@' || c == '\t' || c == '\r')
+                    v = "'" + v;
+            }
+            return "\"" + v.Replace("\"", "\"\"") + "\"";
         }
 
         private static string Html(string s)

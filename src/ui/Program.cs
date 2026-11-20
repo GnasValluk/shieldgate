@@ -21,8 +21,16 @@ namespace ShieldGate
         private static int Main(string[] args)
         {
             Bootstrap.Load();
-            S.SetLanguage(Bootstrap.IsLanguage(Bootstrap.Language)
-                ? Bootstrap.Language
+            string lang = Bootstrap.Language;
+            if (!Bootstrap.IsLanguage(lang))
+            {
+                // Tác vụ bảo vệ chạy bằng SYSTEM không có setup.ini theo người dùng,
+                // nên đọc ngôn ngữ đã lưu chung để nhật ký không lẫn tiếng Anh.
+                try { lang = Settings.Get("language", ""); }
+                catch { }
+            }
+            S.SetLanguage(Bootstrap.IsLanguage(lang)
+                ? lang
                 : Bootstrap.DefaultLanguage);
             ApplyCulture();
 
@@ -58,13 +66,15 @@ namespace ShieldGate
                     case "watch": return Guard.RunWatch();
                     case "tray": return TrayApp.Run();
                     case "install": return Install(args);
-                    case "uninstall": return Uninstall();
+                    case "uninstall": return Uninstall(args);
                     case "status": return Status();
                     case "scan": return Scan(args);
                     case "devices": return DevicesCommand();
                     case "events": return EventsCommand(args);
                     case "repair": return RepairCommand(args);
                     case "defender": return DefenderCommand(args);
+                    case "import-rules":
+                    case "importrules": return ImportRules(args);
                     case "selftest": return SelfTest.Run();
                     case "":
                         break;
@@ -149,6 +159,17 @@ namespace ShieldGate
 
                 Paths.Configure(string.IsNullOrEmpty(Bootstrap.Home) ? Bootstrap.DefaultHome : Bootstrap.Home);
 
+                // Ghi ngôn ngữ vào thư mục dữ liệu chung (settings.txt) để tiến trình
+                // bảo vệ nền dùng lại; setup.ini chỉ có trong hồ sơ người dùng.
+                try
+                {
+                    if (Bootstrap.IsLanguage(S.Language)
+                        && !string.Equals(S.Language, Settings.Get("language", null),
+                                          StringComparison.OrdinalIgnoreCase))
+                        Settings.Set("language", S.Language);
+                }
+                catch { }
+
                 // Bản cài cũ có thể chưa có biểu tượng khay: tạo lại nếu bảo vệ đang chạy.
                 try { Guard.EnsureTray(); } catch { }
 
@@ -204,6 +225,7 @@ namespace ShieldGate
             switch (command)
             {
                 case "": case "install": case "uninstall": case "watch": case "tray":
+                case "import-rules": case "importrules":
                     return true;
                 default:
                     return false;
@@ -243,12 +265,23 @@ namespace ShieldGate
             return ok ? 0 : 1;
         }
 
-        private static int Uninstall()
+        private static int Uninstall(string[] args)
         {
+            // Mac dinh giu cach ly va ban sao luu o; --purge-data de xoa het.
+            bool keep = true;
+            foreach (string a in args)
+            {
+                string t = a.TrimStart('-').ToLowerInvariant();
+                if (t == "purge-data" || t == "purge") keep = false;
+                if (t == "keep-data" || t == "keep") keep = true;
+            }
+
             bool clean;
-            bool ok = Uninstaller.Run(out clean);
+            bool ok = Uninstaller.Run(keep, out clean);
             if (!ok) return 1;
-            Console.WriteLine(clean ? S.Cli.UninstallDone : S.Cli.UninstallPending);
+            if (!clean) Console.WriteLine(S.Cli.UninstallPending);
+            else if (keep) Console.WriteLine(S.Cli.UninstallKept);
+            else Console.WriteLine(S.Cli.UninstallDone);
             return 0;
         }
 
@@ -256,7 +289,7 @@ namespace ShieldGate
         {
             StatusInfo st = Guard.GetStatus();
             Console.WriteLine(S.Cli.StatusTitle + " " + AppInfo.Version);
-            Console.WriteLine(S.Cli.StatusProtect(st.FullyProtected));
+            Console.WriteLine(S.Cli.StatusProtect(st.ProtectionOn));
             Console.WriteLine(S.Cli.StatusAutorun(st.Autorun));
             Console.WriteLine(S.Cli.StatusIni(st.Ini));
             Console.WriteLine(S.Cli.StatusWsh(st.Wsh));
@@ -355,6 +388,37 @@ namespace ShieldGate
             }
             if (info.Problem.Length > 0) Console.WriteLine(S.Cli.RepairProblem(info.Problem));
             return info.Problem.Length > 0 ? 1 : 0;
+        }
+
+        private static int ImportRules(string[] args)
+        {
+            string path = args.Length > 1 ? args[1].Trim() : "";
+            bool confirmed = false;
+            for (int i = 2; i < args.Length; i++)
+            {
+                string t = args[i].TrimStart('-').ToLowerInvariant();
+                if (t == "yes" || t == "y") confirmed = true;
+            }
+            if (path.Length == 0)
+            {
+                Console.WriteLine(S.Cli.ImportRulesUsage);
+                return 1;
+            }
+            if (!confirmed)
+            {
+                // Ghi đè tệp luật là thao tác phá huỷ: bắt buộc --yes.
+                Console.WriteLine(S.Cli.ImportRulesConfirm(path));
+                Console.WriteLine(S.Cli.ImportRulesUsage);
+                return 1;
+            }
+            string error;
+            if (!Rules.Import(path, out error))
+            {
+                Console.WriteLine(error);
+                return 1;
+            }
+            Console.WriteLine(S.Cli.ImportRulesDone(Paths.RulesFile));
+            return 0;
         }
 
         private static int DefenderCommand(string[] args)

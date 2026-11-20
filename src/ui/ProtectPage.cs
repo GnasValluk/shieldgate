@@ -151,8 +151,8 @@ namespace ShieldGate
             _blockExec.Checked = _status.BlockExec;
             _loading = false;
 
-            _toggle.Text = _status.FullyProtected ? S.Protect.Off : S.Protect.On;
-            _toggle.Kind = _status.FullyProtected ? ButtonKind.Secondary : ButtonKind.Primary;
+            _toggle.Text = _status.ProtectionOn ? S.Protect.Off : S.Protect.On;
+            _toggle.Kind = _status.ProtectionOn ? ButtonKind.Secondary : ButtonKind.Primary;
 
             _adminNote.Visible = !_status.Admin;
             _reload.Visible = !_status.Admin;
@@ -216,23 +216,36 @@ namespace ShieldGate
         {
             if (_busy || !_status.Admin) return;
 
-            if (!_status.FullyProtected)
+            if (!_status.ProtectionOn)
             {
+                // Bật lại đúng lựa chọn đã lưu: mục người dùng chủ động tắt
+                // (ví dụ chặn AutoRun) phải ở yên, không bị bật lại.
+                GuardConfig cfg = Guard.EnableConfig();
+
                 int changes = 0;
-                if (!_status.Autorun) changes++;
-                if (!_status.Ini) changes++;
-                if (!_status.Registry) changes++;
+                if (cfg.Autorun && !_status.Autorun) changes++;
+                if (cfg.Ini && !_status.Ini) changes++;
+                if (cfg.Registry && !_status.Registry) changes++;
                 if (!_status.Running) changes++;
+                if (cfg.Wsh && !_status.Wsh) changes++;
+                if (cfg.WriteProtect && !_status.WriteProtect) changes++;
+                if (cfg.BlockExec && !_status.BlockExec) changes++;
+
                 if (!ConfirmDialog.Ask(FindForm(), S.Dlg.ProtectOnTitle,
                                        S.Dlg.ProtectOnBody(changes), S.Dlg.ProtectOnOk,
                                        S.Dlg.Cancel, ButtonKind.Primary, true))
                     return;
 
                 _loading = true;
-                _autorun.Checked = true;
-                _ini.Checked = true;
-                _registry.Checked = true;
+                _autorun.Checked = cfg.Autorun;
+                _ini.Checked = cfg.Ini;
+                _wsh.Checked = cfg.Wsh;
+                _registry.Checked = cfg.Registry;
+                // "Bật bảo vệ" phải chạy bảo vệ nền; các lớp registry chỉ là
+                // phần thêm và đi theo lựa chọn đã lưu.
                 _guard.Checked = true;
+                _writeProtect.Checked = cfg.WriteProtect;
+                _blockExec.Checked = cfg.BlockExec;
                 _loading = false;
             }
             else

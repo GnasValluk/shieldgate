@@ -16,6 +16,7 @@ namespace ShieldGate
         private bool _scanning;
         private volatile bool _cancel;
         private volatile string _stage = "";
+        private DateTime _scanStarted;
         private bool _refreshing;
         private PrimaryMode _primaryMode = PrimaryMode.Scan;
 
@@ -181,7 +182,7 @@ namespace ShieldGate
                 _primary.Kind = ButtonKind.Primary;
                 _secondary.Visible = true;
             }
-            else if (_status.FullyProtected)
+            else if (_status.ProtectionOn)
             {
                 _primaryMode = PrimaryMode.Scan;
                 _stateIcon.IconName = "check";
@@ -215,7 +216,15 @@ namespace ShieldGate
             switch (_primaryMode)
             {
                 case PrimaryMode.Cancel:
-                    _cancel = true;
+                    // Nút "Huỷ" nằm đúng chỗ vừa bấm "Kiểm tra máy". Bấm đúp hoặc
+                    // bấm lại vì tưởng máy chưa phản hồi sẽ huỷ luôn lần kiểm tra
+                    // vừa bắt đầu, rồi trạng thái trở về như cũ. Bỏ qua cú bấm huỷ
+                    // đến sát lúc bắt đầu.
+                    if ((DateTime.Now - _scanStarted).TotalMilliseconds >= 1500)
+                    {
+                        _cancel = true;
+                        _stage = S.Overview.StateStopping;
+                    }
                     break;
                 case PrimaryMode.ShowFindings:
                     ShowFindings();
@@ -236,6 +245,7 @@ namespace ShieldGate
             if (_scanning) return;
             _scanning = true;
             _cancel = false;
+            _scanStarted = DateTime.Now;
             _stage = S.Pc.StageStartup;
             UpdateState();
 
@@ -275,7 +285,11 @@ namespace ShieldGate
                 _findings = found;
                 int attention = Attention(found);
                 Settings.SetPcScan(0, attention);
-                if (found.Count > 0) Log.Write(S.Log.PcScanFound(found.Count));
+                if (found.Count > 0)
+                {
+                    Log.Write(S.Log.PcScanFound(found.Count));
+                    PcScan.LogFindings(found);
+                }
                 else Log.Write(S.Log.PcScanClean);
             }
 
@@ -403,7 +417,7 @@ namespace ShieldGate
                 _protectText.Text = S.Overview.ProtectOk;
                 _protectDot = Theme.Safe;
             }
-            else if (!_status.Autorun && !_status.Ini && !_status.Registry && !_status.Running)
+            else if (!_status.ProtectionOn)
             {
                 _protectText.Text = S.Overview.ProtectOff;
                 _protectDot = Theme.InkFaint;
@@ -483,8 +497,15 @@ namespace ShieldGate
             _stateSub.Bounds = new Rectangle(pad + Ui.Px(34), Ui.Px(108),
                 width - Ui.Px(34), Ui.Px(24));
 
+            // Giữ bề rộng nút chính ổn định giữa các trạng thái: nếu nút co lại
+            // (ví dụ "Kiểm tra máy" → "Huỷ"), cú bấm tiếp theo rơi ra ngoài nút và
+            // bị nuốt, người dùng phải bấm nhiều lần mới thấy phản hồi.
+            int primaryW = Math.Max(TextWidth(_primary.Text, Theme.BodyStrong),
+                           Math.Max(TextWidth(S.Overview.ActionScan, Theme.BodyStrong),
+                                    Math.Max(TextWidth(S.Overview.ActionProtect, Theme.BodyStrong),
+                                             TextWidth(S.Overview.Cancel, Theme.BodyStrong))));
             _primary.Bounds = new Rectangle(pad, Ui.Px(152),
-                TextWidth(_primary.Text, Theme.BodyStrong), Ui.Px(Theme.ControlHeight));
+                primaryW, Ui.Px(Theme.ControlHeight));
 
             int secW = Ui.Measure(_secondary.Text, Theme.Small).Width + Ui.Px(4);
             _secondary.Bounds = new Rectangle(_primary.Right + Ui.Px(22), Ui.Px(160),

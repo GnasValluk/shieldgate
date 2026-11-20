@@ -16,10 +16,10 @@ namespace ShieldGate
     internal static class AppInfo
     {
         public const string Name = "ShieldGate";
-        public const string Version = "2.0";
+        public const string Version = "2.1";
         public const string TaskName = "ShieldGate USB Guard";
         public const string TrayTaskName = "ShieldGate Tray";
-        // Tên mutex nội bộ đổi theo phiên bản lớn để bản 1.0 và 2.0 không tranh nhau.
+        // Tên mutex nội bộ đổi theo phiên bản lớn để bản 1.0 và 2.x không tranh nhau.
         public const string MutexName = "Global\\ShieldGate_USBGuard_2";
         public const string UiMutexName = "Local\\ShieldGate_UI_2";
         public const string TrayMutexName = "Local\\ShieldGate_Tray_2";
@@ -128,22 +128,48 @@ namespace ShieldGate
         private static void Grant(string dir, bool usersRead, out string output)
         {
             // /reset trước để xoá ACE cũ (bản 7.x từng cấp Users quyền đọc bin).
-            Native.Run("icacls.exe", "\"" + dir + "\" /setowner \"*S-1-5-32-544\" /reset",
+            Native.Run(Native.SysExe("icacls.exe"), "\"" + dir + "\" /setowner \"*S-1-5-32-544\" /reset",
                        20000, out output);
             string args = "\"" + dir + "\" /setowner \"*S-1-5-32-544\" /inheritance:r " +
                           "/grant:r \"*S-1-5-18:(OI)(CI)F\" \"*S-1-5-32-544:(OI)(CI)F\"";
             if (usersRead) args += " \"*S-1-5-32-545:(OI)(CI)RX\"";
             else args += " /remove:g \"*S-1-5-32-545\"";
-            Native.Run("icacls.exe", args, 20000, out output);
+            Native.Run(Native.SysExe("icacls.exe"), args, 20000, out output);
         }
 
         public static void EnsureDirs()
         {
             foreach (string d in new[] { Root, LogDir, QuarDir, BakDir, BinDir, RepairDir })
             {
-                try { Directory.CreateDirectory(d); }
+                try
+                {
+                    Directory.CreateDirectory(d);
+                    string marker = MarkerIn(d);
+                    if (marker.Length > 0 && !File.Exists(marker))
+                        File.WriteAllText(marker, MarkerText(), new UTF8Encoding(false));
+                }
                 catch { }
             }
+        }
+
+        // Tep danh dau "thu muc nay do ShieldGate tao". Bo go cai dat chi xoa cay
+        // con co marker (hoac khop chu ky tep ben trong), nho vay thu muc nguoi
+        // dung chon lam noi luu du lieu khong bi xoa nham.
+        public const string OwnerMarker = ".shieldgate";
+
+        public static string MarkerIn(string dir)
+        {
+            if (string.IsNullOrEmpty(dir)) return "";
+            try { return Path.Combine(dir, OwnerMarker); }
+            catch { return ""; }
+        }
+
+        private static string MarkerText()
+        {
+            return "app=" + AppInfo.Name + "\r\n"
+                 + "version=" + AppInfo.Version + "\r\n"
+                 + "created=" + DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)
+                 + "\r\n";
         }
     }
 
@@ -254,6 +280,79 @@ namespace ShieldGate
             catch { return false; }
         }
 
+        // Serial cua volume (khong phai chu o). Marker sao luu phai gan voi serial
+        // de USB khac cam vao cung chu E: khong duoc dung lai ban sao luu cu.
+        public static uint VolumeSerial(string root)
+        {
+            try
+            {
+                uint serial, maxComponent, flags;
+                StringBuilder label = new StringBuilder(8), fs = new StringBuilder(8);
+                if (!GetVolumeInformationW(root, label, 8, out serial, out maxComponent,
+                                           out flags, fs, 8))
+                    return 0;
+                return serial;
+            }
+            catch { return 0; }
+        }
+
+        // CreateProcess tim tep trong thu muc chua ShieldGate truoc. Goi ten tran
+        // khi chay tu USB (hoac thu muc Downloads) co the chay exe gia voi quyen
+        // admin, nen moi cong cu he thong phai di qua day.
+        //
+        // Thu tu: Sysnative (chi co khi tien trinh 32-bit tren Windows 64-bit, tro
+        // thang vao System32 that), SystemDirectory (SysWOW64 khi chay x86),
+        // System32 (dung khi tien trinh 64-bit), roi WindowsPowerShell\v1.0 vi
+        // powershell.exe khong nam trong System32.
+        public static string SysExe(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return name;
+            try
+            {
+                if (name.IndexOf('\\') >= 0 || name.IndexOf('/') >= 0) return name;
+                string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                string[] dirs = new string[]
+                {
+                    Path.Combine(win, "Sysnative"),
+                    Environment.SystemDirectory,
+                    Path.Combine(win, "System32"),
+                    Path.Combine(win, "System32\\WindowsPowerShell\\v1.0")
+                };
+                foreach (string dir in dirs)
+                {
+                    if (string.IsNullOrEmpty(dir)) continue;
+                    string full = Path.Combine(dir, name);
+                    if (File.Exists(full)) return full;
+                }
+            }
+            catch { }
+            return name;
+        }
+
+        // explorer.exe nam o %WINDIR%, khong phai System32.
+        public static string ShellExe(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return name;
+            try
+            {
+                if (name.IndexOf('\\') >= 0) return name;
+                string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                string full = Path.Combine(win, name);
+                if (File.Exists(full)) return full;
+            }
+            catch { }
+            return name;
+        }
+
+        // Lop phong thu thu hai: du mot cho goi con quen, ten tran van duoc
+        // phan giai truoc khi CreateProcess tim trong thu muc hien tai.
+        private static string ResolveTool(string file)
+        {
+            if (string.IsNullOrEmpty(file)) return file;
+            if (file.IndexOf('\\') >= 0 || file.IndexOf('/') >= 0) return file;
+            return SysExe(file);
+        }
+
         // Thu ghi that mot tep tam roi xoa ngay. Dung truoc khi di chuyen / cach ly
         // de o chi doc hoac o khong co quyen ghi chi bao mot loi thay vi hang loat.
         public static bool CanWrite(string dir)
@@ -295,7 +394,7 @@ namespace ShieldGate
             StringBuilder sb = new StringBuilder();
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo(file, args);
+                ProcessStartInfo psi = new ProcessStartInfo(ResolveTool(file), args);
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
                 psi.RedirectStandardOutput = true;
@@ -482,7 +581,8 @@ namespace ShieldGate
             if (!WinPath.Exists(from))
             {
                 // Tệp đã biến mất (bảo vệ nền hoặc người dùng vừa cách ly trước đó).
-                error = "not found";
+                // Không phải lỗi: để trống error để bên gọi không ghi ERROR/đếm lỗi.
+                error = "";
                 return false;
             }
 
@@ -535,7 +635,8 @@ namespace ShieldGate
                     // và bỏ bản sao để vùng cách ly không có tệp mồ côi.
                     int delCode = Marshal.GetLastWin32Error();
                     WinPath.DeleteFile(WinPath.Ext(dest));
-                    error = WinPath.ErrorText(delCode);
+                    // Nguồn đã bị luồng khác lấy đi trong lúc sao chép: không phải lỗi.
+                    error = (delCode == 2 || delCode == 3) ? "" : WinPath.ErrorText(delCode);
                     return false;
                 }
             }
@@ -622,7 +723,18 @@ namespace ShieldGate
         }
 
         public static void RestoreBatch(string batchPath, out int restored, out int skipped, out int missing)
-        {            restored = 0; skipped = 0; missing = 0;
+        {
+            int refused;
+            RestoreBatch(batchPath, out restored, out skipped, out missing, out refused);
+        }
+
+        // Manifest.csv la du lieu khong tin duoc: dong trong do co the bi sua de tro
+        // nguon ra ngoai lan cach ly (doc tep bat ky) hoac dich vao thu muc he thong
+        // (ghi de tep he thong bang quyen quan tri). Moi dong phai qua kiem tra nay.
+        public static void RestoreBatch(string batchPath, out int restored, out int skipped,
+                                        out int missing, out int refused)
+        {
+            restored = 0; skipped = 0; missing = 0; refused = 0;
             string mf = System.IO.Path.Combine(batchPath, "manifest.csv");
             if (!File.Exists(mf)) return;
             List<string[]> rows = CsvFile.Read(mf);
@@ -631,12 +743,31 @@ namespace ShieldGate
             int iQuar = CsvFile.Index(rows[0], "QuarantinePath");
             int iSha = CsvFile.Index(rows[0], "SHA256");
             if (iOrig < 0 || iQuar < 0) return;
+
+            string batchRoot = Canonical(batchPath);
+            string quarRoot = Canonical(Paths.QuarDir);
+            if (batchRoot.Length == 0) return;
             for (int r = 1; r < rows.Count; r++)
             {
                 string[] row = rows[r];
                 if (iOrig >= row.Length || iQuar >= row.Length) continue;
                 string dest = row[iOrig], src = row[iQuar];
                 if (string.IsNullOrEmpty(dest) || string.IsNullOrEmpty(src)) continue;
+
+                // Nguon phai nam trong dung lan cach ly nay.
+                if (!Inside(src, batchRoot))
+                {
+                    refused++;
+                    RefuseRestore(src, S.Log.RestoreOutside);
+                    continue;
+                }
+                string badTarget;
+                if (!RestoreTargetOk(dest, quarRoot, out badTarget))
+                {
+                    refused++;
+                    RefuseRestore(dest, badTarget);
+                    continue;
+                }
                 if (!WinPath.Exists(WinPath.Ext(src))) { missing++; continue; }
                 if (WinPath.Exists(WinPath.Ext(dest))) { skipped++; continue; }
                 // Bản cách ly bị sửa hoặc hỏng thì không ghi trả về ổ.
@@ -660,6 +791,97 @@ namespace ShieldGate
                 }
                 else missing++;
             }
+        }
+
+        // Duong dan dich hop le: tuyet doi, co ten tep, khong nam trong vung cach ly,
+        // thu muc chuong trinh hay thu muc he thong.
+        private static bool RestoreTargetOk(string dest, string quarRoot, out string reason)
+        {
+            reason = S.Log.RestoreBadPath;
+            if (string.IsNullOrEmpty(dest) || !System.IO.Path.IsPathRooted(dest)) return false;
+            string full = Canonical(dest);
+            if (full.Length == 0) return false;
+            // "C:" hoac "C:\": dich phai la mot tep, khong phai ca o.
+            int slash = full.LastIndexOf('\\');
+            if (slash < 0 || slash == full.Length - 1) return false;
+
+            // Vùng cách ly và thư mục cài đặt không phải chỗ khôi phục: dòng manifest
+            // trỏ vào đó là dấu hiệu bị sửa. Không chặn cả thư mục chứa exe vì bản
+            // chạy từ USB quét chính USB đó, khôi phục về gốc USB là hợp lệ (tệp đã
+            // tồn tại thì luôn bị bỏ qua, không ghi đè).
+            if (Inside(full, quarRoot) || Inside(full, Paths.BinDir))
+            {
+                reason = S.Log.RestoreAppFolder;
+                return false;
+            }
+
+            string[] systemDirs = new string[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
+            };
+            foreach (string dir in systemDirs)
+            {
+                if (Inside(full, dir))
+                {
+                    reason = S.Log.RestoreSystemFolder;
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Chuan hoa khong dung System.IO.Path.GetFullPath: tren .NET Framework 4.0
+        // no nem PathTooLongException voi duong dan > 260 ky tu, dung loai duong dan
+        // ma vung cach ly phai xu ly. Chi gop "." va ".." bang chuoi, khong cham dia.
+        private static string Canonical(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            string p = path;
+            if (p.StartsWith(@"\\?\", StringComparison.Ordinal)) p = p.Substring(4);
+            else if (p.StartsWith(@"\\", StringComparison.Ordinal)) return p.TrimEnd('\\');
+            if (!System.IO.Path.IsPathRooted(p)) return "";
+
+            string[] parts = p.Split('\\');
+            List<string> stack = new List<string>();
+            foreach (string part in parts)
+            {
+                if (part.Length == 0 || part == ".") continue;
+                if (part == "..")
+                {
+                    // Khong duoc lui qua goc o hay goc chia se.
+                    if (stack.Count > 1) stack.RemoveAt(stack.Count - 1);
+                    continue;
+                }
+                stack.Add(part);
+            }
+            StringBuilder sb = new StringBuilder();
+            foreach (string part in stack)
+            {
+                if (sb.Length > 0) sb.Append('\\');
+                sb.Append(part);
+            }
+            return sb.ToString();
+        }
+
+        // So sanh tien to theo duong dan da chuan hoa, co them dau "\" de
+        // "C:\Temp2" khong bi coi la nam trong "C:\Temp".
+        private static bool Inside(string path, string dir)
+        {
+            string full = Canonical(path);
+            string root = Canonical(dir);
+            if (full.Length == 0 || root.Length == 0) return false;
+            return full.Length > root.Length
+                && full.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void RefuseRestore(string path, string reason)
+        {
+            string line = S.Log.RestoreRefused(path, reason);
+            Log.Write(line, "WARN");
+            try { Events.Add(Events.KindScan, "WARN", path, reason); }
+            catch { }
         }
 
         // Xoá hẳn một lần cách ly sau khi đã khôi phục đủ. Chỉ xoá bên trong thư mục cách ly.

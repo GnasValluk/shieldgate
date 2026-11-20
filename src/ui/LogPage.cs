@@ -313,7 +313,7 @@ namespace ShieldGate
             try
             {
                 Paths.EnsureDirs();
-                Process.Start("explorer.exe", "\"" + Paths.LogDir + "\"");
+                Process.Start(Native.ShellExe("explorer.exe"), "\"" + Paths.LogDir + "\"");
             }
             catch { }
         }

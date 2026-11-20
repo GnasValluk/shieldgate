@@ -52,6 +52,14 @@ namespace ShieldGate
         public bool ReadOnly;
     }
 
+    // Phạm vi gỡ thuộc tính ẩn. Chế độ tự động chỉ chạm mục mang dấu hiệu virus
+    // (Hidden + System); nút "Hiện tệp" do người dùng bấm thì gỡ cả mục họ tự ẩn.
+    internal enum UnhideScope
+    {
+        VirusOnly,
+        AllHidden
+    }
+
     internal static class UsbScan
     {
         private static readonly Regex ScriptCmdRe = new Regex(
@@ -67,7 +75,7 @@ namespace ShieldGate
                 ManagementScope scope = new ManagementScope(@"\\.\root\cimv2");
                 scope.Connect();
                 ManagementObjectSearcher s = new ManagementObjectSearcher(scope, new ObjectQuery(
-                    "SELECT ProcessId, Name, CommandLine FROM Win32_Process " +
+                    "SELECT ProcessId, Name, CommandLine, ExecutablePath FROM Win32_Process " +
                     "WHERE Name='wscript.exe' OR Name='cscript.exe' OR Name='mshta.exe'"));
                 s.Options.Timeout = TimeSpan.FromSeconds(10);
                 col = s.Get();
@@ -395,6 +403,25 @@ namespace ShieldGate
             batch = "";
             stopped = 0;
             if (selected == null || selected.Count == 0) return 0;
+            // GUI va bao ve nen co the cung cach ly mot thu muc gia: mot ben di
+            // chuyen tep, ben kia bao loi "khong tim thay" hang tram lan. Chi mot
+            // tien trinh duoc sua o tai mot thoi diem; ben kia cho roi lam tiep.
+            if (!CleanLock.Enter(60000))
+            {
+                Log.Write(S.Log.CleanBusy(scan.Root), "WARN");
+                return 0;
+            }
+            try { return ApplyLocked(scan, selected, out failed, out batch, out stopped, progress); }
+            finally { CleanLock.Exit(); }
+        }
+
+        private static int ApplyLocked(UsbScanResult scan, IList<UsbItem> selected,
+                                       out int failed, out string batch, out int stopped,
+                                       Action<int> progress)
+        {
+            failed = 0;
+            batch = "";
+            stopped = 0;
             // O chi doc: dung truoc khi thu xoa / di chuyen, de khong ghi hang loat
             // loi Windows 5 vao nhat ky va khong tao thu muc cach ly rong.
             if (!Native.CanWrite(scan.Root))
@@ -406,6 +433,7 @@ namespace ShieldGate
             stopped = StopProcesses(scan.Root);
             batch = Quarantine.NewBatch("usb_" + (scan.Drive.Length > 0 ? scan.Drive.Substring(0, 1) : "x"), "");
             int done = 0;
+            int kept = 0;
             List<string> folders = new List<string>();
             List<string> fakes = new List<string>();
             for (int i = 0; i < selected.Count; i++)
@@ -440,7 +468,7 @@ namespace ShieldGate
                 string err;
                 if (Quarantine.Add(it.Path, scan.Root, batch, KindName(it.Kind), out err))
                     done++;
-                else
+                else if (err.Length > 0)
                 {
                     failed++;
                     Log.Write(S.Log.QuarantineFailed(it.Path, err), "ERROR");
@@ -448,11 +476,16 @@ namespace ShieldGate
                 if (progress != null) progress(i + 1);
             }
 
-            // Thu muc gia: cach ly tung tep (khoi phuc duoc), roi go thu muc rong.
+            // Thu muc gia: chi cach ly payload (1.exe, dll, dat, shortcut...).
+            // Tai lieu nguoi dung bi virus doi ten Base64 duoc giu lai tai cho,
+            // khi do thu muc khong xoa duoc va van con nguyen.
             foreach (string fk in fakes)
             {
-                done += QuarantineTree(System.IO.Path.Combine(scan.Root, fk), scan.Root, batch, ref failed);
-                UsbRestore.RemoveWrapper(scan.Root, fk);
+                int keptHere = 0;
+                done += QuarantineTree(System.IO.Path.Combine(scan.Root, fk), scan.Root, batch,
+                                       ref failed, ref keptHere);
+                kept += keptHere;
+                if (keptHere == 0) UsbRestore.RemoveWrapper(scan.Root, fk);
             }
 
             // Tra du lieu tu thu muc khong ten ra goc o, roi xoa thu muc rong do.
@@ -465,34 +498,68 @@ namespace ShieldGate
             }
 
             Log.Write(S.Log.QuarantineSummary(done, scan.Root, failed));
+            if (kept > 0) Log.Write(S.Log.FakeFolderKept(kept, scan.Root), "INFO");
+
+            // Không để lại vỏ batch rỗng: lượt quét sau chỉ còn tài liệu giữ lại
+            // vẫn tạo batch, và mỗi vòng nền lại thêm một thư mục trống.
+            if (batch.Length > 0 && !HasQuarantinedFile(batch))
+            {
+                Quarantine.RemoveBatch(batch);
+                batch = "";
+            }
             return done;
         }
 
-        public static int QuarantineTree(string dir, string root, string batch, ref int failed)
+        private static bool HasQuarantinedFile(string batch)
+        {
+            try
+            {
+                string files = System.IO.Path.Combine(batch, "files");
+                return Directory.Exists(files)
+                    && Directory.GetFiles(files, "*.sgq", SearchOption.AllDirectories).Length > 0;
+            }
+            catch { return true; }   // không đọc được: giữ lại, không xoá mù.
+        }
+
+        // Tra ve so tep payload da cach ly. kept = so tep du lieu nguoi dung giu lai.
+        public static int QuarantineTree(string dir, string root, string batch,
+                                         ref int failed, ref int kept)
         {
             int n = 0;
-            List<string> dirs = new List<string>();
-            foreach (TreeItem t in Tree.Walk(dir))
+            kept = 0;
+            if (!CleanLock.Enter(60000))
             {
-                if (t.IsDir) { dirs.Add(t.Path); continue; }
-                string err;
-                if (Quarantine.Add(t.Path, root, batch, "fake-folder", out err)) n++;
-                else
+                Log.Write(S.Log.CleanBusy(root), "WARN");
+                return 0;
+            }
+            try
+            {
+                List<string> dirs = new List<string>();
+                foreach (TreeItem t in Tree.Walk(dir))
                 {
-                    failed++;
-                    Log.Write(S.Log.QuarantineFailed(t.Path, err), "ERROR");
+                    if (t.IsDir) { dirs.Add(t.Path); continue; }
+                    // Tai lieu / anh / tep cua nguoi dung: khong dong vao.
+                    if (!UsbRestore.IsPayloadFile(t.Name)) { kept++; continue; }
+                    string err;
+                    if (Quarantine.Add(t.Path, root, batch, "fake-folder", out err)) n++;
+                    else if (err.Length > 0)
+                    {
+                        failed++;
+                        Log.Write(S.Log.QuarantineFailed(t.Path, err), "ERROR");
+                    }
                 }
-            }
-            dirs.Sort(delegate(string a, string b) { return b.Length.CompareTo(a.Length); });
-            foreach (string d in dirs)
-            {
-                try { File.SetAttributes(d, FileAttributes.Normal); Directory.Delete(d, false); }
+                dirs.Sort(delegate(string a, string b) { return b.Length.CompareTo(a.Length); });
+                foreach (string d in dirs)
+                {
+                    try { File.SetAttributes(d, FileAttributes.Normal); Directory.Delete(d, false); }
+                    catch { }
+                }
+                bool removed = false;
+                try { File.SetAttributes(dir, FileAttributes.Normal); Directory.Delete(dir, false); removed = true; }
                 catch { }
+                return n > 0 ? n : (removed ? 1 : 0);
             }
-            bool removed = false;
-            try { File.SetAttributes(dir, FileAttributes.Normal); Directory.Delete(dir, false); removed = true; }
-            catch { }
-            return n > 0 ? n : (removed ? 1 : 0);
+            finally { CleanLock.Exit(); }
         }
 
         // Sau khi du lieu ra ngoai, quet lai va cach ly nhung dau hieu manh (shortcut /
@@ -523,7 +590,29 @@ namespace ShieldGate
             }
         }
 
+        // Giữ nguyên thuộc tính hệ thống: desktop.ini thật, autorun.inf (được xử lý
+        // riêng), thư mục hệ thống của ổ. Đổi thuộc tính các mục này dễ làm hỏng
+        // hiển thị thư mục hoặc làm Explorer hiện lại thứ người dùng cố tình ẩn.
+        private static bool KeepSystemAttributes(string name)
+        {
+            string n = name ?? "";
+            if (n.Length == 0) return true;
+            if (n[0] == '$') return true;
+            if (string.Equals(n, "desktop.ini", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(n, "autorun.inf", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(n, "System Volume Information", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        // Chế độ tự động (sau khi cách ly): chỉ mục Hidden + System, dấu hiệu
+        // virus đặt attrib +h +s hàng loạt. Mục người dùng tự ẩn chỉ có Hidden nên
+        // được giữ nguyên.
         public static int Unhide(string root, Func<bool> cancelled)
+        {
+            return Unhide(root, UnhideScope.VirusOnly, cancelled);
+        }
+
+        public static int Unhide(string root, UnhideScope scope, Func<bool> cancelled)
         {
             int count = 0;
             foreach (TreeItem t in Tree.Walk(root))
@@ -532,6 +621,11 @@ namespace ShieldGate
                 try
                 {
                     if (!File.Exists(t.Path) && !Directory.Exists(t.Path)) continue;
+                    if (KeepSystemAttributes(t.Name)) continue;
+                    FileAttributes a = File.GetAttributes(t.Path);
+                    if ((a & FileAttributes.Hidden) == 0) continue;
+                    if (scope == UnhideScope.VirusOnly
+                        && (a & FileAttributes.System) == 0) continue;
                     if (Native.ClearHidden(t.Path)) count++;
                 }
                 catch { }
@@ -563,7 +657,7 @@ namespace ShieldGate
     internal enum PcKind
     {
         RunValue, WinlogonShell, WinlogonUserinit, AppInit,
-        MountPoint, StartupFile, Task, Process, Defender,
+        MountPoint, StartupFile, Task, Process, Service, Defender,
         DroppedFile, FakeProcess,
         DriveShortcut, DriveFakeFolder, DriveHiddenFolder, DriveExe,
         WmiConsumer, LnkAssoc, RegHealth
@@ -717,6 +811,7 @@ namespace ShieldGate
                         {
                             PcItem i = New(PcKind.Process, true, name, cmd + "  [PID " + pid + "]");
                             i.Data["pid"] = pid;
+                            i.Data["path"] = Convert.ToString(mo["ExecutablePath"]) ?? "";
                             list.Add(i);
                         }
                     }
@@ -730,6 +825,9 @@ namespace ShieldGate
             ScanPayloadTrees(list);
             ScanImpostors(list);
             ScanOddProcesses(list);
+            if (stage != null) stage(S.Pc.StageServices);
+            ScanServices(list);
+            LinkProcessesToPayloads(list);
 
             // Cac o dia va thu muc nguoi dung: noi virus tha shortcut/thu muc gia
             // va giau du lieu. Quet goc o de tim ban sao tren may bi nhiem.
@@ -782,7 +880,7 @@ namespace ShieldGate
                 ManagementScope scope = new ManagementScope(@"\\.\root\cimv2");
                 scope.Connect();
                 ManagementObjectSearcher s = new ManagementObjectSearcher(scope, new ObjectQuery(
-                    "SELECT ProcessId, Name, CommandLine FROM Win32_Process " +
+                    "SELECT ProcessId, Name, CommandLine, ExecutablePath FROM Win32_Process " +
                     "WHERE Name='wscript.exe' OR Name='cscript.exe' OR Name='mshta.exe'"));
                 s.Options.Timeout = TimeSpan.FromSeconds(10);
                 col = s.Get();
@@ -970,6 +1068,7 @@ namespace ShieldGate
                         PcItem i = New(PcKind.FakeProcess, true, Convert.ToString(mo["Name"]),
                                        path + "  [PID " + pid + "]");
                         i.Data["pid"] = pid;
+                        i.Data["path"] = path;
                         findings.Add(i);
                     }
                     catch { }
@@ -1019,6 +1118,7 @@ namespace ShieldGate
                                        path + "  [PID " + pid + "]" +
                                        (removable ? " (chay tu USB)" : " (ten dang so)"));
                         i.Data["pid"] = pid;
+                        i.Data["path"] = path;
                         findings.Add(i);
                     }
                     catch { }
@@ -1028,8 +1128,243 @@ namespace ShieldGate
             catch { }
         }
 
-        // Goc cac o dia: tim shortcut, thu muc gia, thu muc khong ten va tep chay gia dang
-        // ma virus shortcut de lai tren may bi nhiem (ke ca o he thong).
+        // Dich vu/driver khong nam trong Windows hay Program Files: day la cach
+        // thuong tru pho bien cua virus de tu khoi dong lai sau moi lan don.
+        private static void ScanServices(List<PcItem> findings)
+        {
+            try
+            {
+                using (RegistryKey root = Registry.LocalMachine.OpenSubKey(
+                           @"SYSTEM\CurrentControlSet\Services"))
+                {
+                    if (root == null) return;
+                    string[] names;
+                    try { names = root.GetSubKeyNames(); }
+                    catch { return; }
+                    foreach (string name in names)
+                    {
+                        try
+                        {
+                            using (RegistryKey k = root.OpenSubKey(name))
+                            {
+                                if (k == null) continue;
+                                string image = Convert.ToString(k.GetValue("ImagePath")) ?? "";
+                                if (image.Length == 0) continue;
+                                int start = ToInt(k.GetValue("Start"), 3);
+                                int type = ToInt(k.GetValue("Type"), 1);
+                                if (!ServiceSuspicious(name, image, start, type)) continue;
+                                string exe = ServiceImagePath(image);
+                                PcItem i = New(PcKind.Service, true, name,
+                                    image + "  [Start " + start + ", Type " + type + "]");
+                                i.Data["name"] = name;
+                                i.Data["image"] = exe;
+                                findings.Add(i);
+
+                                // Tep chay cua dich vu cung phai roi khoi may, nhung
+                                // chi sau khi dich vu da dung (FixPass 0 truoc pass 3).
+                                if (exe.Length > 0 && File.Exists(exe))
+                                {
+                                    bool dup = false;
+                                    foreach (PcItem x in findings)
+                                        if (string.Equals(Str(x, "path"), exe,
+                                                          StringComparison.OrdinalIgnoreCase))
+                                        { dup = true; break; }
+                                    if (!dup)
+                                    {
+                                        PcItem f = New(PcKind.DroppedFile, true,
+                                            System.IO.Path.GetFileName(exe),
+                                            "service-image  ->  " + exe);
+                                        f.Data["path"] = exe;
+                                        f.Data["root"] = System.IO.Path.GetDirectoryName(exe);
+                                        findings.Add(f);
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // Chi bao dich vu co ImagePath ra khoi Windows/Program Files. Dich vu lanh
+        // manh thuong nam trong hai thu muc do; file .sys cua driver cung vay.
+        internal static bool ServiceSuspicious(string name, string imagePath, int start, int type)
+        {
+            if (start == 4 || type <= 0) return false;
+            string exe = ServiceImagePath(imagePath);
+            if (exe.Length == 0) return false;
+            string lower = exe.ToLowerInvariant();
+            string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows)
+                                      .TrimEnd('\\').ToLowerInvariant();
+            if (win.Length > 0 && lower.StartsWith(win + "\\")) return false;
+            if (Regex.IsMatch(lower, @"^[a-z]:\\program files( \(x86\))?\\")) return false;
+
+            // Windows Defender dat engine trong ProgramData\Microsoft\Windows Defender.
+            // Do la dich vu cua Windows, khong phai virus; nham o day se de xuat xoa
+            // dung thanh phan bao ve cua may.
+            if (lower.IndexOf(@"\windows defender\", StringComparison.Ordinal) >= 0) return false;
+            string common = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)
+                                       .TrimEnd('\\').ToLowerInvariant();
+            if (common.Length > 0 && lower.StartsWith(common + @"\microsoft\")) return false;
+
+            if (Regex.IsMatch(lower,
+                    @"\\(appdata|temp|programdata|users\\public|downloads|desktop|documents)\\"))
+                return true;
+            if (exe.IndexOf('\\') < 0) return true;
+            // Duong dan la khac (D:\Apps, C:\Tools...): chi bao khi tep khong co
+            // chu ky so, vi trinh cai dat hop le co the dat dich vu o day.
+            try
+            {
+                if (!File.Exists(exe)) return true;
+                return !ShieldGate.Detect.IsSigned(exe);
+            }
+            catch { return true; }
+        }
+
+        // ImagePath co the la "\??\C:\...", "%SystemRoot%\...", co ngoac kep va
+        // tham so (svchost.exe -k netsvcs). Tra ve dung duong dan tep chay.
+        internal static string ServiceImagePath(string image)
+        {
+            string s = (image ?? "").Trim();
+            if (s.Length == 0) return "";
+            s = Environment.ExpandEnvironmentVariables(s);
+            if (s.StartsWith(@"\??\", StringComparison.Ordinal)) s = s.Substring(4);
+            string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            if (s.StartsWith(@"\SystemRoot\", StringComparison.OrdinalIgnoreCase))
+                s = System.IO.Path.Combine(win, s.Substring(12));
+            if (s.StartsWith(@"System32\", StringComparison.OrdinalIgnoreCase))
+                s = System.IO.Path.Combine(win, s);
+            if (s.StartsWith("\"", StringComparison.Ordinal))
+            {
+                int end = s.IndexOf('"', 1);
+                if (end > 1) s = s.Substring(1, end - 1);
+            }
+            else
+            {
+                Match m = Regex.Match(s, @"^(.*?\.(exe|sys|dll))(\s|$)",
+                                      RegexOptions.IgnoreCase);
+                if (m.Success) s = m.Groups[1].Value;
+                else
+                {
+                    int sp = s.IndexOf(' ');
+                    if (sp > 0) s = s.Substring(0, sp);
+                }
+            }
+            return s.Trim();
+        }
+
+        private static int ToInt(object value, int fallback)
+        {
+            try { return Convert.ToInt32(value); }
+            catch { return fallback; }
+        }
+
+        // Tiến trình đang chạy từ chính thư mục chứa payload/thư mục giả. Đây là
+        // ứng viên ghi lại shortcut sau mỗi lần dọn: nếu chỉ cách ly tệp, vòng
+        // quét nền sẽ lặp mãi (nhật ký máy bệnh 05/11: 50 lần trong 27 phút).
+        // Bộ lọc theo tên (wscript/mshta, tên hệ thống giả, tên số) bỏ sót exe
+        // lạ hoặc exe có chữ ký bị lợi dụng, nên phải nối theo thư mục.
+        private static void LinkProcessesToPayloads(List<PcItem> findings)
+        {
+            List<string> dirs = new List<string>();
+            HashSet<int> known = new HashSet<int>();
+            HashSet<string> knownFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (PcItem x in findings)
+            {
+                if (x.Kind == PcKind.Process || x.Kind == PcKind.FakeProcess)
+                {
+                    int id;
+                    if (x.Data.ContainsKey("pid") && int.TryParse(Convert.ToString(x.Data["pid"]), out id))
+                        known.Add(id);
+                }
+                if (x.Kind == PcKind.DriveFakeFolder)
+                {
+                    string root = Str(x, "root"), folder = Str(x, "folder");
+                    if (root.Length > 0 && folder.Length > 0)
+                        dirs.Add(System.IO.Path.Combine(root, folder));
+                    continue;
+                }
+                if (x.Kind == PcKind.Service)
+                {
+                    string img = Str(x, "image");
+                    string sd = img.Length > 0 ? System.IO.Path.GetDirectoryName(img) : "";
+                    if (!string.IsNullOrEmpty(sd)) dirs.Add(sd);
+                    continue;
+                }
+                string p = Str(x, "path");
+                if (p.Length == 0) continue;
+                knownFiles.Add(p);
+                // Chỉ nối theo tệp payload đã biết (tên/kích thước/hash). Nối theo
+                // mọi tệp đáng ngờ sẽ kéo theo thư mục Desktop/Documents và báo
+                // nhầm ứng dụng portable của người dùng.
+                if (ShieldGate.Detect.IsPayloadFile(p))
+                {
+                    string d = System.IO.Path.GetDirectoryName(p);
+                    if (!string.IsNullOrEmpty(d)) dirs.Add(d);
+                }
+            }
+            if (dirs.Count == 0) return;
+
+            string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            int self = Process.GetCurrentProcess().Id;
+            try
+            {
+                ManagementScope scope = new ManagementScope(@"\\.\root\cimv2");
+                scope.Connect();
+                ManagementObjectSearcher s = new ManagementObjectSearcher(scope, new ObjectQuery(
+                    "SELECT ProcessId, Name, ExecutablePath FROM Win32_Process"));
+                s.Options.Timeout = TimeSpan.FromSeconds(10);
+                foreach (ManagementBaseObject o in s.Get())
+                {
+                    ManagementObject mo = o as ManagementObject;
+                    if (mo == null) continue;
+                    try
+                    {
+                        string path = Convert.ToString(mo["ExecutablePath"]);
+                        if (string.IsNullOrEmpty(path)) continue;
+                        if (path.StartsWith(win + "\\", StringComparison.OrdinalIgnoreCase)) continue;
+                        int pid = Convert.ToInt32(mo["ProcessId"]);
+                        if (pid == self || known.Contains(pid)) continue;
+                        string dir = System.IO.Path.GetDirectoryName(path) ?? "";
+                        bool hit = false;
+                        foreach (string d in dirs)
+                        {
+                            if (string.Equals(dir, d, StringComparison.OrdinalIgnoreCase)
+                                || ShieldGate.Detect.IsUnder(path, d)) { hit = true; break; }
+                        }
+                        if (!hit) continue;
+
+                        PcItem i = New(PcKind.FakeProcess, true, Convert.ToString(mo["Name"]),
+                                       path + "  [PID " + pid + "]  (chay tu thu muc co payload)");
+                        i.Data["pid"] = pid;
+                        i.Data["path"] = path;
+                        findings.Add(i);
+                        known.Add(pid);
+
+                        // Tệp chạy của tiến trình cũng là mã độc: đưa vào danh sách
+                        // để cách ly sau khi tiến trình đã dừng.
+                        if (!knownFiles.Contains(path))
+                        {
+                            PcItem f = New(PcKind.DroppedFile, true, System.IO.Path.GetFileName(path),
+                                           "process-image  ->  " + path);
+                            f.Data["path"] = path;
+                            f.Data["root"] = dir;
+                            findings.Add(f);
+                            knownFiles.Add(path);
+                        }
+                    }
+                    catch { }
+                    finally { try { mo.Dispose(); } catch { } }
+                }
+            }
+            catch { }
+        }
+
+
+        // Gốc các ổ cố định và ổ rời: cùng cấu trúc shortcut/thư mục giả như USB,
+        // nên dùng lại bộ dò của UsbScan thay vì viết luật riêng.
         private static void ScanDriveRoots(List<PcItem> findings)
         {
             try
@@ -1306,22 +1641,20 @@ namespace ShieldGate
                         continue;
                     }
                     string rel = path.Substring(tasksRoot.Length).TrimStart('\\');
-                    if (rel.StartsWith("Microsoft\\", StringComparison.OrdinalIgnoreCase)) continue;
+                    // Task Scheduler an cac tac vu trong \Microsoft\... va tac vu Hidden
+                    // theo mac dinh, nen nguoi dung tim khong thay. Van quet, nhung chi
+                    // bao khi lenh tro vao thu muc nguoi dung ghi duoc hoac script host.
+                    bool microsoft = rel.StartsWith("Microsoft\\", StringComparison.OrdinalIgnoreCase);
                     XmlDocument doc = new XmlDocument();
                     doc.XmlResolver = null;
                     doc.Load(path);
-                    XmlNodeList cmds = doc.GetElementsByTagName("Command");
-                    XmlNodeList argsList = doc.GetElementsByTagName("Arguments");
-                    string action = "";
-                    foreach (XmlNode n in cmds) action += n.InnerText + " ";
-                    foreach (XmlNode n in argsList) action += n.InnerText + " ";
-                    action = Environment.ExpandEnvironmentVariables(action).Trim();
-                    if (action.Length == 0) continue;
-                    ShieldGate.CommandCheck v = ShieldGate.Detect.CommandVerdict(action);
-                    if (v == null || !v.High) continue;
+                    string action;
+                    if (!TaskSuspicious(doc, microsoft, out action)) continue;
                     string name = System.IO.Path.GetFileName(rel);
                     string tpath = "\\" + System.IO.Path.GetDirectoryName(rel);
-                    PcItem i = New(PcKind.Task, true, name, "\\" + rel + "  ->  " + action);
+                    string detail = "\\" + rel + "  ->  " + action;
+                    if (TaskHidden(doc)) detail += "  [hidden]";
+                    PcItem i = New(PcKind.Task, true, name, detail);
                     i.Data["name"] = name;
                     i.Data["path"] = tpath;
                     findings.Add(i);
@@ -1330,18 +1663,96 @@ namespace ShieldGate
             }
         }
 
+        // Tác vụ đã bị tắt thì không báo lại. Trước đây mỗi lần "Kiểm tra máy" lại
+        // hiện đúng tác vụ vừa tắt và ghi "Đã sửa" thêm lần nữa, nên người dùng
+        // tưởng virus tạo lại tác vụ.
+        internal static bool TaskSuspicious(XmlDocument doc, out string action)
+        {
+            return TaskSuspicious(doc, false, out action);
+        }
+
+        // microsoftFolder: tac vu nam duoi \Microsoft\... Legit Windows tasks sometimes
+        // use encoded PowerShell, so require a user-writable path or script host too.
+        internal static bool TaskSuspicious(XmlDocument doc, bool microsoftFolder, out string action)
+        {
+            action = "";
+            if (doc == null) return false;
+            bool enabled = true;
+            XmlNodeList en = doc.GetElementsByTagName("Enabled");
+            if (en.Count > 0)
+                enabled = !string.Equals(en[0].InnerText.Trim(), "false",
+                                         StringComparison.OrdinalIgnoreCase);
+            if (!enabled) return false;
+            XmlNodeList cmds = doc.GetElementsByTagName("Command");
+            XmlNodeList argsList = doc.GetElementsByTagName("Arguments");
+            foreach (XmlNode n in cmds) action += n.InnerText + " ";
+            foreach (XmlNode n in argsList) action += n.InnerText + " ";
+            action = Environment.ExpandEnvironmentVariables(action).Trim();
+            if (action.Length == 0) return false;
+            ShieldGate.CommandCheck v = ShieldGate.Detect.CommandVerdict(action);
+            if (v == null || !v.High) return false;
+            return !microsoftFolder || TaskLooksUserControlled(action);
+        }
+
+        private static bool TaskLooksUserControlled(string action)
+        {
+            return Regex.IsMatch(action,
+                       @"(?i)\\(appdata|temp|programdata|users\\public|downloads|desktop|documents)\\")
+                || Regex.IsMatch(action, @"(?i)\b(mshta|wscript|cscript)(\.exe)?\b")
+                || Regex.IsMatch(action, @"(?i)\.(vbs|vbe|js|jse|wsf|hta)\b")
+                || Regex.IsMatch(action, @"(?i)(^|\\)\d{1,3}\.(exe|scr|com|pif)\b")
+                || Regex.IsMatch(action, @"(?i)\battrib\s+[+\-][hsrc]");
+        }
+
+        private static bool TaskHidden(XmlDocument doc)
+        {
+            XmlNodeList n = doc.GetElementsByTagName("Hidden");
+            return n.Count > 0
+                && string.Equals(n[0].InnerText.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+        }
+
         // ----------------------------------------------------------------- sửa
 
-        internal static void BackupReg(RegistryHive hive, string path)
+        internal static bool BackupReg(RegistryHive hive, string path, out string error)
         {
-            if (!Native.IsAdmin()) return;
-            Paths.EnsureDirs();
+            string file;
+            return BackupReg(hive, path, out error, out file);
+        }
+
+        // Sao lưu một khoá trước khi sửa. Chỉ trả true khi reg.exe thoát 0 **và**
+        // tệp .reg có thật: exit code 0 mà không có tệp cũng không phải bản sao.
+        // Bên gọi phải dừng khi hàm này trả false, để không xoá mà không có đường lùi.
+        internal static bool BackupReg(RegistryHive hive, string path, out string error, out string file)
+        {
+            error = "";
+            file = "";
             string full = (hive == RegistryHive.LocalMachine ? "HKEY_LOCAL_MACHINE\\" : "HKEY_CURRENT_USER\\") + path;
-            string safe = Regex.Replace(full, @"[\\/:*?""<>|]", "_");
-            string file = System.IO.Path.Combine(Paths.BakDir,
-                "reg_" + safe + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".reg");
-            string output;
-            Native.Run("reg.exe", "export \"" + full + "\" \"" + file + "\" /y", 20000, out output);
+            try
+            {
+                Paths.EnsureDirs();
+                string safe = Regex.Replace(full, @"[\\/:*?""<>|]", "_");
+                string dest = System.IO.Path.Combine(Paths.BakDir,
+                    "reg_" + safe + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".reg");
+                string output;
+                int code = Native.Run(Native.SysExe("reg.exe"),
+                    "export \"" + full + "\" \"" + dest + "\" /y", 20000, out output);
+                bool written = false;
+                try { written = File.Exists(dest) && new FileInfo(dest).Length > 0; }
+                catch { }
+                if (code == 0 && written)
+                {
+                    file = dest;
+                    return true;
+                }
+                error = S.Err.RegBackup(full);
+                Log.Write(S.Log.RegBackupFailed(full, code), "WARN");
+            }
+            catch (Exception e)
+            {
+                error = S.Err.RegBackup(full);
+                Log.Write(S.Log.RegBackupFailed(full, -1) + " " + e.Message, "WARN");
+            }
+            return false;
         }
 
         public static void Fix(IList<PcItem> items, Action<PcItem, bool, string> done, Func<bool> cancelled,
@@ -1350,10 +1761,15 @@ namespace ShieldGate
             okCount = 0;
             failCount = 0;
             string batch = Quarantine.NewBatch("pc", "");
-            foreach (PcItem f in items)
+            // Dừng tiến trình trước, rồi mới xoá cơ chế khởi động và tệp. Nếu xoá
+            // tác vụ trước, tiến trình đang chạy sẽ tạo lại ngay trong cùng lượt.
+            List<PcItem> ordered = new List<PcItem>();
+            for (int pass = 0; pass < 4; pass++)
+                foreach (PcItem f in items)
+                    if (f.Fixable && FixPass(f.Kind) == pass) ordered.Add(f);
+            foreach (PcItem f in ordered)
             {
                 if (cancelled != null && cancelled()) break;
-                if (!f.Fixable) continue;
                 bool ok = false;
                 string err = "";
                 try
@@ -1363,29 +1779,30 @@ namespace ShieldGate
                     switch (f.Kind)
                     {
                         case PcKind.RunValue:
-                            BackupReg(hive, Str(f, "path"));
+                            // Không có bản sao khoá thì không xoá giá trị.
+                            if (!BackupReg(hive, Str(f, "path"), out err)) break;
                             ok = Reg.DeleteValue(hive, Str(f, "path"), Str(f, "name"));
                             break;
                         case PcKind.WinlogonShell:
                         case PcKind.WinlogonUserinit:
                         case PcKind.AppInit:
-                            BackupReg(hive, Str(f, "path"));
+                            if (!BackupReg(hive, Str(f, "path"), out err)) break;
                             ok = Reg.Write(hive, Str(f, "path"), Str(f, "name"), f.Data["value"],
                                            f.Data.ContainsKey("kind")
                                                ? (RegistryValueKind)f.Data["kind"] : RegistryValueKind.String);
                             break;
                         case PcKind.MountPoint:
-                            BackupReg(hive, Str(f, "path"));
+                            if (!BackupReg(hive, Str(f, "path"), out err)) break;
                             ok = Reg.DeleteTree(hive, Str(f, "path"));
                             break;
                         case PcKind.StartupFile:
                             ok = Quarantine.Add(Str(f, "path"), Str(f, "root"), batch, "startup", out err);
                             break;
                         case PcKind.Task:
-                            string tn = Str(f, "path").TrimEnd('\\') + "\\" + Str(f, "name");
-                            string outp;
-                            ok = Native.Run("schtasks.exe", "/Change /TN \"" + tn + "\" /DISABLE", 20000, out outp) == 0;
-                            err = outp;
+                            ok = RemoveTask(Str(f, "path"), Str(f, "name"), out err);
+                            break;
+                        case PcKind.Service:
+                            ok = RemoveService(Str(f, "name"), out err);
                             break;
                         case PcKind.DroppedFile:
                             ok = Quarantine.Add(Str(f, "path"), Str(f, "root"), batch, "dropped", out err);
@@ -1409,9 +1826,12 @@ namespace ShieldGate
                                 break;
                             }
                             int innerFail = 0;
-                            UsbScan.QuarantineTree(System.IO.Path.Combine(droot, folder), droot, batch, ref innerFail);
-                            UsbRestore.RemoveWrapper(droot, folder);
+                            int innerKept = 0;
+                            UsbScan.QuarantineTree(System.IO.Path.Combine(droot, folder), droot, batch,
+                                                   ref innerFail, ref innerKept);
+                            if (innerKept == 0) UsbRestore.RemoveWrapper(droot, folder);
                             ok = innerFail == 0;
+                            if (innerKept > 0) Log.Write(S.Log.FakeFolderKept(innerKept, droot), "INFO");
                             if (innerFail > 0) err = S.Err.Unknown;
                             break;
                         case PcKind.DriveHiddenFolder:
@@ -1425,12 +1845,12 @@ namespace ShieldGate
                             ok = DeleteWmiConsumer(Str(f, "class"), Str(f, "name"));
                             break;
                         case PcKind.LnkAssoc:
-                            BackupReg(hive, Str(f, "path"));
+                            if (!BackupReg(hive, Str(f, "path"), out err)) break;
                             ok = Reg.DeleteValue(hive, Str(f, "path"), Str(f, "name"));
                             if (!ok) ok = Reg.DeleteTree(hive, Str(f, "path"));
                             break;
                         case PcKind.RegHealth:
-                            BackupReg(hive, Str(f, "path"));
+                            if (!BackupReg(hive, Str(f, "path"), out err)) break;
                             if (f.Data.ContainsKey("delete") && Convert.ToBoolean(f.Data["delete"]))
                                 ok = Reg.DeleteValue(hive, Str(f, "path"), Str(f, "name"));
                             else
@@ -1442,22 +1862,180 @@ namespace ShieldGate
                             break;
                         case PcKind.Process:
                         case PcKind.FakeProcess:
-                            try
-                            {
-                                using (Process p = Process.GetProcessById(Convert.ToInt32(f.Data["pid"])))
-                                    p.Kill();
-                                ok = true;
-                            }
-                            catch (Exception e) { err = e.Message; }
+                            ok = StopOne(f, out err);
                             break;
                     }
                 }
                 catch (Exception e) { ok = false; err = e.Message; }
 
+                // Tệp đã biến mất (bảo vệ nền vừa xử lý) không phải lỗi cần báo.
+                if (!ok && err.Length == 0
+                    && (f.Kind == PcKind.StartupFile || f.Kind == PcKind.DroppedFile
+                        || f.Kind == PcKind.DriveShortcut || f.Kind == PcKind.DriveExe))
+                    ok = true;
+
                 if (ok) { okCount++; Log.Write(S.Log.PcFixed(f.Kind.ToString(), f.Arg1), "WARN"); }
                 else failCount++;
                 if (done != null) done(f, ok, err);
             }
+            try { Settings.SetPcFixEvent(okCount, failCount); }
+            catch { }
+        }
+
+        // Thứ tự sửa: 0 tiến trình/dịch vụ, 1 tác vụ/WMI, 2 startup/registry,
+        // 3 tệp. Tách hàm để self-test kiểm được mà không cần chạy schtasks.
+        internal static int FixPass(PcKind kind)
+        {
+            switch (kind)
+            {
+                case PcKind.Process:
+                case PcKind.FakeProcess:
+                case PcKind.Service: return 0;
+                case PcKind.Task:
+                case PcKind.WmiConsumer: return 1;
+                case PcKind.RunValue:
+                case PcKind.WinlogonShell:
+                case PcKind.WinlogonUserinit:
+                case PcKind.AppInit:
+                case PcKind.StartupFile:
+                case PcKind.LnkAssoc:
+                case PcKind.MountPoint: return 2;
+                default: return 3;
+            }
+        }
+
+        // Chỉ dừng đúng tiến trình đã quét: PID có thể bị hệ thống cấp lại cho
+        // tiến trình khác giữa lúc quét và lúc sửa. Tên luôn kiểm được; đường dẫn
+        // chỉ kiểm được khi tiến trình cùng kiến trúc (x86 đọc x64 sẽ ném lỗi).
+        private static bool StopOne(PcItem f, out string error)
+        {
+            error = "";
+            int pid;
+            if (!f.Data.ContainsKey("pid")
+                || !int.TryParse(Convert.ToString(f.Data["pid"]), out pid) || pid <= 0)
+            {
+                error = S.Err.Unknown;
+                return false;
+            }
+            try
+            {
+                using (Process p = Process.GetProcessById(pid))
+                {
+                    string name = f.Arg1 ?? "";
+                    if (name.Length > 0
+                        && !string.Equals(p.ProcessName + ".exe", name, StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(p.ProcessName, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        error = S.Err.ProcessChanged(name);
+                        return false;
+                    }
+                    string expected = Str(f, "path");
+                    if (expected.Length > 0)
+                    {
+                        try
+                        {
+                            if (!string.Equals(p.MainModule.FileName, expected,
+                                               StringComparison.OrdinalIgnoreCase))
+                            {
+                                error = S.Err.ProcessChanged(name);
+                                return false;
+                            }
+                        }
+                        catch { }
+                    }
+                    p.Kill();
+                }
+                return true;
+            }
+            catch (ArgumentException)
+            {
+                // Tiến trình đã tự thoát: không phải lỗi.
+                return true;
+            }
+            catch (Exception e) { error = e.Message; return false; }
+        }
+
+        // Sao lưu XML rồi xoá hẳn tác vụ. Chỉ tắt (/DISABLE) thì tiến trình đang
+        // chạy bật lại được và tác vụ vẫn nằm đó chờ người dùng bấm nhầm.
+        // Không sao lưu được thì lùi về tắt, để vẫn còn đường lùi.
+        internal static bool RemoveTask(string folder, string name, out string error)
+        {
+            error = "";
+            string tn = (folder ?? "").TrimEnd('\\') + "\\" + (name ?? "");
+            string output;
+            string backup;
+            if (BackupTask(tn, out backup, out output))
+            {
+                if (Native.Run(Native.SysExe("schtasks.exe"),
+                               "/Delete /TN \"" + tn + "\" /F", 20000, out output) == 0)
+                {
+                    Log.Write(S.Log.TaskDeleted(tn), "WARN");
+                    return true;
+                }
+                error = output;
+                return false;
+            }
+            bool ok = Native.Run(Native.SysExe("schtasks.exe"),
+                                 "/Change /TN \"" + tn + "\" /DISABLE", 20000, out output) == 0;
+            if (!ok) error = output;
+            else Log.Write(S.Log.TaskDisabled(tn), "WARN");
+            return ok;
+        }
+
+        // Sao lưu khoá dịch vụ rồi dừng và xoá. Chỉ xoá khi đã có bản sao .reg;
+        // dịch vụ đang chạy sẽ chặn xoá tệp nên phải dừng trước (FixPass 0).
+        internal static bool RemoveService(string name, out string error)
+        {
+            error = "";
+            if (string.IsNullOrEmpty(name)) { error = S.Err.Unknown; return false; }
+            string key = @"SYSTEM\CurrentControlSet\Services\" + name;
+            if (!BackupReg(RegistryHive.LocalMachine, key, out error)) return false;
+
+            string output;
+            Native.Run(Native.SysExe("sc.exe"), "stop \"" + name + "\"", 20000, out output);
+            int code = Native.Run(Native.SysExe("sc.exe"), "delete \"" + name + "\"",
+                                  20000, out output);
+            if (code == 0)
+            {
+                Log.Write(S.Log.ServiceDeleted(name), "WARN");
+                return true;
+            }
+            error = output;
+            return false;
+        }
+
+        private static bool BackupTask(string taskName, out string file, out string error)
+        {
+            file = "";
+            error = "";
+            try
+            {
+                Paths.EnsureDirs();
+                string xml;
+                int code = Native.Run(Native.SysExe("schtasks.exe"),
+                    "/Query /TN \"" + taskName + "\" /XML", 20000, out xml);
+                if (code != 0 || string.IsNullOrEmpty(xml)
+                    || xml.IndexOf("<Task", StringComparison.OrdinalIgnoreCase) < 0
+                    || xml.Length > 1024 * 1024)
+                    return false;
+                string safe = Regex.Replace(taskName.Trim('\\'), @"[\\/:*?""<>|]", "_");
+                string dest = System.IO.Path.Combine(Paths.BakDir,
+                    "task_" + safe + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".xml");
+                File.WriteAllText(dest, xml, new System.Text.UTF8Encoding(false));
+                if (!File.Exists(dest) || new FileInfo(dest).Length == 0) return false;
+                file = dest;
+                return true;
+            }
+            catch (Exception e) { error = e.Message; return false; }
+        }
+
+        // Ghi từng mục ra nhật ký. Trước đây chỉ có "N mục đáng ngờ" nên nhật ký
+        // gửi đi không cho biết tiến trình/tác vụ nào, không chẩn đoán được.
+        public static void LogFindings(IList<PcItem> items)
+        {
+            if (items == null) return;
+            foreach (PcItem i in items)
+                Log.Write(S.Log.PcItem(i.Kind.ToString(), i.Arg1, Cut(i.Detail, 300)), "INFO");
         }
 
         private static string Str(PcItem f, string key)

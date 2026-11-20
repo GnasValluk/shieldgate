@@ -1,4 +1,6 @@
 // ShieldGate - go cai dat hoan toan: tat bao ve, khoi phuc Windows, xoa du lieu va tep chay.
+// Chi xoa thu muc co tep danh dau .shieldgate (hoac khop chu ky tep ben trong) de
+// khong xoa nham thu muc nguoi dung chon lam noi luu du lieu.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -13,8 +15,15 @@ namespace ShieldGate
     internal static class Uninstaller
     {
         // Tra ve true khi da tat bao ve (co the dong ung dung).
-        // clean = false nghia la con tep chua xoa duoc; tien trinh nen se don not sau khi thoat.
+        // Mac dinh giu cach ly va ban sao luu o: nguoi dung khong mat du lieu da
+        // sao luu chi vi go cong cu.
         public static bool Run(out bool clean)
+        {
+            return Run(true, out clean);
+        }
+
+        // clean = false nghia la con tep chua xoa duoc; tien trinh nen se don not sau khi thoat.
+        public static bool Run(bool keepData, out bool clean)
         {
             clean = false;
             if (!Native.IsAdmin()) return false;
@@ -28,20 +37,21 @@ namespace ShieldGate
                 return false;
             }
 
-            clean = RemoveData();
-            ScheduleCleanup();
+            clean = RemoveData(keepData, true);
+            ScheduleCleanup(keepData);
             return true;
         }
 
         // ------------------------------------------------------------- xoá dữ liệu
 
-        // Chỉ xoá những mục do ShieldGate tạo. Thư mục dữ liệu có thể do người dùng
-        // chọn chung với tệp khác, nên không bao giờ xoá cả cây thư mục gốc.
-        private static List<string> DataEntries()
+        // Danh sach muc ShieldGate tao ra. keepData = true bo qua cach ly va ban
+        // sao luu o (du lieu nguoi dung can giu lai).
+        internal static List<string> DataEntries(bool keepData)
         {
             List<string> list = new List<string>();
+            // Marker cua chinh thu muc goc: xoa truoc khi don thu muc rong.
+            Add(list, Paths.MarkerIn(Paths.Root));
             Add(list, Paths.LogDir);
-            Add(list, Paths.QuarDir);
             Add(list, Paths.BakDir);
             Add(list, Paths.BinDir);
             Add(list, Paths.SettingsFile);
@@ -51,14 +61,23 @@ namespace ShieldGate
             Add(list, Paths.GuardConfig);
             Add(list, Paths.Heartbeat);
             Add(list, Paths.StopFlag);
+            // Khoá dọn ổ (F1) không phải dữ liệu nhưng nằm ở gốc; để lại thì
+            // PruneEmpty không xoá được thư mục dữ liệu sau khi gỡ.
+            Add(list, CleanLock.FilePath);
             Add(list, Paths.PolicyBackup + ".bad");
-            // Dữ liệu 2.0: luật, kho thiết bị, timeline, bản sao lưu ổ và marker.
+            // Dữ liệu 2.0: luật, kho thiết bị, timeline.
             Add(list, Paths.RulesFile);
+            Add(list, Paths.RulesFile + ".bak");
             Add(list, Paths.DevicesFile);
             Add(list, Paths.DevicesFile + ".tmp");
             Add(list, Paths.EventsFile);
             Add(list, Paths.EventsFile + ".1");
-            Add(list, Paths.RepairDir);
+            if (!keepData)
+            {
+                // Cach ly la mau song va ban sao luu o la du lieu nguoi dung: chi xoa khi duoc yeu cau.
+                Add(list, Paths.QuarDir);
+                Add(list, Paths.RepairDir);
+            }
             return list;
         }
 
@@ -68,18 +87,100 @@ namespace ShieldGate
             if (!list.Contains(path)) list.Add(path);
         }
 
-        private static bool RemoveData()
+        // True khi thu muc chac chan do ShieldGate tao: co marker, hoac khop chu ky
+        // tep dac trung cua ban 2.0 (chua co marker), hoac dang rong.
+        internal static bool Owned(string dir)
         {
-            foreach (string path in DataEntries()) RemovePath(path);
-            RemovePath(Bootstrap.SetupFile);
+            if (string.IsNullOrEmpty(dir)) return false;
+            try
+            {
+                if (File.Exists(Paths.MarkerIn(dir))) return true;
+            }
+            catch { }
+            try
+            {
+                // Thu muc rong: xoa khong lam mat gi cua nguoi dung.
+                if (Directory.Exists(dir) && Directory.GetFileSystemEntries(dir).Length == 0)
+                    return true;
+            }
+            catch { }
+            try
+            {
+                if (Same(dir, Paths.LogDir) && File.Exists(Paths.LogFile)) return true;
+                if (Same(dir, Paths.BinDir) && File.Exists(Paths.GuardExe)) return true;
+                if (Same(dir, Paths.QuarDir))
+                {
+                    foreach (string sub in Directory.GetDirectories(dir))
+                        if (File.Exists(Path.Combine(sub, "manifest.csv"))) return true;
+                }
+                if (Same(dir, Paths.RepairDir))
+                {
+                    if (Directory.GetFiles(dir, "*.ok").Length > 0) return true;
+                    foreach (string sub in Directory.GetDirectories(dir))
+                        if (Path.GetFileName(sub).StartsWith("backup-", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                }
+            }
+            catch { }
+            return false;
+        }
 
-            PruneEmpty(Paths.Root);
-            PruneEmpty(Path.GetDirectoryName(Bootstrap.SetupFile));
+        private static bool Same(string a, string b)
+        {
+            if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return false;
+            return string.Equals(a.TrimEnd(Path.DirectorySeparatorChar),
+                                 b.TrimEnd(Path.DirectorySeparatorChar),
+                                 StringComparison.OrdinalIgnoreCase);
+        }
 
-            foreach (string path in DataEntries())
-                if (PathExists(path)) return false;
-            if (File.Exists(Bootstrap.SetupFile)) return false;
-            return true;
+        internal static bool RemoveData(bool keepData, bool includeSetup)
+        {
+            List<string> targets = DataEntries(keepData);
+            if (includeSetup) Add(targets, Bootstrap.SetupFile);
+
+            bool clean = true;
+            foreach (string path in targets)
+            {
+                bool isDir = Directory.Exists(path);
+                if (!isDir && !File.Exists(path)) continue;
+                if (isDir)
+                {
+                    if (!Owned(path))
+                    {
+                        // Khong xoa thu muc khong phai cua minh, ke ca khi no nam
+                        // dung ten trong thu muc du lieu.
+                        // (bo qua im lang se khien nguoi dung tuong da xoa sach)
+                        Log.Write(S.Log.UninstallSkip(path), "WARN");
+                        continue;
+                    }
+                    Adopt(path);
+                }
+                RemovePath(path);
+                if (isDir ? Directory.Exists(path) : File.Exists(path)) clean = false;
+            }
+
+            if (!keepData && clean)
+            {
+                PruneEmpty(Paths.Root);
+                if (includeSetup) PruneEmpty(Path.GetDirectoryName(Bootstrap.SetupFile));
+            }
+            return clean;
+        }
+
+        // Ban 2.0 chua ghi marker: ghi bu truoc khi xoa de lan sau (neu con) biet
+        // day la thu muc cua ShieldGate.
+        private static void Adopt(string dir)
+        {
+            try
+            {
+                string marker = Paths.MarkerIn(dir);
+                if (marker.Length == 0 || File.Exists(marker)) return;
+                File.WriteAllText(marker, "app=" + AppInfo.Name + "\r\nversion=" + AppInfo.Version
+                    + "\r\nadopted=" + DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss",
+                                                          CultureInfo.InvariantCulture) + "\r\n",
+                    new UTF8Encoding(false));
+            }
+            catch { }
         }
 
         private static bool PathExists(string path)
@@ -118,15 +219,41 @@ namespace ShieldGate
             catch { }
         }
 
+        // Dung luong se bi xoa neu nguoi dung bo tich "giu cach ly va ban sao luu".
+        // Gioi han thoi gian: thu muc sao luu co the rat lon, khong duoc lam treo giao dien.
+        internal static void KeptSizes(out long quarantine, out long repair)
+        {
+            Stopwatch sw = Stopwatch.StartNew();
+            quarantine = DirBytes(Paths.QuarDir, sw, 300);
+            repair = DirBytes(Paths.RepairDir, sw, 600);
+        }
+
+        private static long DirBytes(string dir, Stopwatch sw, int limitMs)
+        {
+            long sum = 0;
+            try
+            {
+                if (!Directory.Exists(dir)) return 0;
+                foreach (string file in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+                {
+                    if (sw.ElapsedMilliseconds > limitMs) break;
+                    try { sum += new FileInfo(file).Length; }
+                    catch { }
+                }
+            }
+            catch { }
+            return sum;
+        }
+
         // --------------------------------------------------- dọn nốt sau khi thoát
 
         // Tệp đang chạy không thể tự xoá. Một tiến trình PowerShell chờ đúng PID này
         // thoát rồi xoá tệp chạy và các mục còn sót, kể cả khi người dùng đọc thông báo lâu.
-        private static void ScheduleCleanup()
+        private static void ScheduleCleanup(bool keepData)
         {
             try
             {
-                List<string> targets = DataEntries();
+                List<string> targets = DataEntries(keepData);
                 Add(targets, Bootstrap.SetupFile);
 
                 string exe = CurrentExe();
@@ -162,13 +289,13 @@ namespace ShieldGate
 
                 // Dọn các thư mục đã rỗng (chỉ xoá khi không còn tệp nào bên trong).
                 ps.Append("foreach($d in @(");
-                ps.Append(Quote(exeDir)).Append(',').Append(Quote(Paths.Root))
+                ps.Append(Quote(exeDir)).Append(',').Append(Quote(keepData ? "" : Paths.Root))
                   .Append(',').Append(Quote(setupDir));
                 ps.Append(")){");
                 ps.Append("if($d -and (Test-Path -LiteralPath $d)){");
                 ps.Append("try{[System.IO.Directory]::Delete($d,$false)}catch{}}}");
 
-                ProcessStartInfo psi = new ProcessStartInfo("powershell.exe",
+                ProcessStartInfo psi = new ProcessStartInfo(Native.SysExe("powershell.exe"),
                     "-NoProfile -NonInteractive -WindowStyle Hidden -Command \"" + ps + "\"");
                 psi.CreateNoWindow = true;
                 psi.UseShellExecute = false;
@@ -182,7 +309,7 @@ namespace ShieldGate
                 {
                     string exe = CurrentExe();
                     if (string.IsNullOrEmpty(exe)) return;
-                    ProcessStartInfo psi = new ProcessStartInfo("cmd.exe",
+                    ProcessStartInfo psi = new ProcessStartInfo(Native.SysExe("cmd.exe"),
                         "/c ping 127.0.0.1 -n 4 >nul & del /f /q \"" + exe + "\"");
                     psi.CreateNoWindow = true;
                     psi.UseShellExecute = false;

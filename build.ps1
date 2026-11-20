@@ -11,6 +11,10 @@ New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
 $icon = Join-Path $root 'assets\app.ico'
 $makico = Join-Path $root 'dist\_makico.exe'
 
+# Cong kiem tra an toan: khong cho goi cong cu he thong bang ten tran.
+& (Join-Path $root 'tools\check-bare-tools.ps1') $root
+if ($LASTEXITCODE -ne 0) { throw 'Bare system tool names are not allowed.' }
+
 # Biểu tượng có sẵn trong assets. Nếu thiếu thì vẽ lại từ mã nguồn.
 if (-not (Test-Path $icon)) {
     try {

@@ -2,6 +2,7 @@
 // Không đụng tới USB thật, không đổi cấu hình máy. Dùng khi phát hành hoặc sau khi sửa lõi.
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -26,7 +27,7 @@ namespace ShieldGate
             Environment.SetEnvironmentVariable("SHIELDGATE_HOME", root);
 
             int passed = 0;
-            int total = 35;
+            int total = 54;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -113,8 +114,8 @@ namespace ShieldGate
             bool removed = missing == 0 && Quarantine.RemoveBatch(batch) && !Directory.Exists(batch);
             check(S.Selftest.BatchRemoved, removed);
 
-            // 9. Bỏ thuộc tính ẩn
-            int unhidden = UsbScan.Unhide(usb, null);
+            // 9. Bỏ thuộc tính ẩn (nút người dùng bấm: gỡ cả mục họ tự ẩn)
+            int unhidden = UsbScan.Unhide(usb, UnhideScope.AllHidden, null);
             bool visible = (File.GetAttributes(photo) & FileAttributes.Hidden) == 0;
             check(S.Selftest.Unhidden, unhidden > 0 && visible);
 
@@ -277,6 +278,31 @@ namespace ShieldGate
             catch { }
             check(S.Selftest.GuardConfig, configOk);
 
+            // 12b. Bật bảo vệ dùng đúng lựa chọn đã lưu: người dùng đã tắt chặn
+            //      AutoRun thì lần bật sau không được bật lại mục đó.
+            bool keepChoice = false;
+            try
+            {
+                Guard.SaveConfig(false, true, true, true);
+                GuardConfig enable = Guard.EnableConfig();
+                keepChoice = !enable.Autorun && enable.Ini && enable.Registry;
+                File.Delete(Paths.GuardConfig);
+                GuardConfig fresh = Guard.EnableConfig();
+                keepChoice = keepChoice && fresh.Autorun && fresh.Ini && fresh.Registry;
+            }
+            catch { }
+            check(S.Selftest.ProtectKeepsChoice, keepChoice);
+
+            // 12c. Còn một lớp đang chạy thì vẫn là đang bảo vệ, kể cả khi người
+            //      dùng chủ động tắt chặn AutoRun.
+            StatusInfo partial = new StatusInfo();
+            partial.Running = true;
+            partial.Ini = true;
+            partial.Registry = true;
+            StatusInfo nothing = new StatusInfo();
+            check(S.Selftest.ProtectionStaysOn,
+                  partial.ProtectionOn && !partial.FullyProtected && !nothing.ProtectionOn);
+
             // 13. Bản cách ly bị sửa thì không được ghi trả về ổ.
             bool refused = false;
             string tamper = Path.Combine(usb, "tamper.txt");
@@ -430,18 +456,21 @@ namespace ShieldGate
             catch { }
             check(S.Selftest.RulesDefaults, rulesDefault);
 
-            // 21. rules.json trong thư mục dữ liệu đổi được ngưỡng và trọng số.
+            // 21. rules.json bổ sung ngưỡng/trọng số/đuôi tệp, không xoá mặc định.
             bool rulesCustom = false;
             try
             {
                 Paths.EnsureDirs();
                 File.WriteAllText(Paths.RulesFile,
-                    "{ \"scoreThreshold\": 7, \"weights\": { \"double-extension\": 9 }, " +
+                    "{ \"scoreThreshold\": 7, \"weights\": { \"double-extension\": 9, \"target\": 99 }, " +
                     "\"scriptExts\": [\"abc\"] }", new UTF8Encoding(false));
                 Rules.Reload();
                 RulesData d = Rules.Current;
                 rulesCustom = d.ScoreThreshold == 7 && d.Weight("double-extension") == 9
-                           && d.IsScriptExt(".abc") && !d.IsScriptExt(".vbs");
+                           && d.Weight("target") == 10
+                           && d.IsScriptExt(".abc") && d.IsScriptExt(".vbs")
+                           && d.IsDangerousExt(".exe") && d.IsPayloadExt(".dll")
+                           && d.Version == RulesData.CurrentVersion;
             }
             catch { }
             check(S.Selftest.RulesCustom, rulesCustom);
@@ -569,7 +598,33 @@ namespace ShieldGate
             catch { try { DeviceStore.Forget(trustKey); } catch { } }
             check(S.Selftest.DeviceTrustStore, trustOk);
 
-            // 27. Sửa ổ: từ chối ổ hệ thống và đường dẫn không dùng được.
+            // 27. Công cụ hệ thống: luôn phân giải ra đường dẫn tuyệt đối, kể cả
+            //     khi nơi gọi chỉ truyền tên trần (CreateProcess tìm trong thư
+            //     mục chứa ShieldGate trước).
+            bool sysExeOk = false;
+            try
+            {
+                // schtasks/reg/cmd deu co tren moi Windows ho tro; powershell.exe
+                // nam o System32\WindowsPowerShell\v1.0 nen kiem rieng.
+                bool rooted = true;
+                string[] names = new string[] { "cmd.exe", "schtasks.exe", "reg.exe",
+                                                "icacls.exe", "powershell.exe" };
+                foreach (string name in names)
+                {
+                    string full = Native.SysExe(name);
+                    if (!Path.IsPathRooted(full) || !File.Exists(full)) rooted = false;
+                }
+                // Tên trần vẫn phải chạy được: Native.Run tự phân giải trước khi
+                // CreateProcess tìm trong thư mục hiện tại.
+                string bareTool = "cmd.exe";
+                string exeOut;
+                int exeCode = Native.Run(bareTool, "/c exit 0", 15000, out exeOut);
+                sysExeOk = rooted && exeCode == 0;
+            }
+            catch { }
+            check(S.Selftest.SysExe, sysExeOk);
+
+            // 28. Sửa ổ: từ chối ổ hệ thống và đường dẫn không dùng được.
             bool repairGuards = false;
             try
             {
@@ -583,7 +638,7 @@ namespace ShieldGate
             catch { }
             check(S.Selftest.RepairGuards, repairGuards);
 
-            // 28. Đọc thử chỉ đọc trên thư mục tạm; không ghi, không xoá.
+            // 29. Đọc thử chỉ đọc trên thư mục tạm; không ghi, không xoá.
             bool readOk = false;
             try
             {
@@ -593,24 +648,83 @@ namespace ShieldGate
             catch { }
             check(S.Selftest.RepairReadTest, readOk);
 
-            // 29. Marker sao lưu: chỉ báo đã sao lưu khi tệp đánh dấu tồn tại.
+            // 30. Marker sao lưu phải gắn đúng volume: serial khớp, bản sao còn,
+            //     và marker 2.0 chỉ theo chữ ổ không còn được chấp nhận.
             bool markerOk = false;
-            string marker = Path.Combine(Paths.RepairDir, "backup-Z.ok");
+            string backupDest = Path.Combine(Paths.RepairDir, "selftest-backup");
+            string driveLetter = Paths.SystemDrive.Substring(0, 1).ToUpperInvariant();
+            uint volumeSerial = Native.VolumeSerial(Paths.SystemDrive);
+            string serialText = volumeSerial.ToString("X8", CultureInfo.InvariantCulture);
+            long volumeBytes = 0;
+            try { volumeBytes = new DriveInfo(Paths.SystemDrive).TotalSize; }
+            catch { }
+            string marker = Path.Combine(Paths.RepairDir,
+                "backup-" + driveLetter + "-" + serialText + ".ok");
+            string legacyMarker = Path.Combine(Paths.RepairDir, "backup-" + driveLetter + ".ok");
             try
             {
                 Paths.EnsureDirs();
+                if (Directory.Exists(backupDest)) Directory.Delete(backupDest, true);
+                Directory.CreateDirectory(backupDest);
+                File.WriteAllText(Path.Combine(backupDest, "sample.txt"), "x");
                 if (File.Exists(marker)) File.Delete(marker);
-                bool before = !Repair.HasBackup("Z:\\");
-                File.WriteAllText(marker, "x", new UTF8Encoding(false));
-                bool after = Repair.HasBackup("Z:\\");
+                if (File.Exists(legacyMarker)) File.Delete(legacyMarker);
+
+                bool before = !Repair.HasBackup(Paths.SystemDrive);
+                string when = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss",
+                                                    CultureInfo.InvariantCulture);
+                File.WriteAllText(marker, BackupMarkerText(Paths.SystemDrive, backupDest,
+                    serialText, volumeBytes, when), new UTF8Encoding(false));
+                bool after = Repair.HasBackup(Paths.SystemDrive);
+
+                File.WriteAllText(marker, BackupMarkerText(Paths.SystemDrive, backupDest,
+                    (volumeSerial + 1).ToString("X8", CultureInfo.InvariantCulture),
+                    volumeBytes, when), new UTF8Encoding(false));
+                bool wrongVolume = !Repair.HasBackup(Paths.SystemDrive);
+
+                // Marker 2.0 chỉ có chữ ổ, không có serial: phải bị bỏ qua.
                 File.Delete(marker);
-                bool gone = !Repair.HasBackup("Z:\\");
-                markerOk = before && after && gone;
+                File.WriteAllText(legacyMarker, "x", new UTF8Encoding(false));
+                bool legacyIgnored = !Repair.HasBackup(Paths.SystemDrive);
+
+                markerOk = before && after && wrongVolume && legacyIgnored;
             }
-            catch { try { File.Delete(marker); } catch { } }
+            catch { }
+            finally
+            {
+                try { if (File.Exists(marker)) File.Delete(marker); } catch { }
+                try { if (File.Exists(legacyMarker)) File.Delete(legacyMarker); } catch { }
+                try { if (Directory.Exists(backupDest)) Directory.Delete(backupDest, true); }
+                catch { }
+            }
             check(S.Selftest.RepairBackupMarker, markerOk);
 
-            // 30. Xem trước sao lưu: đếm dự phòng bằng Tree.Walk khi không đọc
+            // 31. Marker quá 24 giờ không còn hiệu lực: phải sao lưu lại.
+            bool expiryOk = false;
+            try
+            {
+                Paths.EnsureDirs();
+                Directory.CreateDirectory(backupDest);
+                File.WriteAllText(Path.Combine(backupDest, "sample.txt"), "x");
+                string oldWhen = DateTime.Now.AddHours(-25).ToString("yyyy-MM-ddTHH:mm:ss",
+                    CultureInfo.InvariantCulture);
+                File.WriteAllText(marker, BackupMarkerText(Paths.SystemDrive, backupDest,
+                    serialText, volumeBytes, oldWhen), new UTF8Encoding(false));
+                string expiryReason;
+                bool expired = !Repair.CheckBackup(Paths.SystemDrive, out expiryReason);
+                expiryOk = expired
+                        && string.Equals(expiryReason, S.Repair.BackupExpired, StringComparison.Ordinal);
+            }
+            catch { }
+            finally
+            {
+                try { if (File.Exists(marker)) File.Delete(marker); } catch { }
+                try { if (Directory.Exists(backupDest)) Directory.Delete(backupDest, true); }
+                catch { }
+            }
+            check(S.Selftest.RepairBackupExpiry, expiryOk);
+
+            // 32. Xem trước sao lưu: đếm dự phòng bằng Tree.Walk khi không đọc
             // được bản tổng kết robocopy (Windows bản địa hoá).
             bool countOk = false;
             try
@@ -622,6 +736,481 @@ namespace ShieldGate
             catch { }
             check(S.Selftest.RepairPreviewCount, countOk);
 
+            // 33. Gỡ cài đặt: chỉ xoá thư mục có dấu hiệu sở hữu (marker hoặc tệp
+            //     đặc trưng của bản 2.0), và giữ cách ly + bản sao lưu khi được yêu
+            //     cầu. Dùng thư mục lồng trong sandbox, không đụng dữ liệu thật.
+            bool uninstallOk = false;
+            string sub = Path.Combine(root, "uninstall-test");
+            try
+            {
+                Paths.Configure(sub);
+                Paths.EnsureDirs();
+                // Bản 2.0 chưa có marker: xoá marker để kiểm nhận diện bằng chữ ký.
+                foreach (string dir in new string[] { Paths.LogDir, Paths.QuarDir, Paths.RepairDir })
+                {
+                    try { File.Delete(Paths.MarkerIn(dir)); }
+                    catch { }
+                }
+                File.WriteAllText(Paths.LogFile, "x");
+                string quarBatch = Path.Combine(Paths.QuarDir, "usb_20260101_000000");
+                Directory.CreateDirectory(quarBatch);
+                File.WriteAllText(Path.Combine(quarBatch, "manifest.csv"), "x");
+                Directory.CreateDirectory(Path.Combine(Paths.RepairDir, "backup-E-20260101_000000"));
+                string foreign = Path.Combine(sub, "userdata");
+                Directory.CreateDirectory(foreign);
+                File.WriteAllText(Path.Combine(foreign, "keep.txt"), "x");
+
+                bool owned = Uninstaller.Owned(Paths.LogDir) && Uninstaller.Owned(Paths.QuarDir)
+                          && Uninstaller.Owned(Paths.RepairDir) && !Uninstaller.Owned(foreign);
+                bool keepExcludes = !Uninstaller.DataEntries(true).Contains(Paths.QuarDir)
+                                 && !Uninstaller.DataEntries(true).Contains(Paths.RepairDir);
+                bool purgeIncludes = Uninstaller.DataEntries(false).Contains(Paths.QuarDir)
+                                  && Uninstaller.DataEntries(false).Contains(Paths.RepairDir);
+
+                bool kept = Uninstaller.RemoveData(true, false);
+                bool quarStill = Directory.Exists(quarBatch);
+                bool repairStill = Directory.Exists(Paths.RepairDir);
+                bool logGone = !File.Exists(Paths.LogFile);
+
+                bool purged = Uninstaller.RemoveData(false, false);
+                bool quarGone = !Directory.Exists(Paths.QuarDir);
+                bool foreignKept = File.Exists(Path.Combine(foreign, "keep.txt"));
+
+                uninstallOk = owned && keepExcludes && purgeIncludes && kept && quarStill
+                           && repairStill && logGone && purged && quarGone && foreignKept;
+            }
+            catch { }
+            finally
+            {
+                try { if (Directory.Exists(sub)) Directory.Delete(sub, true); }
+                catch { }
+                Paths.Configure(root);
+            }
+            check(S.Selftest.UninstallOwnership, uninstallOk);
+
+            // 34. Manifest là dữ liệu không tin được: dòng trỏ nguồn ra ngoài lần
+            //     cách ly hoặc đích vào thư mục hệ thống phải bị từ chối, không ghi.
+            bool restoreGuard = false;
+            string guardBatch = Path.Combine(Paths.QuarDir, "usb_20260101_010101");
+            string guardFiles = Path.Combine(guardBatch, "files");
+            string okSource = Path.Combine(guardFiles, "good.txt");
+            string okTarget = Path.Combine(usb, "restore-ok.txt");
+            string escapedTarget = Path.Combine(usb, "restore-outside.txt");
+            string outside = Path.Combine(root, "outside.txt");
+            string systemTarget = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                "shieldgate-selftest-escape.txt");
+            try
+            {
+                Paths.EnsureDirs();
+                Directory.CreateDirectory(guardFiles);
+                File.WriteAllText(okSource, "payload");
+                File.WriteAllText(outside, "outside");
+                string header = "Time,OriginalPath,QuarantinePath,Reason,Size,SHA256\r\n";
+                File.WriteAllText(Path.Combine(guardBatch, "manifest.csv"),
+                    header
+                    + Quarantine.Csv("2026-01-01 01:01:01") + "," + Quarantine.Csv(okTarget) + ","
+                    + Quarantine.Csv(okSource) + ",test,7,\r\n"
+                    + Quarantine.Csv("2026-01-01 01:01:02") + "," + Quarantine.Csv(escapedTarget) + ","
+                    + Quarantine.Csv(Path.Combine(guardBatch, "..", "..", "outside.txt")) + ",test,7,\r\n"
+                    + Quarantine.Csv("2026-01-01 01:01:03") + "," + Quarantine.Csv(systemTarget) + ","
+                    + Quarantine.Csv(okSource) + ",test,7,\r\n",
+                    new UTF8Encoding(false));
+
+                int rr, rs, rm, rf;
+                Quarantine.RestoreBatch(guardBatch, out rr, out rs, out rm, out rf);
+                restoreGuard = rr == 1 && rf == 2 && File.Exists(okTarget)
+                            && !File.Exists(escapedTarget) && !File.Exists(systemTarget);
+            }
+            catch { }
+            finally
+            {
+                try { Quarantine.RemoveBatch(guardBatch); } catch { }
+                try { if (File.Exists(okTarget)) File.Delete(okTarget); } catch { }
+                try { if (File.Exists(outside)) File.Delete(outside); } catch { }
+            }
+            check(S.Selftest.RestoreGuard, restoreGuard);
+
+            // 35. Thư mục giả: chỉ cách ly tệp chạy được. Tài liệu người dùng bị
+            //     virus đổi tên Base64 phải được giữ lại (log 03/11 đã thu gom
+            //     hơn 600 tài liệu thật chỉ vì nằm trong thư mục "Docusment").
+            bool fakeKeep = false;
+            string fakeRoot = Path.Combine(usb, "Docusment");
+            string fakeBatch = "";
+            try
+            {
+                string deep = Path.Combine(fakeRoot, "3", "22AB820634F924A0");
+                Directory.CreateDirectory(deep);
+                string payload = Path.Combine(deep, "1.exe");
+                string payloadDat = Path.Combine(deep, "adback.dat");
+                // "cuong_do cuong.docx" mã hoá Base64: tài liệu thật, không phải mã độc.
+                string doc = Path.Combine(deep, "Y3VvbmdfxJHhu5cgY8aw4budbmcuZG9jeA==");
+                File.WriteAllText(payload, "MZ", new UTF8Encoding(false));
+                File.WriteAllText(payloadDat, "x", new UTF8Encoding(false));
+                File.WriteAllText(doc, "tai lieu", new UTF8Encoding(false));
+
+                fakeBatch = Quarantine.NewBatch("test", "");
+                int fakeFail = 0, fakeKept = 0;
+                UsbScan.QuarantineTree(fakeRoot, usb, fakeBatch, ref fakeFail, ref fakeKept);
+                fakeKeep = fakeFail == 0 && fakeKept == 1
+                        && !File.Exists(payload) && !File.Exists(payloadDat)
+                        && File.Exists(doc) && Directory.Exists(deep);
+            }
+            catch { }
+            finally
+            {
+                if (fakeBatch.Length > 0) { try { Quarantine.RemoveBatch(fakeBatch); } catch { } }
+                try { if (Directory.Exists(fakeRoot)) Directory.Delete(fakeRoot, true); }
+                catch { }
+            }
+            check(S.Selftest.FakeFolderKeepsDocs, fakeKeep);
+
+            // 36. Tệp đã biến mất không phải lỗi: phải trả error rỗng để bên gọi
+            //     bỏ qua thay vì ghi ERROR và trừ vào bộ đếm (log có 286 lỗi giả).
+            bool goneOk = false;
+            string goneBatch = "";
+            try
+            {
+                goneBatch = Quarantine.NewBatch("test", "");
+                string goneErr;
+                bool goneAdded = Quarantine.Add(Path.Combine(usb, "khong-con.txt"), usb,
+                                                goneBatch, "test", out goneErr);
+                goneOk = !goneAdded && goneErr.Length == 0;
+            }
+            catch { }
+            finally
+            {
+                if (goneBatch.Length > 0) { try { Quarantine.RemoveBatch(goneBatch); } catch { } }
+            }
+            check(S.Selftest.MissingIsNotError, goneOk);
+
+            // 37. Khoá dọn ổ: luồng khác không vào được khi đang giữ, cùng luồng
+            //     vào lại được (Apply gọi QuarantineTree), nhả ra thì vào lại được.
+            bool lockOk = false;
+            bool lockHeld = false;
+            try
+            {
+                lockHeld = CleanLock.Enter(1000);
+                int other = -1;
+                System.Threading.Thread t = new System.Threading.Thread(delegate()
+                {
+                    bool got = CleanLock.Enter(0);
+                    other = got ? 1 : 0;
+                    if (got) CleanLock.Exit();
+                });
+                t.IsBackground = true;
+                t.Start();
+                t.Join(5000);
+                bool blocked = lockHeld && other == 0;
+                bool reentrant = lockHeld && CleanLock.Enter(0);
+                if (reentrant) CleanLock.Exit();
+                if (lockHeld) { CleanLock.Exit(); lockHeld = false; }
+                bool freeAgain = CleanLock.Enter(2000);
+                if (freeAgain) CleanLock.Exit();
+                lockOk = blocked && reentrant && freeAgain && !CleanLock.IsBusy();
+            }
+            catch { }
+            finally
+            {
+                if (lockHeld) { try { CleanLock.Exit(); } catch { } }
+            }
+            check(S.Selftest.CleanLockExclusive, lockOk);
+
+            // 38. Lượt cách ly không di chuyển được tệp nào thì không để lại vỏ
+            //     batch rỗng: vòng quét nền 10 giây/lần sẽ sinh hàng trăm thư mục.
+            bool emptyBatchOk = false;
+            string docsRoot = Path.Combine(usb, "Dosc2");
+            try
+            {
+                Directory.CreateDirectory(docsRoot);
+                string keepDoc = Path.Combine(docsRoot, "baocao.docx");
+                File.WriteAllText(keepDoc, "tai lieu", new UTF8Encoding(false));
+
+                UsbScanResult isEmpty = new UsbScanResult();
+                isEmpty.Root = usb;
+                isEmpty.Drive = usb;
+                UsbItem folderItem = new UsbItem();
+                folderItem.Kind = UsbKind.FakeFolder;
+                folderItem.Path = docsRoot;
+                folderItem.FolderName = "Dosc2";
+                folderItem.High = true;
+                List<UsbItem> oneFolder = new List<UsbItem>();
+                oneFolder.Add(folderItem);
+
+                int emptyFailed, emptyStopped;
+                string emptyBatch;
+                int movedFiles = UsbScan.Apply(isEmpty, oneFolder, out emptyFailed,
+                                               out emptyBatch, out emptyStopped, null);
+                emptyBatchOk = movedFiles == 0 && emptyBatch.Length == 0
+                            && emptyFailed == 0 && File.Exists(keepDoc);
+            }
+            catch { }
+            finally
+            {
+                try { if (Directory.Exists(docsRoot)) Directory.Delete(docsRoot, true); }
+                catch { }
+            }
+            check(S.Selftest.EmptyBatchRemoved, emptyBatchOk);
+
+            // 39. CSV injection: ô mở đầu bằng = + - @ phải bị vô hiệu hoá khi xuất
+            //     để Excel không chạy công thức từ tên tệp do virus đặt.
+            bool csvGuard = false;
+            try
+            {
+                ShieldGate.Events.Add("selftest", "INFO", "=cmd|' /C calc'!A0", "csvdetail");
+                string csvPath = Path.Combine(root, "events-inject.csv");
+                if (ShieldGate.Events.ExportCsv(csvPath))
+                {
+                    string text = File.ReadAllText(csvPath);
+                    csvGuard = text.IndexOf("\"'=cmd", StringComparison.Ordinal) >= 0
+                            && text.IndexOf("\"=cmd", StringComparison.Ordinal) < 0;
+                }
+            }
+            catch { }
+            check(S.Selftest.CsvInjection, csvGuard);
+
+            // 40. reg export: khoá không tồn tại thì không có bản sao, phải trả
+            //     false để Fix dừng thay vì xoá mà không có đường lùi.
+            bool regBackupOk = false;
+            string regBak = "";
+            try
+            {
+                string bogusError;
+                string bogusFile;
+                bool bogus = PcScan.BackupReg(RegistryHive.CurrentUser,
+                    @"Control Panel\ShieldGateNoSuchKey", out bogusError, out bogusFile);
+                string realError;
+                string realFile;
+                bool real = PcScan.BackupReg(RegistryHive.CurrentUser,
+                    @"Control Panel\Desktop", out realError, out realFile);
+                regBak = realFile;
+                regBackupOk = !bogus && bogusError.Length > 0
+                           && real && realError.Length == 0
+                           && File.Exists(realFile) && new FileInfo(realFile).Length > 0;
+            }
+            catch { }
+            finally
+            {
+                try { if (regBak.Length > 0 && File.Exists(regBak)) File.Delete(regBak); }
+                catch { }
+            }
+            check(S.Selftest.RegExportChecked, regBackupOk);
+
+            // 41. Phạm vi Unhide: chế độ tự động chỉ gỡ Hidden+System (dấu hiệu
+            //     virus), giữ desktop.ini, mục người dùng tự ẩn và thư mục hệ thống.
+            bool scopeOk = false;
+            string scopeDir = Path.Combine(root, "unhide-scope");
+            try
+            {
+                Directory.CreateDirectory(scopeDir);
+                string recycle = Path.Combine(scopeDir, "$RECYCLE.BIN");
+                Directory.CreateDirectory(recycle);
+                string deskIni = Path.Combine(scopeDir, "desktop.ini");
+                string mine = Path.Combine(scopeDir, "mine.docx");
+                string worm = Path.Combine(scopeDir, "worm.doc");
+                File.WriteAllText(deskIni, "[.ShellClassInfo]", new UTF8Encoding(false));
+                File.WriteAllText(mine, "nguoi dung", new UTF8Encoding(false));
+                File.WriteAllText(worm, "virus", new UTF8Encoding(false));
+                File.SetAttributes(deskIni, FileAttributes.Hidden | FileAttributes.System);
+                File.SetAttributes(mine, FileAttributes.Hidden);
+                File.SetAttributes(worm, FileAttributes.Hidden | FileAttributes.System);
+                File.SetAttributes(recycle, FileAttributes.Hidden | FileAttributes.System);
+
+                int autoUnhide = UsbScan.Unhide(scopeDir, null);
+                bool deskKept = (File.GetAttributes(deskIni) & FileAttributes.Hidden) != 0;
+                bool mineKept = (File.GetAttributes(mine) & FileAttributes.Hidden) != 0;
+                bool wormCleared = (File.GetAttributes(worm) & FileAttributes.Hidden) == 0;
+                bool recycleKept = (File.GetAttributes(recycle) & FileAttributes.Hidden) != 0;
+                scopeOk = autoUnhide == 1 && deskKept && mineKept && wormCleared && recycleKept;
+            }
+            catch { }
+            finally
+            {
+                try
+                {
+                    if (Directory.Exists(scopeDir))
+                    {
+                        foreach (string f in Directory.GetFiles(scopeDir, "*", SearchOption.AllDirectories))
+                        {
+                            try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
+                        }
+                        foreach (string d in Directory.GetDirectories(scopeDir, "*", SearchOption.AllDirectories))
+                        {
+                            try { File.SetAttributes(d, FileAttributes.Directory); } catch { }
+                        }
+                        Directory.Delete(scopeDir, true);
+                    }
+                }
+                catch { }
+            }
+            check(S.Selftest.UnhideScope, scopeOk);
+
+            // 42. Nhập luật có xác nhận: bỏ qua tệp cạnh exe, giữ bản cũ, tệp v2
+            //     thiếu khoá mới vẫn có mặc định, trọng số ngoài 0..10 bị kẹp.
+            bool rulesImport = false;
+            string importSrc = Path.Combine(root, "rules-import.json");
+            string besideRules = Path.Combine(
+                Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "rules.json");
+            try
+            {
+                Paths.EnsureDirs();
+                File.WriteAllText(besideRules,
+                    "{ \"scoreThreshold\": 9, \"scriptExts\": [\"besideonly\"] }",
+                    new UTF8Encoding(false));
+                File.WriteAllText(importSrc,
+                    "{ \"scoreThreshold\": 8, \"weights\": { \"target\": 99 }, " +
+                    "\"scriptExts\": [\"xyz\"] }", new UTF8Encoding(false));
+
+                string importError;
+                bool imported = Rules.Import(importSrc, out importError);
+                string missingError;
+                bool rejected = !Rules.Import(Path.Combine(root, "khong-co.json"), out missingError);
+                RulesData d = Rules.Current;
+                rulesImport = imported && importError.Length == 0
+                           && rejected && missingError.Length > 0
+                           && d.Version == RulesData.CurrentVersion
+                           && d.ScoreThreshold == 8
+                           && d.IsScriptExt(".xyz") && d.IsScriptExt(".vbs")
+                           && !d.IsScriptExt(".besideonly")
+                           && d.IsPayloadExt(".dll")
+                           && d.Weight("target") == 10
+                           && File.Exists(Paths.RulesFile + ".bak")
+                           && string.Equals(Rules.CandidatePath(), Paths.RulesFile,
+                                            StringComparison.OrdinalIgnoreCase);
+            }
+            catch { }
+            finally
+            {
+                try { File.Delete(besideRules); } catch { }
+                try { File.Delete(importSrc); } catch { }
+                try
+                {
+                    File.WriteAllText(Paths.RulesFile, Rules.DefaultJson, new UTF8Encoding(false));
+                    Rules.Reload();
+                }
+                catch { }
+            }
+            check(S.Selftest.RulesImport, rulesImport);
+
+            // 43. Tác vụ: chỉ báo khi tác vụ đang bật và lệnh nguy hiểm; tác vụ đã
+            //     tắt không được báo lại (người dùng tưởng virus tạo lại tác vụ).
+            bool taskState = false;
+            try
+            {
+                System.Xml.XmlDocument risky = new System.Xml.XmlDocument();
+                risky.LoadXml("<Task><Actions><Exec><Command>wscript.exe</Command>"
+                    + "<Arguments>\"C:\\Users\\Public\\a.vbs\"</Arguments></Exec></Actions>"
+                    + "<Settings><Enabled>true</Enabled></Settings></Task>");
+                System.Xml.XmlDocument off = new System.Xml.XmlDocument();
+                off.LoadXml("<Task><Actions><Exec><Command>wscript.exe</Command>"
+                    + "<Arguments>\"C:\\Users\\Public\\a.vbs\"</Arguments></Exec></Actions>"
+                    + "<Settings><Enabled>false</Enabled></Settings></Task>");
+                System.Xml.XmlDocument clean = new System.Xml.XmlDocument();
+                clean.LoadXml("<Task><Actions><Exec><Command>C:\\Windows\\System32\\notepad.exe"
+                    + "</Command></Exec></Actions><Settings><Enabled>true</Enabled>"
+                    + "</Settings></Task>");
+                string action;
+                bool hit = PcScan.TaskSuspicious(risky, out action) && action.Length > 0;
+                bool skipOff = !PcScan.TaskSuspicious(off, out action);
+                bool skipClean = !PcScan.TaskSuspicious(clean, out action);
+                taskState = hit && skipOff && skipClean;
+            }
+            catch { }
+            check(S.Selftest.TaskState, taskState);
+
+            // 44. Ổ bị dọn 3 lần trong 10 phút mới báo nhiễm lại, báo một lần rồi
+            //     im; ổ khác đếm riêng; lượt không cách ly tệp nào thì không đếm.
+            bool reinfectOk = false;
+            try
+            {
+                ReinfectWatch.Reset();
+                DateTime t0 = new DateTime(2026, 11, 5, 2, 31, 0);
+                bool first = ReinfectWatch.Observe("F:", 1, t0);
+                bool second = ReinfectWatch.Observe("F:", 1, t0.AddSeconds(35));
+                bool third = ReinfectWatch.Observe("F:", 1, t0.AddSeconds(70));
+                bool throttled = ReinfectWatch.Observe("F:", 1, t0.AddSeconds(105));
+                bool other = ReinfectWatch.Observe("D:", 1, t0.AddSeconds(110));
+                bool noMove = ReinfectWatch.Observe("F:", 0, t0.AddSeconds(120));
+                ReinfectWatch.Reset();
+                bool again1 = ReinfectWatch.Observe("F:", 1, t0.AddMinutes(20));
+                bool again2 = ReinfectWatch.Observe("F:", 1, t0.AddMinutes(21));
+                bool again3 = ReinfectWatch.Observe("F:", 1, t0.AddMinutes(22));
+                reinfectOk = !first && !second && third && !throttled && !other
+                          && !noMove && !again1 && !again2 && again3;
+            }
+            catch { }
+            finally { ReinfectWatch.Reset(); }
+            check(S.Selftest.ReinfectLoop, reinfectOk);
+
+            // 45. Tác vụ ẩn dưới \Microsoft\...: PowerShell mã hoá của Windows không
+            //     bị báo, nhưng lệnh trỏ vào ProgramData hoặc script host thì báo.
+            bool taskMicrosoft = false;
+            try
+            {
+                System.Xml.XmlDocument encoded = new System.Xml.XmlDocument();
+                encoded.LoadXml("<Task><Actions><Exec><Command>powershell.exe</Command>"
+                    + "<Arguments>-EncodedCommand AAAA</Arguments></Exec></Actions>"
+                    + "<Settings><Enabled>true</Enabled></Settings></Task>");
+                System.Xml.XmlDocument drop = new System.Xml.XmlDocument();
+                drop.LoadXml("<Task><Actions><Exec><Command>cmd.exe</Command>"
+                    + "<Arguments>/c \"C:\\ProgramData\\LMIGuardianUrX\\1.exe\"</Arguments>"
+                    + "</Exec></Actions><Settings><Enabled>true</Enabled></Settings></Task>");
+                string action;
+                bool normalSees = PcScan.TaskSuspicious(encoded, out action);
+                bool microsoftSkips = !PcScan.TaskSuspicious(encoded, true, out action);
+                bool microsoftSeesDrop = PcScan.TaskSuspicious(drop, true, out action);
+                taskMicrosoft = normalSees && microsoftSkips && microsoftSeesDrop;
+            }
+            catch { }
+            check(S.Selftest.TaskMicrosoft, taskMicrosoft);
+
+            // 46. Dịch vụ/driver: đường dẫn Windows và Program Files được bỏ qua,
+            //     ProgramData/Public hoặc đường dẫn trần bị báo; đọc đúng \??\ và
+            //     \SystemRoot\.
+            bool servicePath = false;
+            try
+            {
+                string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                bool svchost = !PcScan.ServiceSuspicious("x",
+                    @"C:\Windows\System32\svchost.exe -k netsvcs", 2, 0x20);
+                bool programFiles = !PcScan.ServiceSuspicious("x",
+                    @"""C:\Program Files\App\svc.exe"" -run", 2, 0x10);
+                bool disabled = !PcScan.ServiceSuspicious("x",
+                    @"C:\ProgramData\LMIGuardianUrX\1.exe", 4, 0x10);
+                bool programData = PcScan.ServiceSuspicious("x",
+                    @"\??\C:\ProgramData\LMIGuardianUrX\1.exe", 2, 0x10);
+                bool publicDir = PcScan.ServiceSuspicious("x",
+                    @"C:\Users\Public\svc.exe", 3, 0x10);
+                bool bare = PcScan.ServiceSuspicious("x", "adback.dat", 2, 0x10);
+                bool defender = !PcScan.ServiceSuspicious("WinDefend",
+                    @"""C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.26100.4-0\MsMpEng.exe""",
+                    2, 0x10);
+                string sysRoot = PcScan.ServiceImagePath(
+                    @"\SystemRoot\System32\drivers\evil.sys");
+                servicePath = svchost && programFiles && disabled && programData && publicDir
+                           && bare && defender
+                           && string.Equals(sysRoot,
+                                  System.IO.Path.Combine(win, @"System32\drivers\evil.sys"),
+                                  StringComparison.OrdinalIgnoreCase);
+            }
+            catch { }
+            check(S.Selftest.ServicePath, servicePath);
+
+            // 47. Thứ tự sửa: tiến trình/dịch vụ trước, cơ chế khởi động, rồi tệp —
+            //     để nguồn lây không kịp tạo lại thứ vừa xoá.
+            bool fixOrder = PcScan.FixPass(PcKind.Process) == 0
+                         && PcScan.FixPass(PcKind.FakeProcess) == 0
+                         && PcScan.FixPass(PcKind.Service) == 0
+                         && PcScan.FixPass(PcKind.Task) == 1
+                         && PcScan.FixPass(PcKind.WmiConsumer) == 1
+                         && PcScan.FixPass(PcKind.RunValue) == 2
+                         && PcScan.FixPass(PcKind.StartupFile) == 2
+                         && PcScan.FixPass(PcKind.DroppedFile) == 3
+                         && PcScan.FixPass(PcKind.Process) < PcScan.FixPass(PcKind.Task)
+                         && PcScan.FixPass(PcKind.Task) < PcScan.FixPass(PcKind.RunValue)
+                         && PcScan.FixPass(PcKind.RunValue) < PcScan.FixPass(PcKind.DroppedFile);
+            check(S.Selftest.FixOrder, fixOrder);
+
             try { Directory.Delete(root, true); }
             catch { }
 
@@ -632,6 +1221,20 @@ namespace ShieldGate
             }
             Console.WriteLine(S.Cli.SelftestFail(passed, total, firstError));
             return 1;
+        }
+
+        // Marker sao lưu đúng định dạng Repair đọc (xem Repair.FindMarker).
+        private static string BackupMarkerText(string source, string dest, string serial,
+                                               long volumeBytes, string when)
+        {
+            return "state=complete\r\n"
+                 + "volumeSerial=" + serial + "\r\n"
+                 + "volumeBytes=" + volumeBytes.ToString(CultureInfo.InvariantCulture) + "\r\n"
+                 + "source=" + source + "\r\n"
+                 + "dest=" + dest + "\r\n"
+                 + "when=" + when + "\r\n"
+                 + "files=1\r\n"
+                 + "bytes=1\r\n";
         }
 
         // Mã có thể kèm chi tiết dạng "code=detail"; so khớp cả hai dạng.

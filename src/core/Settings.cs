@@ -239,6 +239,59 @@ namespace ShieldGate
         public static string BehaviorEventDrive { get { return Get("behavior.drive", ""); } }
         public static string BehaviorEventText { get { return Get("behavior.text", ""); } }
 
+        // Ổ bị nhiễm lại liên tục: nguồn lây nằm trên máy, không phải trên ổ.
+        public static void SetReinfectEvent(string drive)
+        {
+            SetReinfectEvent(drive, false);
+        }
+
+        // afterFix: máy vừa được sửa mà ổ vẫn nhiễm lại — nguồn lây nằm ngoài
+        // những gì người dùng đã xử lý (driver/rootkit hoặc tiến trình được bảo vệ).
+        public static void SetReinfectEvent(string drive, bool afterFix)
+        {
+            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            v["reinfect.time"] = DateTime.Now.ToString("o");
+            v["reinfect.drive"] = drive ?? "";
+            v["reinfect.afterfix"] = afterFix ? "1" : "0";
+            SetMany(v);
+        }
+
+        public static DateTime ReinfectEventTime
+        {
+            get
+            {
+                DateTime t;
+                return DateTime.TryParse(Get("reinfect.time", ""), out t) ? t : DateTime.MinValue;
+            }
+        }
+
+        public static string ReinfectEventDrive { get { return Get("reinfect.drive", ""); } }
+        public static bool ReinfectEventAfterFix
+        {
+            get { return string.Equals(Get("reinfect.afterfix", "0"), "1", StringComparison.Ordinal); }
+        }
+
+        // Lần sửa máy gần nhất, để phân biệt "chưa sửa" với "sửa rồi vẫn nhiễm lại".
+        public static void SetPcFixEvent(int ok, int fail)
+        {
+            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            v["pcfix.time"] = DateTime.Now.ToString("o");
+            v["pcfix.ok"] = ok.ToString();
+            v["pcfix.fail"] = fail.ToString();
+            SetMany(v);
+        }
+
+        public static DateTime PcFixEventTime
+        {
+            get
+            {
+                DateTime t;
+                return DateTime.TryParse(Get("pcfix.time", ""), out t) ? t : DateTime.MinValue;
+            }
+        }
+
+        public static int PcFixEventOk { get { return Int("pcfix.ok"); } }
+
         private static int Int(string key)
         {
             int n;

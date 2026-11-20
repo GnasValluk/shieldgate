@@ -552,11 +552,11 @@ namespace ShieldGate
                                    S.Dlg.UndoOk, S.Dlg.Close, ButtonKind.Secondary, false))
                 return;
 
-            int restored, skipped, missing;
+            int restored, skipped, missing, refused = 0;
             try
             {
-                Quarantine.RestoreBatch(_batch, out restored, out skipped, out missing);
-                if (missing == 0) Quarantine.RemoveBatch(_batch);
+                Quarantine.RestoreBatch(_batch, out restored, out skipped, out missing, out refused);
+                if (missing == 0 && refused == 0) Quarantine.RemoveBatch(_batch);
             }
             catch (Exception e)
             {
@@ -568,6 +568,7 @@ namespace ShieldGate
             _list.Clear();
             _notice.SetMessage(S.Usb.UndoDone(restored, skipped), false);
             if (missing > 0) _notice.SetMessage(S.Restore.Missing(missing), true);
+            if (refused > 0) _notice.SetMessage(S.Restore.Refused(refused), true);
             ShowState(SelectedDrive() == null ? UsbState.NoDrive : UsbState.Idle);
         }
 
@@ -616,7 +617,8 @@ namespace ShieldGate
                     List<string> nameless = UsbRestore.FindNameless(drive);
                     if (nameless.Count > 0)
                         count += UsbRestore.Restore(drive, nameless, delegate { return _cancelFlag; }).Moved;
-                    count += UsbScan.Unhide(drive, delegate { return _cancelFlag; });
+                    count += UsbScan.Unhide(drive, UnhideScope.AllHidden,
+                                            delegate { return _cancelFlag; });
                 }
                 catch (Exception e) { Log.Write(S.Log.UnhideError(e.Message), "ERROR"); }
                 if (IsDisposed || !IsHandleCreated) return;

@@ -668,7 +668,7 @@ namespace ShieldGate
             string output;
             string args = (enabled ? "/enable-device " : "/disable-device ") +
                           "\"" + instanceId + "\"";
-            int code = Native.Run("pnputil.exe", args, 30000, out output);
+            int code = Native.Run(Native.SysExe("pnputil.exe"), args, 30000, out output);
             Log.Write("pnputil " + args + " -> " + code + " " + (output ?? "").Trim(),
                       code == 0 ? "INFO" : "WARN");
             return code == 0;

@@ -12,9 +12,11 @@ namespace ShieldGate
     internal sealed class ConfirmDialog : Form
     {
         public bool Accepted;
+        public bool Checked;
 
         private ConfirmDialog(string title, string body, string okText, string cancelText,
-                              ButtonKind kind, bool defaultOk)
+                              ButtonKind kind, bool defaultOk,
+                              string checkText, string checkDetail, bool checkDefault)
         {
             Text = S.App.Name;
             BackColor = Theme.Surface;
@@ -36,9 +38,12 @@ namespace ShieldGate
                 new Size(inner, int.MaxValue),
                 TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
 
+            bool hasCheck = !string.IsNullOrEmpty(checkText);
             int titleH = Ui.Px(30);
             int bodyY = pad + titleH + Ui.Px(8);
-            int buttonsY = bodyY + bodySize.Height + Ui.Px(26);
+            int checkY = bodyY + bodySize.Height + Ui.Px(14);
+            int buttonsY = hasCheck ? checkY + Ui.Px(76) + Ui.Px(2)
+                                    : bodyY + bodySize.Height + Ui.Px(26);
             int height = buttonsY + Ui.Px(Theme.ControlHeight) + pad;
 
             ClientSize = new Size(width, height);
@@ -60,6 +65,18 @@ namespace ShieldGate
             text.Bounds = new Rectangle(pad, bodyY, inner, bodySize.Height + Ui.Px(2));
             text.TextAlign = ContentAlignment.TopLeft;
             Controls.Add(text);
+
+            if (hasCheck)
+            {
+                SwitchRow row = new SwitchRow();
+                row.Text = checkText;
+                row.Detail = checkDetail ?? "";
+                row.Bounds = new Rectangle(pad, checkY, inner, Ui.Px(76));
+                row.Checked = checkDefault;
+                row.CheckedChanged += delegate { Checked = row.Checked; };
+                Checked = checkDefault;
+                Controls.Add(row);
+            }
 
             Size okSize = Ui.Measure(okText, Theme.BodyStrong);
             Size cancelSize = Ui.Measure(cancelText, Theme.Body);
@@ -100,10 +117,25 @@ namespace ShieldGate
         public static bool Ask(IWin32Window owner, string title, string body,
                                string okText, string cancelText, ButtonKind kind, bool defaultOk)
         {
-            using (ConfirmDialog d = new ConfirmDialog(title, body, okText, cancelText, kind, defaultOk))
+            bool ignored;
+            return Ask(owner, title, body, okText, cancelText, kind, defaultOk,
+                       "", "", false, out ignored);
+        }
+
+        // Hộp thoại có thêm một công tắc (giữ dữ liệu, xoá vĩnh viễn...).
+        // checkDefault và out checkChecked chỉ có nghĩa khi checkText khác rỗng.
+        public static bool Ask(IWin32Window owner, string title, string body,
+                               string okText, string cancelText, ButtonKind kind, bool defaultOk,
+                               string checkText, string checkDetail, bool checkDefault,
+                               out bool checkChecked)
+        {
+            using (ConfirmDialog d = new ConfirmDialog(title, body, okText, cancelText, kind,
+                                                       defaultOk, checkText, checkDetail,
+                                                       checkDefault))
             {
                 if (owner != null) d.ShowDialog(owner);
                 else d.ShowDialog();
+                checkChecked = d.Checked;
                 return d.Accepted;
             }
         }
@@ -125,6 +157,7 @@ namespace ShieldGate
                 case PcKind.StartupFile: return S.Pc.StartupFile(item.Arg1);
                 case PcKind.Task: return S.Pc.Task(item.Arg1);
                 case PcKind.Process: return S.Pc.Process(item.Arg1);
+                case PcKind.Service: return S.Pc.Service(item.Arg1);
                 case PcKind.DroppedFile: return S.Pc.DroppedFile(item.Arg1);
                 case PcKind.FakeProcess: return S.Pc.FakeProcess(item.Arg1);
                 case PcKind.DriveShortcut: return S.Pc.DriveShortcut(item.Arg1);
@@ -576,13 +609,15 @@ namespace ShieldGate
                                    S.Dlg.RestoreOk, S.Dlg.Close, ButtonKind.Primary, false))
                 return;
 
-            int restored, skipped, missing;
-            Quarantine.RestoreBatch(b.Path, out restored, out skipped, out missing);
-            if (missing == 0) Quarantine.RemoveBatch(b.Path);
+            int restored, skipped, missing, refused;
+            Quarantine.RestoreBatch(b.Path, out restored, out skipped, out missing, out refused);
+            // Còn mục bị từ chối thì giữ lần cách ly để người dùng xem lại.
+            if (missing == 0 && refused == 0) Quarantine.RemoveBatch(b.Path);
 
             string text = S.Restore.Done(restored, skipped);
             if (missing > 0) text += " " + S.Restore.Missing(missing);
-            Log.Write(S.Log.RestoreBatch(restored, b.Name, missing));
+            if (refused > 0) text += " " + S.Restore.Refused(refused);
+            Log.Write(S.Log.RestoreBatch(restored, b.Name, missing, refused));
             RefreshBatches();
             _result.Text = text;
         }
@@ -635,7 +670,7 @@ namespace ShieldGate
             try
             {
                 Paths.EnsureDirs();
-                System.Diagnostics.Process.Start("explorer.exe", "\"" + Paths.QuarDir + "\"");
+                System.Diagnostics.Process.Start(Native.ShellExe("explorer.exe"), "\"" + Paths.QuarDir + "\"");
             }
             catch { }
         }

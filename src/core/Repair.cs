@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -78,6 +79,14 @@ namespace ShieldGate
         // True khi phai tu choi moi thao tac ghi. Dung truoc chkdsk/backup.
         public static bool RefuseReason(string drive, out string reason)
         {
+            return RefuseReason(drive, false, out reason);
+        }
+
+        // write = true: thao tac ghi chi cho o roi. O co dinh phu (D:, E: trong
+        // may) van duoc chan doan chi doc nhung khong duoc sao luu/chkdsk /f: day
+        // thuong la o du lieu chinh, khong phai thiet bi ngoai vi.
+        public static bool RefuseReason(string drive, bool write, out string reason)
+        {
             reason = "";
             if (string.IsNullOrEmpty(drive) || drive.Trim().Length < 2)
             {
@@ -106,6 +115,11 @@ namespace ShieldGate
                 if (di.DriveType == DriveType.Network || di.DriveType == DriveType.CDRom)
                 {
                     reason = S.Repair.UnsupportedDrive;
+                    return true;
+                }
+                if (write && di.DriveType != DriveType.Removable)
+                {
+                    reason = S.Repair.NotRemovable;
                     return true;
                 }
             }
@@ -149,7 +163,7 @@ namespace ShieldGate
             {
                 string letter = info.Drive.Substring(0, 2);
                 string output;
-                int code = Native.Run("fsutil.exe", "dirty query " + letter, 15000, out output);
+                int code = Native.Run(Native.SysExe("fsutil.exe"), "dirty query " + letter, 15000, out output);
                 if (code == 0 && output != null)
                 {
                     string low = output.ToLowerInvariant();
@@ -229,7 +243,7 @@ namespace ShieldGate
         {
             BackupPlan plan = new BackupPlan();
             string reason;
-            if (RefuseReason(drive, out reason))
+            if (RefuseReason(drive, true, out reason))
             {
                 plan.Error = reason;
                 return plan;
@@ -240,8 +254,8 @@ namespace ShieldGate
             try
             {
                 string args = "\"" + NormalRoot(drive) + "\" \"" + dest +
-                              "\" /L /E /COPY:DAT /R:0 /W:0 /XJ /BYTES /NP /NFL /NDL";
-                int code = Native.Run("robocopy.exe", args, 120000, out output);
+                              "\" /L /E /COPY:DAT /R:0 /W:0 /XJ" + SkipDirs + " /BYTES /NP /NFL /NDL";
+                int code = Native.Run(Native.SysExe("robocopy.exe"), args, 120000, out output);
                 plan.Output = output ?? "";
                 plan.Ok = code >= 0 && code < 8;
                 if (!plan.Ok) plan.Error = S.Repair.BackupExit(code);
@@ -308,7 +322,7 @@ namespace ShieldGate
             dest = "";
             output = "";
             string reason;
-            if (RefuseReason(drive, out reason))
+            if (RefuseReason(drive, true, out reason))
             {
                 output = reason;
                 return false;
@@ -321,10 +335,10 @@ namespace ShieldGate
                 dest = Path.Combine(Paths.RepairDir,
                     "backup-" + letter + "-" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
 
-                string repairRoot = Path.GetFullPath(Paths.RepairDir)
-                    .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                string repairRoot = SafeRepairRoot();
                 string full = Path.GetFullPath(dest);
-                if (!full.StartsWith(repairRoot, StringComparison.OrdinalIgnoreCase))
+                if (repairRoot.Length == 0 ||
+                    !full.StartsWith(repairRoot, StringComparison.OrdinalIgnoreCase))
                 {
                     output = S.Repair.BackupOutside;
                     return false;
@@ -336,13 +350,54 @@ namespace ShieldGate
                     return false;
                 }
 
+                // Uoc luong truoc khi chep: robocopy het cho se dung giua duong va
+                // de lai ban sao do, trong khi marker chi duoc ghi khi xong.
+                long files, bytes;
+                CountTree(root, out files, out bytes);
+                long need, free;
+                if (!HasRoomFor(bytes, out need, out free))
+                {
+                    output = S.Repair.BackupNoSpace(need, free);
+                    return false;
+                }
+
                 string args = "\"" + root + "\" \"" + dest +
-                              "\" /E /COPY:DAT /R:1 /W:1 /XJ /NP /NFL /NDL";
-                int code = Native.Run("robocopy.exe", args, 6 * 60 * 60 * 1000, out output);
+                              "\" /E /COPY:DAT /R:1 /W:1 /XJ" + SkipDirs + " /NP /NFL /NDL";
+                int code = Native.Run(Native.SysExe("robocopy.exe"), args, 6 * 60 * 60 * 1000, out output);
                 bool ok = code >= 0 && code < 8;
+                // O trong hop le thi dich cung rong; chi khi nguon co du lieu ma
+                // dich khong co gi moi la chep hong.
+                if (ok && bytes > 0 && !HasAnyEntry(dest))
+                {
+                    ok = false;
+                    output = S.Repair.BackupMissing;
+                }
                 if (ok)
                 {
-                    File.WriteAllText(MarkerFile(drive), dest + "\r\n", new UTF8Encoding(false));
+                    if (!Directory.Exists(dest)) Directory.CreateDirectory(dest);
+                    uint serial = Native.VolumeSerial(root);
+                    long size = 0;
+                    try { size = new DriveInfo(root).TotalSize; } catch { }
+                    StringBuilder marker = new StringBuilder();
+                    marker.Append("state=complete\r\n");
+                    marker.Append("volumeSerial=")
+                          .Append(serial.ToString("X8", CultureInfo.InvariantCulture)).Append("\r\n");
+                    marker.Append("volumeBytes=")
+                          .Append(size.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+                    marker.Append("source=").Append(root).Append("\r\n");
+                    marker.Append("dest=").Append(dest).Append("\r\n");
+                    marker.Append("when=")
+                          .Append(DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss",
+                                                        CultureInfo.InvariantCulture)).Append("\r\n");
+                    marker.Append("files=")
+                          .Append(files.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+                    marker.Append("bytes=")
+                          .Append(bytes.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+                    File.WriteAllText(MarkerFile(drive, serial), marker.ToString(),
+                                      new UTF8Encoding(false));
+                    // Marker 2.0 chi theo chu o khong con hieu luc; xoa de khoi gay nham.
+                    try { File.Delete(Path.Combine(Paths.RepairDir, "backup-" + letter + ".ok")); }
+                    catch { }
                     Events.Add(Events.KindRepair, "INFO", root, S.Events.BackupDone(dest));
                     Log.Write(S.Log.BackupDone(root, dest));
                 }
@@ -357,33 +412,189 @@ namespace ShieldGate
             }
         }
 
-        private static string MarkerFile(string drive)
+        // Du cho ban sao luu: giu lai 10% va 100 MB cho nhat ky/he thong.
+        private static bool HasRoomFor(long bytes, out long need, out long free)
+        {
+            need = 0;
+            free = 0;
+            try
+            {
+                string root = Path.GetPathRoot(Paths.RepairDir);
+                DriveInfo d = new DriveInfo(root);
+                free = d.AvailableFreeSpace;
+                need = bytes + bytes / 10 + 100L * 1024 * 1024;
+                return free >= need;
+            }
+            catch { return true; }
+        }
+
+        // ------------------------------------------------ marker sao lưu theo ổ
+
+        // Marker 2.0 (backup-E.ok) chỉ gắn theo chữ ổ: USB khác cắm vào cùng E:
+        // vẫn được coi là đã sao lưu. Marker mới ghi serial + dung lượng volume và
+        // chỉ có hiệu lực 24 giờ; marker cũ bị bỏ qua để buộc sao lưu lại.
+        private const int MarkerMaxAgeHours = 24;
+
+        // Hai thư mục này luôn gây lỗi truy cập trên NTFS; không loại trừ thì
+        // robocopy trả mã >= 8 và marker không bao giờ được ghi.
+        private const string SkipDirs = " /XD \"System Volume Information\" \"$RECYCLE.BIN\"";
+
+        private static string MarkerFile(string drive, uint serial)
         {
             string letter = NormalRoot(drive).Substring(0, 1).ToUpperInvariant();
-            return Path.Combine(Paths.RepairDir, "backup-" + letter + ".ok");
+            return Path.Combine(Paths.RepairDir,
+                "backup-" + letter + "-" + serial.ToString("X8", CultureInfo.InvariantCulture) + ".ok");
+        }
+
+        private static string MarkerValue(string text, string key)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            foreach (string raw in text.Split('\n'))
+            {
+                string line = raw.Trim();
+                int eq = line.IndexOf('=');
+                if (eq <= 0) continue;
+                if (string.Equals(line.Substring(0, eq).Trim(), key,
+                                  StringComparison.OrdinalIgnoreCase))
+                    return line.Substring(eq + 1).Trim();
+            }
+            return "";
+        }
+
+        private static string SafeRepairRoot()
+        {
+            try
+            {
+                return Path.GetFullPath(Paths.RepairDir)
+                    .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            }
+            catch { return ""; }
+        }
+
+        private static bool IsInsideRepair(string path, string repairRoot)
+        {
+            if (string.IsNullOrEmpty(path) || repairRoot.Length == 0) return false;
+            try
+            {
+                string full = Path.GetFullPath(path);
+                return full.StartsWith(repairRoot, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(full.TrimEnd(Path.DirectorySeparatorChar),
+                                      repairRoot.TrimEnd(Path.DirectorySeparatorChar),
+                                      StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
+        private static bool HasAnyEntry(string dir)
+        {
+            try { return Directory.Exists(dir) && Directory.GetFileSystemEntries(dir).Length > 0; }
+            catch { return false; }
+        }
+
+        // Tim marker hop le cua dung volume dang cam; tra ve duong dan ban sao.
+        private static string FindMarker(string drive, out string reason, out DateTime when)
+        {
+            reason = S.Repair.BackupRequired;
+            when = DateTime.MinValue;
+            string root = NormalRoot(drive);
+            if (root.Length < 3)
+            {
+                reason = S.Repair.InvalidDrive;
+                return "";
+            }
+            uint serial = Native.VolumeSerial(root);
+            if (serial == 0)
+            {
+                reason = S.Repair.NotReady;
+                return "";
+            }
+            long size = 0;
+            try { size = new DriveInfo(root).TotalSize; } catch { }
+
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles(Paths.RepairDir,
+                    "backup-" + root.Substring(0, 1).ToUpperInvariant() + "-*.ok");
+            }
+            catch { return ""; }
+
+            string repairRoot = SafeRepairRoot();
+            string serialText = serial.ToString("X8", CultureInfo.InvariantCulture);
+            foreach (string file in files)
+            {
+                string text;
+                try { text = File.ReadAllText(file); } catch { continue; }
+                if (!string.Equals(MarkerValue(text, "state"), "complete",
+                                   StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (!string.Equals(MarkerValue(text, "volumeSerial"), serialText,
+                                   StringComparison.OrdinalIgnoreCase))
+                {
+                    reason = S.Repair.BackupOtherVolume;
+                    continue;
+                }
+                string sizeText = MarkerValue(text, "volumeBytes");
+                if (sizeText.Length > 0 && size > 0 &&
+                    !string.Equals(sizeText, size.ToString(CultureInfo.InvariantCulture),
+                                   StringComparison.Ordinal))
+                {
+                    reason = S.Repair.BackupOtherVolume;
+                    continue;
+                }
+
+                DateTime made;
+                if (!DateTime.TryParse(MarkerValue(text, "when"), CultureInfo.InvariantCulture,
+                                       DateTimeStyles.None, out made))
+                {
+                    reason = S.Repair.BackupMissing;
+                    continue;
+                }
+                if ((DateTime.Now - made).TotalHours > MarkerMaxAgeHours)
+                {
+                    reason = S.Repair.BackupExpired;
+                    continue;
+                }
+
+                string dest = MarkerValue(text, "dest");
+                if (!IsInsideRepair(dest, repairRoot) || !HasAnyEntry(dest))
+                {
+                    reason = S.Repair.BackupMissing;
+                    continue;
+                }
+
+                when = made;
+                reason = "";
+                return dest;
+            }
+            return "";
+        }
+
+        // True khi co marker hop le: dung volume, con han, ban sao con ton tai.
+        public static bool CheckBackup(string drive, out string reason)
+        {
+            DateTime when;
+            return FindMarker(drive, out reason, out when).Length > 0;
         }
 
         public static bool HasBackup(string drive)
         {
-            try { return File.Exists(MarkerFile(drive)); }
-            catch { return false; }
+            string reason;
+            return CheckBackup(drive, out reason);
         }
 
         public static string LastBackup(string drive)
         {
-            try
-            {
-                if (!File.Exists(MarkerFile(drive))) return "";
-                return File.ReadAllText(MarkerFile(drive)).Trim();
-            }
-            catch { return ""; }
+            string reason;
+            DateTime when;
+            return FindMarker(drive, out reason, out when);
         }
 
         // chkdsk chi doc hoac /f. /f bat buoc da co ban sao luu va co quyen quan tri.
         public static int RunChkdsk(string drive, bool fix, Action<string> log)
         {
             string reason;
-            if (RefuseReason(drive, out reason))
+            if (RefuseReason(drive, fix, out reason))
             {
                 if (log != null) log(reason);
                 return -1;
@@ -406,7 +617,7 @@ namespace ShieldGate
             string args = fix ? letter + " /f" : letter;
             string output;
             if (log != null) log(fix ? S.Repair.ChkdskFixRunning : S.Repair.ChkdskReadRunning);
-            int code = Native.Run("chkdsk.exe", args,
+            int code = Native.Run(Native.SysExe("chkdsk.exe"), args,
                                   fix ? 6 * 60 * 60 * 1000 : 20 * 60 * 1000, out output);
             if (log != null && !string.IsNullOrEmpty(output))
             {

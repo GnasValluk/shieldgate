@@ -29,6 +29,15 @@ namespace ShieldGate
         // Bốn thiết lập chính đang có hiệu lực: chặn autorun, chặn autorun.inf,
         // bảo vệ Registry File Explorer và chạy nền.
         public bool FullyProtected { get { return Autorun && Ini && Registry && Running; } }
+
+        // Bảo vệ đang bật khi còn ít nhất một lớp chính đang chạy. Người dùng có
+        // quyền chủ động tắt một lớp (ví dụ chặn AutoRun); khi đó vẫn là đang bảo
+        // vệ, không phải "chưa bật", nếu không nút Bật bảo vệ sẽ bật lại lớp đã
+        // tắt. Bốn lớp này khớp với dòng Bảo vệ ở trang Tổng quan.
+        public bool ProtectionOn
+        {
+            get { return Running || Autorun || Ini || Registry; }
+        }
     }
 
     // Lựa chọn người dùng đã đặt, để bảo vệ nền chỉ áp đúng phần đang bật.
@@ -68,13 +77,38 @@ namespace ShieldGate
         private static readonly HashSet<string> ReadOnlyLogged =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // Ổ không ghi được (khoá ghi hoặc ACL) bị bỏ qua 5 phút; ổ ghi được chỉ
+        // thử lại mỗi phút. Trước đây mỗi 10 giây lại quét rồi ghi WARN, nhật ký
+        // máy bệnh 05/11 đầy dòng "chỉ đọc hoặc không có quyền ghi" của ổ D:.
+        private static readonly Dictionary<string, DateTime> UnwritableUntil =
+            new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, DateTime> WritableSeen =
+            new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+
         private static bool SkipReadOnly(string volume)
         {
-            if (!Native.IsReadOnlyVolume(volume)) return false;
-            bool first;
-            lock (ReadOnlyLogged) first = ReadOnlyLogged.Add(volume);
-            if (first) Log.Write(S.Log.DriveNotWritable(volume), "WARN");
-            return true;
+            DateTime until;
+            if (UnwritableUntil.TryGetValue(volume, out until))
+            {
+                if (DateTime.Now < until) return true;
+                UnwritableUntil.Remove(volume);
+            }
+            DateTime seen;
+            if (WritableSeen.TryGetValue(volume, out seen)
+                && (DateTime.Now - seen).TotalSeconds < 60)
+                return false;
+
+            if (Native.IsReadOnlyVolume(volume) || !Native.CanWrite(volume))
+            {
+                UnwritableUntil[volume] = DateTime.Now.AddMinutes(5);
+                WritableSeen.Remove(volume);
+                bool first;
+                lock (ReadOnlyLogged) first = ReadOnlyLogged.Add(volume);
+                if (first) Log.Write(S.Log.DriveNotWritable(volume), "WARN");
+                return true;
+            }
+            WritableSeen[volume] = DateTime.Now;
+            return false;
         }
 
         // ---------------------------------------------------------- chính sách
@@ -125,6 +159,32 @@ namespace ShieldGate
                 }
             }
             catch { }
+            return c;
+        }
+
+        // Đã có lựa chọn nào được lưu chưa. Lần đầu bật bảo vệ dùng bộ mặc định;
+        // từ lần sau tôn trọng đúng những mục người dùng đã tắt.
+        public static bool HasConfig
+        {
+            get
+            {
+                try { return File.Exists(Paths.GuardConfig); }
+                catch { return false; }
+            }
+        }
+
+        // Bộ công tắc dùng khi bấm "Bật bảo vệ": đúng lựa chọn đã lưu, không bật
+        // lại mục người dùng chủ động tắt. Chưa có lựa chọn nào thì dùng bộ mặc
+        // định của bản cài (chặn AutoRun, chặn autorun.inf, bảo vệ Registry).
+        public static GuardConfig EnableConfig()
+        {
+            GuardConfig c = LoadConfig();
+            if (!HasConfig)
+            {
+                c.Autorun = true;
+                c.Ini = true;
+                c.Registry = true;
+            }
             return c;
         }
 
@@ -273,8 +333,8 @@ namespace ShieldGate
         private static void RemoveLegacyTask()
         {
             string output;
-            Native.Run("schtasks.exe", "/End /TN \"" + LegacyTaskName + "\"", 10000, out output);
-            Native.Run("schtasks.exe", "/Delete /TN \"" + LegacyTaskName + "\" /F", 10000, out output);
+            Native.Run(Native.SysExe("schtasks.exe"), "/End /TN \"" + LegacyTaskName + "\"", 10000, out output);
+            Native.Run(Native.SysExe("schtasks.exe"), "/Delete /TN \"" + LegacyTaskName + "\" /F", 10000, out output);
         }
 
         private const string TaskXml =
@@ -347,7 +407,7 @@ namespace ShieldGate
         {
             if (!Native.IsAdmin()) return false;
             string output;
-            return Native.Run("schtasks.exe", "/Query /TN \"" + AppInfo.TaskName + "\"", 15000, out output) == 0;
+            return Native.Run(Native.SysExe("schtasks.exe"), "/Query /TN \"" + AppInfo.TaskName + "\"", 15000, out output) == 0;
         }
 
         private static string SelfPath()
@@ -480,7 +540,7 @@ namespace ShieldGate
         {
             string output;
             try { File.WriteAllText(Paths.StopFlag, "stop"); } catch { }
-            Native.Run("schtasks.exe", "/End /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
+            Native.Run(Native.SysExe("schtasks.exe"), "/End /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
             try { File.Delete(Paths.StopFlag); } catch { }
         }
 
@@ -505,7 +565,7 @@ namespace ShieldGate
             try { File.WriteAllText(xmlPath, xml, new UnicodeEncoding(false, true)); }
             catch (Exception e) { output = "không ghi được tệp tác vụ: " + e.Message; return false; }
 
-            int code = Native.Run("schtasks.exe",
+            int code = Native.Run(Native.SysExe("schtasks.exe"),
                 "/Create /XML \"" + xmlPath + "\" /TN \"" + AppInfo.TaskName + "\" /F",
                 30000, out output);
             if (code == 0)
@@ -519,7 +579,7 @@ namespace ShieldGate
             string xmlError = output;
             string simple = "/Create /TN \"" + AppInfo.TaskName + "\" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR \"\\\""
                             + Paths.GuardExe + "\\\" --watch\" /F";
-            int simpleCode = Native.Run("schtasks.exe", simple, 30000, out output);
+            int simpleCode = Native.Run(Native.SysExe("schtasks.exe"), simple, 30000, out output);
             if (simpleCode == 0) return true;
 
             output = "XML(" + code + "): " + (xmlError ?? "").Trim()
@@ -543,7 +603,7 @@ namespace ShieldGate
         {
             if (!Native.IsAdmin()) return false;
             string output;
-            return Native.Run("schtasks.exe", "/Query /TN \"" + AppInfo.TrayTaskName + "\"", 15000, out output) == 0;
+            return Native.Run(Native.SysExe("schtasks.exe"), "/Query /TN \"" + AppInfo.TrayTaskName + "\"", 15000, out output) == 0;
         }
 
         private static bool RegisterTrayTask(out string output)
@@ -557,7 +617,7 @@ namespace ShieldGate
             try { File.WriteAllText(xmlPath, xml, new UnicodeEncoding(false, true)); }
             catch (Exception e) { output = "không ghi được tệp tác vụ: " + e.Message; return false; }
 
-            bool made = Native.Run("schtasks.exe",
+            bool made = Native.Run(Native.SysExe("schtasks.exe"),
                 "/Create /XML \"" + xmlPath + "\" /TN \"" + AppInfo.TrayTaskName + "\" /F",
                 30000, out output) == 0;
             try { File.Delete(xmlPath); } catch { }
@@ -572,14 +632,14 @@ namespace ShieldGate
                 Log.Write(S.Log.TrayCreateFailed((output ?? "").Trim()), "WARN");
                 return;
             }
-            Native.Run("schtasks.exe", "/Run /TN \"" + AppInfo.TrayTaskName + "\"", 20000, out output);
+            Native.Run(Native.SysExe("schtasks.exe"), "/Run /TN \"" + AppInfo.TrayTaskName + "\"", 20000, out output);
         }
 
         private static void StopTray()
         {
             string output;
-            Native.Run("schtasks.exe", "/End /TN \"" + AppInfo.TrayTaskName + "\"", 20000, out output);
-            Native.Run("schtasks.exe", "/Delete /TN \"" + AppInfo.TrayTaskName + "\" /F", 20000, out output);
+            Native.Run(Native.SysExe("schtasks.exe"), "/End /TN \"" + AppInfo.TrayTaskName + "\"", 20000, out output);
+            Native.Run(Native.SysExe("schtasks.exe"), "/Delete /TN \"" + AppInfo.TrayTaskName + "\" /F", 20000, out output);
         }
 
         // Bảo đảm có biểu tượng khay khi bảo vệ nền đang chạy (kể cả bản cài từ trước).
@@ -598,7 +658,7 @@ namespace ShieldGate
                 }
             }
             string output;
-            Native.Run("schtasks.exe", "/Run /TN \"" + AppInfo.TrayTaskName + "\"", 20000, out output);
+            Native.Run(Native.SysExe("schtasks.exe"), "/Run /TN \"" + AppInfo.TrayTaskName + "\"", 20000, out output);
         }
 
         public static double HeartbeatAge()
@@ -656,7 +716,7 @@ namespace ShieldGate
             catch { }
             if (taskOk)
             {
-                Native.Run("schtasks.exe", "/Run /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
+                Native.Run(Native.SysExe("schtasks.exe"), "/Run /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
                 bool alive = false;
                 for (int i = 0; i < 16; i++)
                 {
@@ -686,8 +746,8 @@ namespace ShieldGate
                 Thread.Sleep(500);
             }
             string output;
-            Native.Run("schtasks.exe", "/End /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
-            bool deleted = Native.Run("schtasks.exe", "/Delete /TN \"" + AppInfo.TaskName + "\" /F",
+            Native.Run(Native.SysExe("schtasks.exe"), "/End /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
+            bool deleted = Native.Run(Native.SysExe("schtasks.exe"), "/Delete /TN \"" + AppInfo.TaskName + "\" /F",
                                       20000, out output) == 0;
             StopTray();
             if (log != null) log(deleted ? S.Cli.TaskRemoved : S.Cli.TaskMissing);
@@ -1036,6 +1096,9 @@ namespace ShieldGate
         private static void CleanRoot(string volume)
         {
             if (SkipReadOnly(volume)) return;
+            // GUI co the dang quet/cach ly cung o: bo qua vong nay thay vi
+            // quet lai toan bo thu muc gia roi bao "khong tim thay tep".
+            if (CleanLock.IsBusy()) return;
             UsbScanResult root = UsbScan.DetectRoot(volume);
             List<UsbItem> auto = new List<UsbItem>();
             foreach (UsbItem it in root.Items)
@@ -1044,16 +1107,22 @@ namespace ShieldGate
 
             int failed = 0, stopped = 0;
             string batch = "";
-            UsbScan.Apply(root, auto, out failed, out batch, out stopped, null);
-            int done = auto.Count - failed;
+            // Apply tra ve so tep da di chuyen, khong phai so muc da chon:
+            // truoc day "auto.Count - failed" cho ra so am (-67).
+            int done = UsbScan.Apply(root, auto, out failed, out batch, out stopped, null);
             int unhidden = 0;
-            if (done > 0) unhidden = UsbScan.Unhide(volume, null);
+            if (done > 0)
+            {
+                unhidden = UsbScan.Unhide(volume, null);
+                if (ReinfectWatch.Observe(volume, done, DateTime.Now)) ReportReinfection(volume);
+            }
             Log.Write(S.Log.AutoScan(volume, root.Files, root.Items.Count, done, failed, unhidden, stopped));
         }
 
         private static void ScanAndClean(string volume)
         {
             if (SkipReadOnly(volume)) return;
+            if (CleanLock.IsBusy()) return;
             UsbScanResult scan = UsbScan.Detect(volume, null, null);
             if (scan.Truncated)
                 Log.Write(S.Log.WatchScanTruncated(volume), "WARN");
@@ -1071,23 +1140,94 @@ namespace ShieldGate
             string batch = "";
             if (auto.Count > 0)
             {
-                UsbScan.Apply(scan, auto, out failed, out batch, out stopped, null);
-                done = auto.Count - failed;
+                done = UsbScan.Apply(scan, auto, out failed, out batch, out stopped, null);
                 review += failed;
             }
             int unhidden = 0;
-            if (done > 0) unhidden = UsbScan.Unhide(volume, null);
+            if (done > 0)
+            {
+                unhidden = UsbScan.Unhide(volume, null);
+                if (ReinfectWatch.Observe(volume, done, DateTime.Now)) ReportReinfection(volume);
+            }
             Settings.SetDriveScan(volume, scan.Files, review);
             Settings.SetDriveEvent(volume, done, review);
             Log.Write(S.Log.AutoScan(volume, scan.Files, scan.Items.Count, done,
                                       review, unhidden, stopped));
         }
 
+        // Cùng một ổ bị nhiễm lại vài lần trong vài phút: nguồn lây đang chạy trên
+        // máy chứ không nằm trên ổ. Báo rõ thay vì lặng lẽ dọn tiếp mỗi 10 giây.
+        public static void ReportReinfection(string volume)
+        {
+            bool afterFix = false;
+            try
+            {
+                DateTime t = Settings.PcFixEventTime;
+                afterFix = t != DateTime.MinValue
+                           && (DateTime.Now - t).TotalMinutes < 60;
+            }
+            catch { }
+
+            // Sửa máy rồi mà ổ vẫn nhiễm lại: đừng bảo người dùng sửa lại lần nữa.
+            // Nguồn lây nằm ngoài các mục đã thấy (driver/rootkit hoặc tiến trình
+            // được bảo vệ), chỉ quét offline mới xử lý được.
+            if (afterFix)
+            {
+                Log.Write(S.Log.DriveReinfectedAfterFix(volume), "ERROR");
+                try { Events.Add(Events.KindBehavior, "ERROR", volume, S.Events.DriveReinfected(volume)); }
+                catch { }
+            }
+            else
+            {
+                Log.Write(S.Log.DriveReinfected(volume), "WARN");
+                try { Events.Add(Events.KindBehavior, "WARN", volume, S.Events.DriveReinfected(volume)); }
+                catch { }
+            }
+            Settings.SetReinfectEvent(volume, afterFix);
+            HuntSource(volume);
+        }
+
+        private static int _hunting;
+        private static DateTime _lastHunt = DateTime.MinValue;
+
+        // Quét máy ngay khi phát hiện vòng lặp nhiễm lại, chỉ đọc và ghi nhật ký.
+        // Nhờ vậy log có tên tiến trình/tác vụ/dịch vụ cụ thể, kể cả tác vụ ẩn
+        // dưới \Microsoft\..., thay vì bắt người dùng tự đoán.
+        private static void HuntSource(string volume)
+        {
+            if ((DateTime.Now - _lastHunt).TotalMinutes < 10) return;
+            if (Interlocked.CompareExchange(ref _hunting, 1, 0) != 0) return;
+            _lastHunt = DateTime.Now;
+
+            Thread t = new Thread(delegate()
+            {
+                try
+                {
+                    List<PcItem> found = PcScan.Detect(null, null);
+                    if (found.Count > 0)
+                    {
+                        Log.Write(S.Log.HuntFound(volume, found.Count), "WARN");
+                        PcScan.LogFindings(found);
+                    }
+                    else Log.Write(S.Log.HuntClean(volume));
+                }
+                catch (Exception e)
+                {
+                    try { Log.Write(S.Log.HuntError(e.Message), "ERROR"); }
+                    catch { }
+                }
+                finally { Interlocked.Exchange(ref _hunting, 0); }
+            });
+            t.IsBackground = true;
+            try { t.Start(); }
+            catch { Interlocked.Exchange(ref _hunting, 0); }
+        }
+
         public static bool StartWatchNow()
         {
             if (!Native.IsAdmin()) return false;
             string output;
-            return Native.Run("schtasks.exe", "/Run /TN \"" + AppInfo.TaskName + "\"",
+            return Native.Run(Native.SysExe("schtasks.exe"), "/Run /TN \"" + AppInfo.TaskName + "\"",
                               20000, out output) == 0;
         }
 
@@ -1140,6 +1280,13 @@ namespace ShieldGate
             EnsureSnapshot();
             bool ok = true;
 
+            // Ghi lựa chọn trước khi sửa registry: vòng lặp nền đọc guard.cfg mỗi
+            // 60 giây. Nếu ghi sau, nó có thể đọc bản cũ và áp lại đúng phần vừa
+            // được trả về, khiến công tắc người dùng vừa tắt tự bật lên.
+            // Khi tắt toàn bộ bảo vệ thì giữ nguyên guard.cfg, để lần bật sau
+            // dùng lại đúng lựa chọn cũ thay vì bật lại mọi mục.
+            if (guardOn) SaveConfig(autorun, ini, wsh, registry, writeProtect, blockExec);
+
             if (autorun)
             {
                 ok &= Reg.Write(RegistryHive.LocalMachine, ExplorerHklm, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
@@ -1177,7 +1324,7 @@ namespace ShieldGate
                 if (created)
                 {
                     try { File.Delete(Paths.StopFlag); } catch { }
-                    Native.Run("schtasks.exe", "/Run /TN \"" + AppInfo.TaskName + "\"",
+                    Native.Run(Native.SysExe("schtasks.exe"), "/Run /TN \"" + AppInfo.TaskName + "\"",
                                20000, out output);
                     for (int i = 0; i < 10; i++)
                     {
@@ -1190,14 +1337,13 @@ namespace ShieldGate
             else
             {
                 try { File.WriteAllText(Paths.StopFlag, "stop"); } catch { }
-                Native.Run("schtasks.exe", "/End /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
-                Native.Run("schtasks.exe", "/Delete /TN \"" + AppInfo.TaskName + "\" /F", 20000, out output);
+                Native.Run(Native.SysExe("schtasks.exe"), "/End /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
+                Native.Run(Native.SysExe("schtasks.exe"), "/Delete /TN \"" + AppInfo.TaskName + "\" /F", 20000, out output);
                 StopTray();
                 try { File.Delete(Paths.StopFlag); } catch { }
                 try { File.Delete(Paths.Heartbeat); } catch { }
             }
 
-            SaveConfig(autorun, ini, wsh, registry, writeProtect, blockExec);
             Log.Write(S.Log.SettingsApplied(autorun, ini, wsh, registry, guardOn, ok));
             if (log != null) log(ok ? S.Cli.Configured : S.Cli.ConfigurePartial);
             return ok;

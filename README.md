@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/license-MIT-1f5e3d?style=flat-square" alt="MIT license">
   <img src="https://img.shields.io/badge/platform-Windows%207%2B-0078d4?style=flat-square" alt="Windows 7 or later">
   <img src="https://img.shields.io/badge/.NET%20Framework-4.0-5b6472?style=flat-square" alt=".NET Framework 4.0">
-  <img src="https://img.shields.io/badge/download-480%20KB-5b6472?style=flat-square" alt="About 480 KB">
+  <img src="https://img.shields.io/badge/download-530%20KB-5b6472?style=flat-square" alt="About 530 KB">
 </p>
 
 <p align="center">
@@ -42,10 +42,37 @@ Vietnamese and English interface.
 | <img src="docs/screenshots/devices.png" alt="Peripheral devices and event timeline"> | <img src="docs/screenshots/drive-repair.png" alt="Drive repair with icon toolbar"> |
 | Inventory with VID/PID/serial, trust marks, event timeline | Diagnose, preview, back up, check the file system; icons name themselves on hover |
 
+## What is new in 2.1
+
+- **Re-infection loop is treated as a PC problem.** If one drive is cleaned three
+  times in ten minutes, ShieldGate logs a warning, shows a tray balloon, and starts
+  a read-only source hunt on the PC in the background. The log then names the
+  process, task, service or file instead of only "N suspicious items".
+- **Fix order changed: stop the source first.** `Check this PC` now stops processes
+  and services, then removes tasks/WMI, then startup entries, and only then
+  quarantines files. A file is no longer removed while the process holding it is
+  still running.
+- **Hidden and `\Microsoft\...` scheduled tasks are scanned.** Task Scheduler hides
+  both by default. The XML is read directly, `[hidden]` is shown in the result, and
+  a task under `\Microsoft\` is reported only when its command targets a
+  user-writable folder, a script host or an odd numeric executable.
+- **Services and drivers are checked.** A service whose `ImagePath` points to
+  `ProgramData`, `AppData`, `Temp`, `Users\Public` or an unsigned binary outside
+  Windows/Program Files is reported. The registry key is backed up, then the
+  service is stopped and deleted, and its image is quarantined afterwards.
+  Windows Defender's own platform folder is explicitly excluded.
+- **Escalation after a fix.** If the drive is re-infected within 60 minutes after
+  `Check this PC` was fixed, the warning changes to "the source may be a
+  driver/rootkit — run Microsoft Defender Offline" instead of asking you to clean
+  the same items again.
+
 ## What is new in 2.0
 
 - **Rules live in `rules.json`.** File names, extensions and score weights can be
-  updated without rebuilding. A missing or corrupt file falls back to the
+  updated without rebuilding. The file is read only from the data folder; a
+  `rules.json` beside the executable is ignored with a warning. Your entries are
+  merged into the built-in defaults, so an older or partial file cannot remove
+  extensions the program relies on. A missing or corrupt file falls back to the
   built-in defaults.
 - **New detectors.** Double extensions (`report.pdf.exe`), right-to-left
   override characters in names, scripts at the drive root, `.url`/`.scf` files
@@ -55,7 +82,8 @@ Vietnamese and English interface.
   with VID/PID/serial. Trust is stored by a stable device key, never by drive
   letter.
 - **Event timeline.** Device, scan, behaviour, protection and repair events in
-  one local timeline, exportable to CSV or HTML.
+  one local timeline, exportable to CSV or HTML. CSV cells that start with
+  `=`, `+`, `-` or `@` are prefixed with `'` so a spreadsheet does not run them.
 - **Drive repair page.** Diagnose, read-test, preview and create a backup, run
   `chkdsk`, read the boot sector. Every write refuses the system drive.
 - **Optional write protection and execution blocking.** Both off by default,
@@ -100,11 +128,19 @@ wrong path, and Explorer registry keys.
 - Quarantine runs only on the items you keep selected, and can be undone. Data
   inside a nameless folder moves to the drive root; nothing is overwritten, and
   duplicates get `(1)`.
+- Inside a fake folder only executable payloads (`.exe`, `.dll`, `.dat`, `.lnk`,
+  scripts, `desktop.ini`) are quarantined. Documents the worm renamed to Base64
+  (`.doc`, `.docx`, `.pdf`, …) stay where they are, and such a folder is not
+  deleted. One ShieldGate process cleans a drive at a time, so the GUI and the
+  background watch never fight over the same files.
 - Fix removes malicious Run/Winlogon/MountPoints/`.lnk` values, disables tasks,
   deletes WMI consumers and bindings and stops related processes. Registry
-  repair runs `reg export` first. Every action is logged.
-- **Unhide files** moves data out of nameless folders and clears the hidden
-  attribute across a drive.
+  repair runs `reg export` first and refuses to change a key if that backup
+  failed (exit code checked, file must exist). Every action is logged.
+- **Unhide files** moves data out of nameless folders. The automatic pass only
+  clears items marked Hidden **and** System (the worm's `attrib +h +s`), so a
+  real `desktop.ini`, `$RECYCLE.BIN` and folders you hid yourself keep their
+  attributes; the button also clears Hidden-only items after you confirm.
 
 ## Protection
 
@@ -169,13 +205,19 @@ ShieldGate.exe --devices                  list peripheral devices
 ShieldGate.exe --events [n]               last n timeline events
 ShieldGate.exe --repair E:\               diagnose a drive (read-only)
 ShieldGate.exe --defender <path>          manual Windows Defender scan
+ShieldGate.exe --import-rules <file> --yes  replace rules.json after a validated import
 ShieldGate.exe --install                  install background protection
 ShieldGate.exe --install --blockscript    also block Windows Script Host
 ShieldGate.exe --uninstall                remove protection, restore Windows
+ShieldGate.exe --uninstall --purge-data   also delete quarantine and drive backups
 ShieldGate.exe --watch                    background worker, used by the task
 ShieldGate.exe --tray                     tray icon worker
 ShieldGate.exe --selftest                 self-test in a temp folder
 ```
+
+- `--uninstall` keeps `quarantine` and `repair` (quarantined samples and drive
+  backups) inside the data folder by default; `--purge-data` deletes them too.
+  The GUI asks with a switch that is on by default.
 
 - `--scan` exits `0` when clean, `2` when it finds items and `1` on error. It
   stops after 150,000 files or 300 seconds and reports that the drive was only
@@ -185,6 +227,10 @@ ShieldGate.exe --selftest                 self-test in a temp folder
   confirmation.
 - `--defender` exits `0` when clean, `2` when Defender reports a threat and `1`
   on error.
+- `--import-rules` parses the file first, keeps the previous one as
+  `rules.json.bak`, then replaces the rules file in the data folder. It refuses
+  to run without `--yes`, and exits `1` on a missing, oversized (>1 MB) or
+  unreadable file.
 - Flags work with `--` or `-`.
 
 ## Data
@@ -196,10 +242,12 @@ Default folder: `C:\ProgramData\ShieldGate`, falling back to
 settings.txt        settings, scan counters, tray notice state
 guard.cfg           protection choices
 rules.json          detection rules and weights (created from defaults)
+rules.json.bak      previous rules file, kept by --import-rules
 devices.json        device trust store, keyed by instance/VID/PID/serial
 events.tsv          event timeline, rotated at 2 MB
 last_scan.txt       last machine scan result
 log\shieldgate.log  activity log, rotated at 5 MB
+clean.lock          one cleaner per data folder at a time (GUI vs background)
 quarantine\         quarantined files and manifests
 backup\             Windows config and registry backups
 repair\             drive backups and backup markers
