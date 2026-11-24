@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/license-MIT-1f5e3d?style=flat-square" alt="MIT license">
   <img src="https://img.shields.io/badge/platform-Windows%207%2B-0078d4?style=flat-square" alt="Windows 7 or later">
   <img src="https://img.shields.io/badge/.NET%20Framework-4.0-5b6472?style=flat-square" alt=".NET Framework 4.0">
-  <img src="https://img.shields.io/badge/download-590%20KB-5b6472?style=flat-square" alt="About 590 KB">
+  <img src="https://img.shields.io/badge/download-618%20KB-5b6472?style=flat-square" alt="About 618 KB">
 </p>
 
 <p align="center">
@@ -43,7 +43,24 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
 | <img src="docs/screenshots/devices.png" alt="Peripheral devices and event timeline"> | <img src="docs/screenshots/drive-repair.png" alt="Drive repair with icon toolbar"> |
 | Inventory with VID/PID/serial, trust marks, event timeline | Diagnose, preview, back up, check the file system; icons name themselves on hover |
 
-## What is new in 2.1
+## What is new in 2.1–2.3
+
+- **A folder can be scanned without touching the whole drive.** `Scan a folder…`
+  on the USB page picks any folder outside the system drive, then the same
+  detection, quarantine, unhide and rename actions run on it. Drive-only actions
+  such as `autorun.inf` vaccination stay hidden in folder mode. `--scan` accepts
+  a folder path too.
+- **Original document names can be restored.** The worm renamed documents to
+  Base64 inside fake folders. `Restore original names` decodes only names that
+  become a valid document name (no path or control characters, a document
+  extension, never a payload extension), runs only inside fake or nameless
+  folders, never overwrites and logs every rename.
+- **Fake folders show the data they still hold.** A scan reports how many user
+  files were kept because only executable payloads are quarantined, instead of
+  making the folder look empty.
+- **The Protect switch turns off again.** Turning every protection switch off
+  now writes an all-off `guard.cfg` and remembers the previous choices in
+  `guard.last`, so the switch no longer springs back on after a restart.
 
 - **Signatures are verified, not just detected.** Executables and DLLs go through
   `WinVerifyTrust`; Windows catalog signatures are checked for system files, and
@@ -170,7 +187,7 @@ wrong path, and Explorer registry keys.
 | Page | Shortcut | Purpose |
 |---|---|---|
 | Overview | `Ctrl+1` | State, last check, quarantine restore and cleanup |
-| USB scan | `Ctrl+2` | Scan a removable drive, choose items, quarantine, unhide |
+| USB scan | `Ctrl+2` | Scan a removable drive or a chosen folder, choose items, quarantine, unhide, restore Base64 names |
 | Protection | `Ctrl+3` | AutoRun/script/registry policy, write protection, execution blocking |
 | Devices | `Ctrl+4` | Peripheral inventory, trust marks, event timeline, export |
 | Drive repair | `Ctrl+5` | Diagnose, read-test, back up, `chkdsk`, boot-sector report, Defender |
@@ -244,9 +261,11 @@ Download `ShieldGate.exe` from Releases and run it. First start asks for a data
 folder and a language (Vietnamese or English); the choice is stored in
 `%LOCALAPPDATA%\ShieldGate\setup.ini`. Delete that file to run setup again.
 
-1. Open **USB scan**, choose a drive, click **Scan USB**.
+1. Open **USB scan**, choose a drive, click **Scan USB**. To check one folder
+   instead, click **Scan a folder…**.
 2. Clear the items you want to keep, then click **Quarantine**.
-3. If data is still hidden, use **Unhide files**.
+3. If data is still hidden, use **Unhide files**. If documents inside a fake
+   folder have Base64 names, use **Restore original names**.
 4. Restore quarantined files from **Overview**.
 5. Check **Devices** to see what is connected and mark familiar hardware.
 6. Use **Drive repair** only when a drive misbehaves; preview the backup first.
@@ -260,7 +279,8 @@ and `--selftest` do not.
 ```
 ShieldGate.exe                            GUI
 ShieldGate.exe --status                   protection state
-ShieldGate.exe --scan E:\                 read-only scan
+ShieldGate.exe --scan E:\                 read-only scan of a drive
+ShieldGate.exe --scan "D:\folder"         read-only scan of one folder
 ShieldGate.exe --scan E:\ --json          same scan as JSON for scripts
 ShieldGate.exe --devices                  list peripheral devices
 ShieldGate.exe --events [n]               last n timeline events
@@ -284,13 +304,13 @@ ShieldGate.exe --help                     list commands and exit codes
   The GUI asks with a switch that is on by default. The VirusTotal key is always
   deleted.
 
-- `--scan` exits `0` when clean, `2` when it finds items and `1` on error. It
-  stops after 150,000 files or 300 seconds and reports that the drive was only
-  partly checked. With `--json`, stdout is one JSON object: `drive`, `files`,
-  `items`, `seconds`, `truncated`, `readOnly`, `counts`, `warnings` and
-  `findings[]` (each with `path`, `relative`, `kind`, `score`, `high`,
-  `flagOnly`, `size`, `codes`, `reason`). Strings are escaped, and no file
-  contents are included.
+- `--scan` accepts a drive or a folder. It exits `0` when clean, `2` when it
+  finds items and `1` on error. It stops after 150,000 files or 300 seconds and
+  reports that the target was only partly checked. With `--json`, stdout is one
+  JSON object: `drive`, `files`, `items`, `seconds`, `truncated`, `readOnly`,
+  `counts`, `warnings` and `findings[]` (each with `path`, `relative`, `kind`,
+  `score`, `high`, `flagOnly`, `size`, `codes`, `reason`). Strings are escaped,
+  and no file contents are included.
 - `--repair` only diagnoses and prints results. It never backs up, runs
   `chkdsk` or writes to a drive; those actions live in the GUI with explicit
   confirmation.
@@ -314,6 +334,7 @@ Default folder: `C:\ProgramData\ShieldGate`, falling back to
 ```
 settings.txt        settings and scan counters
 guard.cfg           protection choices
+guard.last          last non-empty protection choices, used when all switches are off
 rules.json          detection rules and weights (created from defaults)
 rules.json.bak      previous rules file, kept by --import-rules
 devices.json        device trust store, keyed by instance/VID/PID/serial

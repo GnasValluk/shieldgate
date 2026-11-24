@@ -123,6 +123,15 @@ namespace ShieldGate
             return !string.IsNullOrEmpty(ext) && PayloadExts.Contains(ext);
         }
 
+        // Đuôi tài liệu/dữ liệu người dùng, dùng khi khôi phục tên Base64.
+        // Lấy từ doubleExtDecoys (đúng tập tài liệu phổ biến) và luôn loại payload
+        // để không bao giờ đổi tên một tệp chạy được.
+        public bool IsDocumentExt(string ext)
+        {
+            return !string.IsNullOrEmpty(ext) && DoubleExtDecoys.Contains(ext)
+                   && !PayloadExts.Contains(ext);
+        }
+
         // Duoi tep duoc tinh la "dang ngo" khi xet bung no ghi: .lnk, script va
         // payload. Tai lieu hang loat (.txt, .jpg...) khong duoc coi la dang ngo.
         public bool IsBurstRiskExt(string ext)

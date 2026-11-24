@@ -1309,3 +1309,44 @@ Bằng chứng:
 Chưa đo trên thiết bị BadUSB thật (môi trường không có). Kịch bản §9.2 của
 `docs/design-badusb.md` vẫn là việc của bản phát hành. Việc tiếp theo: W23
 (named pipe) nếu được duyệt; nếu không thì giữ mô hình tệp + ACL.
+
+### 2026-11-24 — phát hành 2.3: quét thư mục, tên Base64, sửa công tắc
+
+Đã làm:
+
+- **Gộp W7–W22:** commit `30dd1e6` (VirusTotal opt-in, CLI JSON, BadUSB, chữ ký,
+  đường dẫn dài). Không đổi hành vi mặc định ngoài các mục đã duyệt.
+- **Sửa công tắc Protect không tắt được:** `Guard.Configure` bỏ qua `SaveConfig`
+  khi mọi công tắc tắt, còn `guard.cfg` cũ vẫn còn `registry=1`, nên `GetStatus`
+  trả lại trạng thái bật. Nay luôn ghi `guard.cfg`; khi tất cả tắt thì sao lưu
+  lựa chọn trước đó sang `guard.last`, và `EnableConfig` đọc `guard.last` nếu
+  `guard.cfg` trống/không có. Commit `f070e90`, self-test 12d, `total` 72 → 73.
+- **Quét một thư mục:** `UsbScan.Detect` nhận cả gốc ổ và thư mục; thêm
+  `UsbScanResult.IsDriveRoot`, `KeptFiles`, `Base64Names`; `UsbScan.IsDriveRoot`.
+  UI có link `Quét thư mục…`, từ chối ổ hệ thống, ẩn tiêm autorun trong chế độ
+  thư mục, và dùng `CurrentRoot()` cho quét/cách ly/unhide/quét lại. CLI `--scan`
+  đã nhận đường dẫn thư mục; help ghi rõ.
+- **Khôi phục tên Base64:** `UsbRestore.DecodeName` chỉ nhận Base64 giải ra tên
+  tài liệu hợp lệ (không có `\`, `/`, ký tự điều khiển; đuôi trong
+  `Rules.DoubleExtDecoys`; không phải đuôi payload). `RenameBase64` chỉ chạy
+  trong thư mục giả/không tên, không ghi đè, ghi log từng lần đổi. UI có link
+  `Khôi phục tên gốc (n)` kèm hộp xác nhận; dùng cờ bận `_unhiding` sẵn có.
+- **Hiện dữ liệu còn trong thư mục giả:** `KeptFiles` đếm tài liệu được giữ lại;
+  kết quả quét hiện cảnh báo "còn n tệp dữ liệu trong thư mục giả" thay vì để
+  thư mục trông rỗng.
+- **Self-test 66–67:** giải mã/đổi tên Base64 (đúng, tên thường, payload, thoát
+  thư mục, trùng tên) và quét thư mục con (không phải gốc ổ, đếm tài liệu giữ).
+  `total` 73 → 75.
+- **Phiên bản:** `AppInfo.Version` 2.1 → 2.3; `AssemblyInfo` 2.3.0.0. README
+  thêm mục 2.1–2.3, lệnh quét thư mục, `guard.last`; roadmap cập nhật trạng thái.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  619 KB, SHA256 `e9c342a41f2587039fc07ce815883e6a7fb697e86d1a1e80d949e0e8f0f16463`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 75/75 phép kiểm tra.`,
+  exit 0.
+
+Chưa chạy được phần cần phần cứng của checklist (USB FAT32/exFAT/NTFS, công tắc
+khoá ghi, bàn phím ngoài/Bluetooth/composite, Windows 7 x86, `chkdsk /f`, UAC
+không admin). W23 (named pipe) vẫn chờ thiết kế được duyệt.

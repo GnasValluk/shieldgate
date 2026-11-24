@@ -33,7 +33,7 @@ namespace ShieldGate
             Policy.PauseAllowed = false;
 
             int passed = 0;
-            int total = 73;
+            int total = 75;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -894,6 +894,64 @@ namespace ShieldGate
                 catch { }
             }
             check(S.Selftest.FakeFolderKeepsDocs, fakeKeep);
+
+            // 35b. Tên Base64: chỉ giải mã tài liệu hợp lệ; đổi tên trong thư mục
+            //      người dùng chọn, không ghi đè và không chạm payload.
+            bool base64Ok = false;
+            string b64Root = Path.Combine(usb, "Docsument");
+            try
+            {
+                Directory.CreateDirectory(b64Root);
+                File.WriteAllText(Path.Combine(b64Root, "1.exe"), "MZ", new UTF8Encoding(false));
+                string good = Convert.ToBase64String(Encoding.UTF8.GetBytes("bao cao.docx"));
+                File.WriteAllText(Path.Combine(b64Root, good), "data", new UTF8Encoding(false));
+
+                bool decodeOk = UsbRestore.DecodeName(good) == "bao cao.docx"
+                    && UsbRestore.DecodeName("tai-lieu.docx") == null
+                    && UsbRestore.DecodeName(Convert.ToBase64String(
+                           Encoding.UTF8.GetBytes("virus.exe"))) == null
+                    && UsbRestore.DecodeName(Convert.ToBase64String(
+                           Encoding.UTF8.GetBytes("..\\x.docx"))) == null;
+
+                int b64Skipped;
+                int renamed = UsbRestore.RenameBase64(b64Root, null, null, out b64Skipped);
+                bool b64Moved = renamed == 1 && b64Skipped == 0
+                    && File.Exists(Path.Combine(b64Root, "bao cao.docx"))
+                    && !File.Exists(Path.Combine(b64Root, good));
+
+                string clash = Convert.ToBase64String(Encoding.UTF8.GetBytes("trung ten.pdf"));
+                File.WriteAllText(Path.Combine(b64Root, clash), "a", new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(b64Root, "trung ten.pdf"), "b", new UTF8Encoding(false));
+                int skipped2;
+                int renamed2 = UsbRestore.RenameBase64(b64Root, null, null, out skipped2);
+
+                base64Ok = decodeOk && b64Moved && renamed2 == 0 && skipped2 == 1
+                    && File.Exists(Path.Combine(b64Root, "trung ten.pdf"));
+            }
+            catch { }
+            check(S.Selftest.Base64Name, base64Ok);
+
+            // 35c. Quét một thư mục con thay vì cả ổ: vẫn nhận diện được và đếm
+            //      đúng tài liệu giữ lại trong thư mục giả.
+            bool folderScanOk = false;
+            try
+            {
+                string subDir = Path.Combine(usb, "Tai lieu", "sub");
+                string fake = Path.Combine(subDir, "Doscument");
+                Directory.CreateDirectory(fake);
+                File.WriteAllText(Path.Combine(fake, "1.exe"), "MZ", new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(fake, "a.docx"), "data", new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(subDir, "run.vbs"),
+                    "CreateObject(\"WScript.Shell\").Run \"cmd.exe\"\r\n", new UTF8Encoding(false));
+
+                UsbScanResult subScan = UsbScan.Detect(subDir, null, null);
+                folderScanOk = !subScan.IsDriveRoot
+                    && string.Equals(subScan.Root, subDir, StringComparison.OrdinalIgnoreCase)
+                    && subScan.Items.Count >= 1
+                    && subScan.KeptFiles == 1;
+            }
+            catch { }
+            check(S.Selftest.FolderScan, folderScanOk);
 
             // 36. Tệp đã biến mất không phải lỗi: phải trả error rỗng để bên gọi
             //     bỏ qua thay vì ghi ERROR và trừ vào bộ đếm (log có 286 lỗi giả).

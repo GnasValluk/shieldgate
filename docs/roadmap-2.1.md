@@ -90,9 +90,10 @@ Mục tiêu: đóng A1–A9 trước khi chạm vào bất kỳ tính năng nào
 | W6 ✅ | `rules.json` chỉ đọc từ thư mục dữ liệu + merge theo phiên bản (A9) | `Rules.cs`, `Program.cs` | File v2 thiếu khoá mới vẫn có khoá mới; không xoá được đuôi mặc định; file cạnh exe bị bỏ qua | `version` 3 + `--import-rules` |
 | W7 ✅ | Xác minh chữ ký bằng `WinVerifyTrust` (A7) | `Signature.cs` mới, `Detect.cs` | Tệp chưa ký → `Unsigned`; tệp hệ thống có ký → `Signed` (bỏ qua nếu máy không có) | Không gọi mạng (`WTD_CACHE_ONLY_URL_RETRIEVAL`) |
 
-Trạng thái 23/11: **W1–W22 đã xong** (W20 là thiết kế đã duyệt mặc định, W21
-đo tốc độ gõ, W22 nối shell và cảnh báo BadUSB chỉ cảnh báo); mốc 2.1.0 hoàn
-tất và 2.1.1 đang chạy. Chi tiết và bằng chứng ở mục nhật ký cuối `plan.md`.
+Trạng thái 24/11: **W1–W22 đã xong** (W20 là thiết kế đã duyệt mặc định, W21
+đo tốc độ gõ, W22 nối shell và cảnh báo BadUSB chỉ cảnh báo); bản 2.3 thêm quét
+một thư mục, khôi phục tên Base64 và sửa công tắc Protect. Chi tiết và bằng
+chứng ở mục nhật ký cuối `plan.md`.
 Trước W5 đã sửa xong F1–F5 (mục 2b)
 vì log thực địa cho thấy bản 2.0 đang thu gom tài liệu người dùng và ghi hàng trăm
 lỗi giả. W7 xác minh chữ ký nhúng bằng `WinVerifyTrust` và tra catalog cho tệp hệ
@@ -119,7 +120,8 @@ cooldown), `ProcessWatch` (poll 1 giây, Toolhelp cho cha), mục `badusb` trong
 `rules.json` phiên bản 6, công tắc trong trang Bảo vệ và cảnh báo WARN kèm
 balloon; chỉ cảnh báo, không tắt thiết bị, không đọc mã phím/command line.
 Việc tiếp theo: W23 (named pipe) nếu được duyệt; còn thiếu đo trên thiết bị
-BadUSB thật.
+BadUSB thật. Bản 2.3 đã thêm quét thư mục, khôi phục tên Base64 và sửa công tắc
+Protect (xem `plan.md` 24/11).
 
 ### W1 — chi tiết
 

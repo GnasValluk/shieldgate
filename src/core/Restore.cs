@@ -368,6 +368,100 @@ namespace ShieldGate
             return Rules.Current.IsPayloadExt(System.IO.Path.GetExtension(n));
         }
 
+        // Virus đổi tên tài liệu thành Base64 của tên gốc (UTF-8). Chỉ nhận khi
+        // giải mã ra một tên tài liệu hợp lệ: không có ký tự đường dẫn, không có
+        // ký tự điều khiển, và đuôi nằm trong danh sách tài liệu (không phải payload).
+        public static string DecodeName(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName)) return null;
+            string n = fileName.Trim();
+            if (n.Length < 8 || n.Length > 400) return null;
+
+            int pad = 0;
+            bool sawPad = false;
+            for (int i = 0; i < n.Length; i++)
+            {
+                char c = n[i];
+                if (c == '=')
+                {
+                    sawPad = true;
+                    if (++pad > 2) return null;
+                    continue;
+                }
+                if (sawPad) return null;   // '=' chỉ được nằm ở cuối
+                bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                       || (c >= '0' && c <= '9') || c == '+' || c == '/';
+                if (!ok) return null;
+            }
+            if (n.Length % 4 == 1) return null;
+
+            string b64 = n;
+            while (b64.Length % 4 != 0) b64 += "=";
+            string text;
+            try
+            {
+                text = new UTF8Encoding(false, true).GetString(Convert.FromBase64String(b64));
+            }
+            catch { return null; }
+
+            if (text.Length < 3 || text.Length > 200) return null;
+            if (text != text.Trim()) return null;
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (c < 32 || c == 127) return null;
+                if ("<>:\"/\\|?*".IndexOf(c) >= 0) return null;
+            }
+            if (!Rules.Current.IsDocumentExt(System.IO.Path.GetExtension(text).ToLowerInvariant()))
+                return null;
+            return text;
+        }
+
+        // Đổi tên tài liệu Base64 trong thư mục giả/không tên về tên gốc.
+        // Không ghi đè: tên đích đã có thì bỏ qua và đếm vào skipped.
+        public static int RenameBase64(string root, Action<int, string> progress,
+                                       Func<bool> cancelled, out int skipped)
+        {
+            skipped = 0;
+            int renamed = 0;
+            string rootExt = WinPath.Ext(root);
+            List<string> dirs = new List<string>();
+            // Thư mục người dùng chọn: quét chính nó. Gốc ổ: chỉ các thư mục giả
+            // và không tên, tránh đổi tên tài liệu hợp lệ nằm rải rác trên ổ.
+            if (!UsbScan.IsDriveRoot(root)) dirs.Add(rootExt);
+            else
+            {
+                foreach (string fk in FindFakeDirs(root)) dirs.Add(WinPath.Join(rootExt, fk));
+                foreach (string nm in FindNameless(root)) dirs.Add(WinPath.Join(rootExt, nm));
+            }
+
+            foreach (string dir in dirs)
+            {
+                foreach (TreeItem t in Tree.Walk(dir))
+                {
+                    if (t.IsDir) continue;
+                    if (cancelled != null && cancelled()) return renamed;
+                    string name = System.IO.Path.GetFileName(t.Path);
+                    // Tệp đang mang đuôi chạy được thì không đổi tên: chỉ tài liệu.
+                    if (IsPayloadFile(name)) continue;
+                    string decoded = DecodeName(name);
+                    if (decoded == null) continue;
+                    string parent = WinPath.Parent(t.Path);
+                    if (parent.Length == 0) continue;
+                    string dest = WinPath.Join(parent, decoded);
+                    if (WinPath.Exists(dest)) { skipped++; continue; }
+                    if (WinPath.Move(t.Path, dest))
+                    {
+                        renamed++;
+                        Log.Write(S.Log.Base64Renamed(name, decoded), "INFO");
+                        if (progress != null) progress(renamed, dest);
+                    }
+                    else skipped++;
+                }
+            }
+            return renamed;
+        }
+
         // Thu muc khong ten chi chua du lieu nguoi dung (khong co tep chay, shortcut,
         // script) thi co the tu dong tra du lieu ra goc o ma khong so mat an toan.
         public static bool HasRiskyContent(string dir)

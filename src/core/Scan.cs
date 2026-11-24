@@ -50,6 +50,13 @@ namespace ShieldGate
         public int Other;
         // O chi doc (USB co khoa ghi, dia CD, anh ISO): chi xem duoc, khong sua duoc.
         public bool ReadOnly;
+        // Gốc quét là ổ (G:\) hay thư mục người dùng chọn. Chế độ thư mục bỏ qua
+        // các thao tác cấp ổ như tiêm autorun.inf.
+        public bool IsDriveRoot;
+        // Số tệp dữ liệu người dùng được giữ lại trong thư mục giả (không cách ly).
+        public int KeptFiles;
+        // Số tệp có tên là Base64 của một tên tài liệu: có thể khôi phục tên gốc.
+        public int Base64Names;
     }
 
     // Phạm vi gỡ thuộc tính ẩn. Chế độ tự động chỉ chạm mục mang dấu hiệu virus
@@ -124,6 +131,29 @@ namespace ShieldGate
 
         // ---------------------------------------------------------------- quét
 
+        // Gốc ổ (G: hoặc G:\) khác với một thư mục người dùng chọn trên ổ đó.
+        public static bool IsDriveRoot(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            string full;
+            try { full = System.IO.Path.GetFullPath(path); }
+            catch { return false; }
+            full = full.TrimEnd('\\');
+            return full.Length == 2 && full[1] == ':';
+        }
+
+        private static bool UnderAny(string rel, List<string> dirs)
+        {
+            foreach (string d in dirs)
+            {
+                if (rel.Length > d.Length
+                    && rel.StartsWith(d, StringComparison.OrdinalIgnoreCase)
+                    && rel[d.Length] == '\\')
+                    return true;
+            }
+            return false;
+        }
+
         public static UsbScanResult Detect(string root, Action<int, string> progress, Func<bool> cancelled)
         {
             return Detect(root, progress, cancelled, int.MaxValue);
@@ -144,6 +174,7 @@ namespace ShieldGate
             result.Root = root;
             result.Drive = root.Length >= 2 ? root.Substring(0, 2) : root;
             result.ReadOnly = Native.IsReadOnlyVolume(root);
+            result.IsDriveRoot = IsDriveRoot(root);
             int seen = 0;
             WalkStats stats = new WalkStats();
             RulesData rules = Rules.Current;
@@ -153,6 +184,7 @@ namespace ShieldGate
             context.Stats = stats;
             context.IsNtfs = Native.IsNtfsVolume(root);
             List<string> nameless = UsbRestore.FindNameless(root);
+            List<string> fakeDirs = UsbRestore.FindFakeDirs(root);
             List<TreeItem> rootExes = new List<TreeItem>();
             List<string> dirs = new List<string>();
 
@@ -180,6 +212,15 @@ namespace ShieldGate
                 bool isRootExe = f.Depth == 0 &&
                     (ext == ".exe" || ext == ".com" || ext == ".pif" || ext == ".scr") &&
                     (f.Attrs & (FileAttributes.Hidden | FileAttributes.System)) != 0;
+
+                // Thư mục giả: đếm tài liệu người dùng còn lại và tên Base64 có
+                // thể khôi phục, để UI báo rõ thay vì chỉ ghi log.
+                if (fakeDirs.Count > 0 && UnderAny(f.Rel, fakeDirs))
+                {
+                    if (!UsbRestore.IsPayloadFile(f.Name)) result.KeptFiles++;
+                    if (!UsbRestore.IsPayloadFile(f.Name)
+                        && UsbRestore.DecodeName(f.Name) != null) result.Base64Names++;
+                }
 
                 UsbItem item = null;
 
@@ -319,7 +360,7 @@ namespace ShieldGate
 
             // Thu muc gia (vd "Docusment") khong can thu muc khong ten di kem.
             // Noi dung virus (payload) bi cach ly; du lieu nguoi dung duoc giu lai.
-            foreach (string fk in UsbRestore.FindFakeDirs(root))
+            foreach (string fk in fakeDirs)
             {
                 string full = System.IO.Path.Combine(root, fk);
                 ShieldGate.Detect.FolderCheck fc = ShieldGate.Detect.CheckFolder(full, System.IO.Path.GetFileName(fk));

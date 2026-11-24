@@ -14,7 +14,7 @@ namespace ShieldGate
 
         private readonly SelectBox _drive;
         private readonly List<string> _driveRoots = new List<string>();
-        private readonly LinkText _refresh, _vaccine, _unhide, _selectAll, _selectNone, _flagToggle, _undo, _log;
+        private readonly LinkText _refresh, _vaccine, _unhide, _scanFolder, _rename, _selectAll, _selectNone, _flagToggle, _undo, _log;
         private readonly FlatButton _scan, _apply, _cancel;
         private readonly Notice _notice;
         private readonly Spinner _spinner;
@@ -29,6 +29,9 @@ namespace ShieldGate
         private string _scanDrive = "";
         private int _doneCount, _failedCount, _unhidden, _cleanFiles;
         private bool _scanning, _applying, _unhiding, _loading;
+        // Quét một thư mục người dùng chọn thay vì cả ổ. _scanDrive giữ gốc quét
+        // hiện tại (ổ hoặc thư mục) để quét lại sau khi cách ly.
+        private bool _isFolder;
         private volatile bool _cancelFlag;
         private volatile int _progressFiles;
         private volatile string _progressPath = "";
@@ -46,6 +49,8 @@ namespace ShieldGate
             _drive.SelectedChanged += delegate
             {
                 if (_loading || _scanning || _applying) return;
+                _isFolder = false;
+                _scanDrive = "";
                 _result = null;
                 _list.Clear();
                 _notice.ClearMessage();
@@ -61,6 +66,10 @@ namespace ShieldGate
             _scan.Click += delegate { StartScan(); };
             Controls.Add(_scan);
 
+            _scanFolder = MakeLink(S.Usb.ScanFolder, "");
+            _scanFolder.Click += delegate { ChooseFolder(); };
+            Controls.Add(_scanFolder);
+
             _vaccine = MakeLink(S.Usb.Vaccine, "shield");
             _vaccine.IconSize = 14;
             _vaccine.Click += delegate { DoVaccinate(); };
@@ -70,10 +79,16 @@ namespace ShieldGate
             _unhide.Click += delegate { DoUnhide(); };
             Controls.Add(_unhide);
 
+            _rename = MakeLink(S.Usb.RenameBase64(0), "");
+            _rename.Click += delegate { DoRenameBase64(); };
+            Controls.Add(_rename);
+
             _tips = new ToolTip();
             _tips.SetToolTip(_vaccine, S.Usb.VaccineHint);
             _tips.SetToolTip(_unhide, S.Usb.UnhideHint);
             _tips.SetToolTip(_refresh, S.Usb.Refresh);
+            _tips.SetToolTip(_scanFolder, S.Usb.ChooseFolderHint);
+            _tips.SetToolTip(_rename, S.Usb.RenameBase64Hint);
 
             _notice = new Notice();
             Controls.Add(_notice);
@@ -168,6 +183,8 @@ namespace ShieldGate
 
         public void FocusDrive(string drive)
         {
+            _isFolder = false;
+            _scanDrive = "";
             RefreshDrives();
             SelectDrive(drive);
         }
@@ -205,6 +222,7 @@ namespace ShieldGate
 
             if (drives.Count == 0)
             {
+                if (_isFolder) { LayoutPage(); return; }
                 _result = null;
                 _list.Clear();
                 ShowState(UsbState.NoDrive);
@@ -224,6 +242,13 @@ namespace ShieldGate
             string d = _driveRoots[i];
             if (string.IsNullOrEmpty(d) || d.Length < 2) return null;
             return d.EndsWith("\\") ? d : d + "\\";
+        }
+
+        // Gốc đang thao tác: thư mục người dùng chọn nếu có, ngược lại là ổ.
+        private string CurrentRoot()
+        {
+            if (_isFolder && _scanDrive.Length > 0) return _scanDrive;
+            return SelectedDrive();
         }
 
         private void SelectDrive(string drive)
@@ -247,7 +272,7 @@ namespace ShieldGate
         private void ShowState(UsbState state)
         {
             _state = state;
-            bool hasDrive = SelectedDrive() != null;
+            bool hasDrive = CurrentRoot() != null;
 
             _spinner.Visible = state == UsbState.Scanning;
             _spinner.Run(state == UsbState.Scanning);
@@ -261,12 +286,25 @@ namespace ShieldGate
             _cancel.Visible = state == UsbState.Scanning;
             _scan.Visible = state != UsbState.NoDrive && state != UsbState.Scanning;
             _scan.Enabled = hasDrive && !_applying && !_unhiding;
-            _vaccine.Visible = hasDrive && state != UsbState.NoDrive && state != UsbState.Scanning;
+            _scan.Text = _isFolder ? S.Usb.ScanFolderButton : S.Usb.Scan;
+            _scan.AccessibleName = _scan.Text;
+            _scanFolder.Visible = state != UsbState.Scanning;
+            _scanFolder.Enabled = !_applying && !_unhiding;
+            // Tiêm autorun.inf chỉ có nghĩa ở gốc ổ, không áp cho thư mục con.
+            _vaccine.Visible = !_isFolder && hasDrive && state != UsbState.NoDrive
+                               && state != UsbState.Scanning;
             _vaccine.Enabled = !_applying && !_unhiding && !ReadOnlyResult();
             bool canUnhide = hasDrive && !ReadOnlyResult() &&
-                (state == UsbState.Idle || state == UsbState.Clean);
+                (state == UsbState.Idle || state == UsbState.Clean
+                 || (state == UsbState.Results && _isFolder));
             _unhide.Visible = canUnhide;
             _unhide.Enabled = canUnhide && !_unhiding;
+            bool canRename = _result != null && _result.Base64Names > 0 &&
+                             !ReadOnlyResult() && !_applying && !_unhiding;
+            _rename.Visible = canRename;
+            _rename.Enabled = canRename;
+            _rename.Text = S.Usb.RenameBase64(_result == null ? 0 : _result.Base64Names);
+            _rename.AccessibleName = _rename.Text;
             _drive.Enabled = !_scanning && !_applying && !_unhiding;
             _refresh.Enabled = !_scanning && !_applying && !_unhiding;
 
@@ -301,12 +339,15 @@ namespace ShieldGate
                 case UsbState.Scanning:
                     _statusTitle.Font = Theme.Hero;
                     _statusTitle.ForeColor = Theme.Ink;
-                    _statusTitle.Text = S.Usb.Scanning(SelectedDrive());
+                    _statusTitle.Text = S.Usb.Scanning(CurrentRoot());
                     _statusSub.ForeColor = Theme.InkMuted;
                     _statusSub.Text = _progressFiles > 0 ? ProgressText() : S.Usb.Starting;
                     break;
                 case UsbState.Results:
                     _resultsTitle.Text = S.Usb.ResultsTitle(_result == null ? 0 : _result.Items.Count);
+                    _resultsNote.Text = _result != null && _result.KeptFiles > 0
+                        ? S.Usb.ResultsNote + " " + S.Usb.FakeFolderKeptWarning(_result.KeptFiles)
+                        : S.Usb.ResultsNote;
                     break;
                 case UsbState.Clean:
                     _statusTitle.Font = Theme.Hero;
@@ -367,12 +408,12 @@ namespace ShieldGate
 
         private void StartScan()
         {
-            string drive = SelectedDrive();
+            string drive = CurrentRoot();
             if (drive == null || _scanning || _applying || _unhiding) return;
             if (!Directory.Exists(drive))
             {
                 _notice.SetMessage(S.Err.Unplugged(drive), true);
-                RefreshDrives();
+                if (!_isFolder) RefreshDrives();
                 return;
             }
 
@@ -425,7 +466,7 @@ namespace ShieldGate
             if (cancelled)
             {
                 _notice.SetMessage(S.Usb.ScanCancelled, false);
-                ShowState(SelectedDrive() == null ? UsbState.NoDrive : UsbState.Idle);
+                ShowState(CurrentRoot() == null ? UsbState.NoDrive : UsbState.Idle);
                 return;
             }
             if (result == null)
@@ -437,17 +478,20 @@ namespace ShieldGate
             if (!Directory.Exists(drive))
             {
                 _notice.SetMessage(S.Err.Unplugged(drive), true);
+                if (_isFolder) { _isFolder = false; _scanDrive = ""; }
                 ShowState(UsbState.Idle);
                 return;
             }
 
             _result = result;
-            Settings.SetDriveScan(drive, result.Files, result.Items.Count);
+            if (result.IsDriveRoot)
+                Settings.SetDriveScan(drive, result.Files, result.Items.Count);
             Log.Write(S.Log.UsbScanDone(drive, result.Files, result.Items.Count, result.Seconds));
 
             List<string> warnings = new List<string>();
             if (result.ReadOnly) warnings.Add(S.Usb.ReadOnlyWarning(drive));
             if (result.Truncated) warnings.Add(S.Usb.Truncated(result.Files));
+            if (result.KeptFiles > 0) warnings.Add(S.Usb.FakeFolderKeptWarning(result.KeptFiles));
             int rootExe = 0;
             foreach (UsbItem item in result.Items)
                 if (item.Kind == UsbKind.RootExe) rootExe++;
@@ -489,8 +533,8 @@ namespace ShieldGate
             List<UsbItem> selected = _list.CheckedItems();
             if (selected.Count == 0) return;
 
-            string drive = SelectedDrive();
-            if (drive == null) return;
+            string drive = _result.Root;
+            if (string.IsNullOrEmpty(drive)) return;
             // Kiểm tra quyền ghi trước khi hỏi: ổ chỉ đọc thật thì không có gì để
             // xác nhận. Khoá ghi do ShieldGate bật thì được tạm mở sau khi xác nhận.
             if (_result.ReadOnly)
@@ -557,7 +601,8 @@ namespace ShieldGate
             _failedCount = failed;
             _unhidden = unhidden;
             _batch = batch;
-            Settings.SetDriveScan(drive, _result == null ? 0 : _result.Files, 0);
+            if (_result != null && _result.IsDriveRoot)
+                Settings.SetDriveScan(drive, _result.Files, 0);
 
             if (done > 0)
             {
@@ -615,11 +660,12 @@ namespace ShieldGate
             _notice.SetMessage(S.Usb.UndoDone(restored, skipped), false);
             if (missing > 0) _notice.SetMessage(S.Restore.Missing(missing), true);
             if (refused > 0) _notice.SetMessage(S.Restore.Refused(refused), true);
-            ShowState(SelectedDrive() == null ? UsbState.NoDrive : UsbState.Idle);
+            ShowState(CurrentRoot() == null ? UsbState.NoDrive : UsbState.Idle);
         }
 
         private void DoVaccinate()
         {
+            if (_isFolder) return;
             string drive = SelectedDrive();
             if (drive == null || _scanning || _applying || _unhiding) return;
             if (!Native.CanWrite(drive))
@@ -643,7 +689,7 @@ namespace ShieldGate
         // tự động: người dùng chủ động bấm lại thao tác này khi cần.
         private void DoUnhide()
         {
-            string drive = SelectedDrive();
+            string drive = CurrentRoot();
             if (drive == null || _scanning || _applying || _unhiding) return;
             if (!Native.CanWrite(drive))
             {
@@ -691,8 +737,80 @@ namespace ShieldGate
             t.Start();
         }
 
-        // ----------------------------------------------------------------- bố cục
+        // Chọn một thư mục để quét thay vì cả ổ. Từ chối ổ hệ thống: mọi thao tác
+        // ghi của dự án không được chạm vào đó.
+        private void ChooseFolder()
+        {
+            if (_scanning || _applying || _unhiding) return;
+            using (FolderBrowserDialog dlg = new FolderBrowserDialog())
+            {
+                dlg.Description = S.Usb.ChooseFolderHint;
+                dlg.ShowNewFolderButton = false;
+                if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+                string root = dlg.SelectedPath;
+                if (string.IsNullOrEmpty(root) || root.Length < 3) return;
+                string sys = Path.GetPathRoot(Environment.SystemDirectory) ?? "";
+                if (sys.Length > 0 && root.StartsWith(sys, StringComparison.OrdinalIgnoreCase))
+                {
+                    _notice.SetMessage(S.Usb.FolderSystemRefused, true);
+                    return;
+                }
+                _isFolder = true;
+                _scanDrive = root.TrimEnd('\\') + "\\";
+                _result = null;
+                _list.Clear();
+                _notice.ClearMessage();
+                StartScan();
+            }
+        }
 
+        // Khôi phục tên gốc cho tài liệu bị virus đổi sang Base64. Chỉ chạm tệp
+        // trong thư mục giả/không tên và không ghi đè tên đã có.
+        private void DoRenameBase64()
+        {
+            if (_result == null || _scanning || _applying || _unhiding) return;
+            int n = _result.Base64Names;
+            if (n <= 0) return;
+            if (!ConfirmDialog.Ask(FindForm(), S.Dlg.RenameTitle(n), S.Dlg.RenameBody,
+                                   S.Dlg.RenameOk(n), S.Dlg.Cancel, ButtonKind.Secondary, false))
+                return;
+
+            string root = _result.Root;
+            _unhiding = true;
+            _cancelFlag = false;
+            _notice.ClearMessage();
+            ShowState(_state);
+
+            Thread t = new Thread(delegate()
+            {
+                int done = 0, skipped = 0;
+                bool paused = false;
+                try
+                {
+                    paused = PauseWriteProtect();
+                    done = UsbRestore.RenameBase64(root, null,
+                        delegate { return _cancelFlag; }, out skipped);
+                }
+                catch (Exception e) { Log.Write(S.Log.UnhideError(e.Message), "ERROR"); }
+                finally { ResumeWriteProtect(paused); }
+                if (IsDisposed || !IsHandleCreated) return;
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        _unhiding = false;
+                        _notice.SetMessage(S.Usb.RenameDone(done, skipped),
+                                           done == 0 && skipped > 0);
+                        StartScan();
+                    });
+                }
+                catch { }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        // ----------------------------------------------------------------- bố cục
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
@@ -715,11 +833,15 @@ namespace ShieldGate
             _refresh.Bounds = new Rectangle(_drive.Right + Ui.Px(16), Ui.Px(70), rw, Ui.Px(22));
 
             _scan.Bounds = new Rectangle(pad, Ui.Px(112),
-                TextWidth(S.Usb.Scan, Theme.BodyStrong), Ui.Px(Theme.ControlHeight));
-            _vaccine.Bounds = new Rectangle(_scan.Right + Ui.Px(24), Ui.Px(119),
+                TextWidth(_scan.Text, Theme.BodyStrong), Ui.Px(Theme.ControlHeight));
+            _scanFolder.Bounds = new Rectangle(_scan.Right + Ui.Px(16), Ui.Px(119),
+                Ui.Measure(S.Usb.ScanFolder, Theme.Small).Width + Ui.Px(4), Ui.Px(22));
+            _vaccine.Bounds = new Rectangle(_scanFolder.Right + Ui.Px(24), Ui.Px(119),
                 Ui.Measure(S.Usb.Vaccine, Theme.Small).Width + Ui.Px(24), Ui.Px(22));
             _unhide.Bounds = new Rectangle(_vaccine.Right + Ui.Px(16), Ui.Px(119),
                 Ui.Measure(S.Usb.Unhide, Theme.Small).Width + Ui.Px(4), Ui.Px(22));
+            _rename.Bounds = new Rectangle(_unhide.Right + Ui.Px(16), Ui.Px(119),
+                Ui.Measure(S.Usb.RenameBase64(999), Theme.Small).Width + Ui.Px(4), Ui.Px(22));
 
             _notice.Bounds = new Rectangle(pad, Ui.Px(158), width, Ui.Px(38));
 

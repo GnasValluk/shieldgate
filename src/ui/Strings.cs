@@ -157,6 +157,45 @@ namespace ShieldGate
             public static string ScanningCount(int files) { return T("Đã xem " + files.ToString("#,0") + " tệp", "Scanned " + files.ToString("#,0") + " files"); }
             public static string Refresh { get { return T("Làm mới danh sách", "Refresh list"); } }
             public static string Scan { get { return T("Kiểm tra USB", "Scan USB"); } }
+            public static string ScanFolderButton { get { return T("Kiểm tra thư mục", "Scan folder"); } }
+            public static string ScanFolder { get { return T("Quét thư mục…", "Scan a folder…"); } }
+            public static string ChooseFolderHint
+            {
+                get { return T("Chọn thư mục cần kiểm tra (không chọn ổ hệ thống).",
+                               "Choose the folder to scan (not the system drive)."); }
+            }
+            public static string FolderSystemRefused
+            {
+                get
+                {
+                    return T("Không xử lý thư mục trên ổ hệ thống. Hãy dùng Kiểm tra máy cho phần này.",
+                             "Folders on the system drive are not processed. Use the computer check for that.");
+                }
+            }
+            public static string FakeFolderKeptWarning(int n)
+            {
+                return T("Còn " + n + " tệp dữ liệu trong thư mục giả (đã giữ lại, không cách ly).",
+                         n + " user files remain in the fake folder (kept, not quarantined).");
+            }
+            public static string RenameBase64(int n)
+            {
+                return T("Khôi phục tên gốc (" + n + ")", "Restore original names (" + n + ")");
+            }
+            public static string RenameBase64Hint
+            {
+                get
+                {
+                    return T("Đổi tên tài liệu bị virus mã hoá Base64 về tên gốc. Không ghi đè tệp đã có.",
+                             "Rename documents the virus encoded as Base64 back to their original names. Existing files are never overwritten.");
+                }
+            }
+            public static string RenameDone(int done, int skipped)
+            {
+                return T("Đã khôi phục tên cho " + done + " tệp."
+                         + (skipped > 0 ? " Bỏ qua " + skipped + " tệp vì tên đích đã tồn tại." : ""),
+                         "Restored names for " + done + " files."
+                         + (skipped > 0 ? " Skipped " + skipped + " because the target name already exists." : ""));
+            }
             public static string Scanning(string drive) { return T("Đang kiểm tra " + drive, "Scanning " + drive); }
             public static string ScanningSub(int files, string path)
             {
@@ -1090,6 +1129,11 @@ namespace ShieldGate
                          "Kept " + kept + " user files in the fake folder on " + root
                          + " (only executable payloads were quarantined).");
             }
+            public static string Base64Renamed(string from, string to)
+            {
+                return T("Khôi phục tên Base64: " + from + " → " + to,
+                         "Restored Base64 name: " + from + " -> " + to);
+            }
             public static string CleanBusy(string root)
             {
                 return T("Một tiến trình khác đang xử lý " + root + "; bỏ qua lượt này.",
@@ -1706,6 +1750,19 @@ namespace ShieldGate
                 }
             }
             public static string UnhideOk { get { return T("Hiện tệp", "Unhide files"); } }
+            public static string RenameTitle(int n)
+            {
+                return T("Khôi phục tên gốc cho " + n + " tệp?", "Restore original names for " + n + " files?");
+            }
+            public static string RenameBody
+            {
+                get
+                {
+                    return T("Chỉ đổi tên tài liệu nằm trong thư mục giả hoặc thư mục không tên, khi tên hiện tại là Base64 của một tên tài liệu hợp lệ. Không ghi đè: nếu tên gốc đã có thì bỏ qua. Không xoá dữ liệu.",
+                             "Only documents inside fake or nameless folders are renamed, and only when the current name is Base64 of a valid document name. Nothing is overwritten: if the original name already exists, the file is skipped. No data is deleted.");
+                }
+            }
+            public static string RenameOk(int n) { return T("Đổi tên " + n + " tệp", "Rename " + n + " files"); }
             public static string BackupTitle { get { return T("Sao lưu toàn bộ ổ?", "Back up the entire drive?"); } }
             public static string BackupBody(string drive, long files, long bytes)
             {
@@ -1845,6 +1902,8 @@ namespace ShieldGate
             public static string RestoreGuard { get { return T("khôi phục từ chối nguồn ngoài lần cách ly và đích trong thư mục hệ thống", "restore refuses sources outside the batch and targets in system folders"); } }
             public static string RepairPreviewCount { get { return T("đếm tệp dự phòng cho xem trước sao lưu", "fallback file count for the backup preview"); } }
             public static string FakeFolderKeepsDocs { get { return T("thư mục giả: chỉ cách ly tệp chạy được, giữ tài liệu người dùng", "fake folder: quarantine only executable payloads and keep user documents"); } }
+            public static string Base64Name { get { return T("khôi phục tên Base64: chỉ nhận tài liệu hợp lệ, không ghi đè, không chạm payload", "Base64 names: only valid documents, no overwrite, payload untouched"); } }
+            public static string FolderScan { get { return T("quét một thư mục con: nhận diện tệp và đếm tài liệu giữ lại", "scan a subfolder: detects files and counts kept documents"); } }
             public static string MissingIsNotError { get { return T("tệp đã biến mất không bị tính là lỗi cách ly", "a file that already vanished is not counted as a quarantine error"); } }
             public static string CleanLockExclusive { get { return T("chỉ một luồng được dọn một ổ tại một thời điểm", "only one thread may clean a drive at a time"); } }
             public static string EmptyBatchRemoved { get { return T("không để lại vỏ cách ly rỗng khi không di chuyển được tệp nào", "no empty quarantine batch is left when nothing was moved"); } }
@@ -2144,7 +2203,7 @@ namespace ShieldGate
                 return T("Tệp đang cách ly: " + files + " trong " + batches + " lần",
                          "Files in quarantine: " + files + " in " + batches + " batches");
             }
-            public static string ScanUsage { get { return T("Cách dùng: ShieldGate.exe --scan E:\\", "Usage: ShieldGate.exe --scan E:\\"); } }
+            public static string ScanUsage { get { return T("Cách dùng: ShieldGate.exe --scan E:\\ hoặc --scan \"D:\\thu muc\"", "Usage: ShieldGate.exe --scan E:\\ or --scan \"D:\\folder\""); } }
             public static string DevicesUsage { get { return T("Cách dùng: ShieldGate.exe --devices", "Usage: ShieldGate.exe --devices"); } }
             public static string EventsUsage { get { return T("Cách dùng: ShieldGate.exe --events [số dòng]", "Usage: ShieldGate.exe --events [count]"); } }
             public static string RepairUsage { get { return T("Cách dùng: ShieldGate.exe --repair E:\\", "Usage: ShieldGate.exe --repair E:\\"); } }
@@ -2233,7 +2292,7 @@ namespace ShieldGate
                         "  ShieldGate.exe                      mở giao diện\n" +
                         "  --install | --uninstall [--keep-data|--purge-data]\n" +
                         "  --watch | --tray | --status\n" +
-                        "  --scan <ổ> [--json]                 quét ổ, --json cho script\n" +
+                        "  --scan <ổ hoặc thư mục> [--json]    quét, --json cho script\n" +
                         "  --repair <ổ>                        xem và sửa lỗi ổ\n" +
                         "  --defender <tệp hoặc thư mục>       nhờ Windows Defender quét\n" +
                         "  --devices | --events [số dòng]\n" +
@@ -2248,7 +2307,7 @@ namespace ShieldGate
                         "  ShieldGate.exe                      open the window\n" +
                         "  --install | --uninstall [--keep-data|--purge-data]\n" +
                         "  --watch | --tray | --status\n" +
-                        "  --scan <drive> [--json]             scan a drive; --json for scripts\n" +
+                        "  --scan <drive or folder> [--json]   scan; --json for scripts\n" +
                         "  --repair <drive>                    inspect and repair a drive\n" +
                         "  --defender <file or folder>         ask Windows Defender to scan\n" +
                         "  --devices | --events [count]\n" +
@@ -2264,7 +2323,7 @@ namespace ShieldGate
             {
                 get
                 {
-                    return "ShieldGate.exe --watch | --status | --install | --uninstall [--keep-data|--purge-data] | --scan <drive> [--json] | --devices | --events [n] | --repair <drive> | --defender <path> | --vt <file> | --import-rules <rules.json> --yes | --selftest | --version | --help";
+                    return "ShieldGate.exe --watch | --status | --install | --uninstall [--keep-data|--purge-data] | --scan <drive or folder> [--json] | --devices | --events [n] | --repair <drive> | --defender <path> | --vt <file> | --import-rules <rules.json> --yes | --selftest | --version | --help";
                 }
             }
             public static string TempDir(string path) { return T("Thư mục tạm: " + path, "Temporary folder: " + path); }
