@@ -556,7 +556,7 @@ Chỉ bắt đầu sau W9 và sau khi `docs/design-badusb.md` được duyệt.
 
 | # | Việc |
 | --- | --- |
-| W23 | Thiết kế + thi hành pipe: `PipeSecurity` chỉ SID người dùng tương tác + Administrators, `PIPE_REJECT_REMOTE_CLIENTS`, một instance; xác thực client bằng `GetNamedPipeClientProcessId` + đường dẫn exe đã ghim + băm; allow-list lệnh JSON có phiên bản, giới hạn kích thước, không nhận đường dẫn tự do |
+| W23 | Thiết kế + thi hành pipe: `PipeSecurity` chỉ SID người dùng tương tác + Administrators, `PIPE_REJECT_REMOTE_CLIENTS`, một instance; xác thực client bằng `GetNamedPipeClientProcessId` + đường dẫn exe đã ghim + băm; allow-list lệnh JSON có phiên bản, giới hạn kích thước, không nhận đường dẫn tự do. Thiết kế chi tiết: [`docs/design-pipe.md`](design-pipe.md) (chờ duyệt §13) |
 
 Nếu chưa duyệt: giữ mô hình tệp + ACL, chỉ thêm W16.
 

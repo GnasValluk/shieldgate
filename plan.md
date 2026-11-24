@@ -1350,3 +1350,17 @@ Bằng chứng:
 Chưa chạy được phần cần phần cứng của checklist (USB FAT32/exFAT/NTFS, công tắc
 khoá ghi, bàn phím ngoài/Bluetooth/composite, Windows 7 x86, `chkdsk /f`, UAC
 không admin). W23 (named pipe) vẫn chờ thiết kế được duyệt.
+
+### 2026-11-24 — W23: thiết kế named pipe (chưa viết mã)
+
+- **`docs/design-pipe.md`:** mục tiêu, kiến trúc GUI quyền thường ↔ engine
+  SYSTEM, khung tin JSON 4 byte + 64 KiB, ACL `PipeSecurity` (SYSTEM +
+  Administrators + Interactive, từ chối Network/Anonymous), cờ
+  `PIPE_REJECT_REMOTE_CLIENTS`, xác thực client bằng PID → ảnh → SHA-256 đã ghim,
+  allow-list lệnh, plan/apply hai bước, giới hạn job, đường lui tệp + ACL.
+- **Không đổi mã.** Chờ chủ dự án duyệt §13 (host pipe, GUI non-admin, pin
+  portable, phạm vi allow-list, mặc định bật/tắt, Windows 7, ký số).
+- Roadmap W23 thêm liên kết tới thiết kế.
+
+Việc tiếp theo: duyệt §13 rồi làm W23a–W23d (giao thức + pipe + xác thực) trước
+khi nối GUI.
