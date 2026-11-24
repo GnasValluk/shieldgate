@@ -41,6 +41,7 @@ namespace ShieldGate
         public static string PolicyBackup;
         public static string LastScan;
         public static string GuardConfig;
+        public static string GuardLast;
         public static string SystemDrive;
         public static string RulesFile;
         public static string DevicesFile;
@@ -94,6 +95,10 @@ namespace ShieldGate
             PolicyBackup = Path.Combine(BakDir, "immunize.txt");
             LastScan = Path.Combine(Root, "last_scan.txt");
             GuardConfig = Path.Combine(Root, "guard.cfg");
+            // Lựa chọn gần nhất trước khi người dùng tắt hết bảo vệ: guard.cfg
+            // phải nói đúng trạng thái hiện tại (toàn 0) để công tắc không tự
+            // bật lại, còn tệp này giữ ý định cũ cho lần "Bật bảo vệ" sau.
+            GuardLast = Path.Combine(Root, "guard.last");
             RulesFile = Path.Combine(Root, "rules.json");
             DevicesFile = Path.Combine(Root, "devices.json");
             EventsFile = Path.Combine(Root, "events.tsv");

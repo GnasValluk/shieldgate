@@ -149,11 +149,16 @@ namespace ShieldGate
 
         public static GuardConfig LoadConfig()
         {
+            return LoadConfig(Paths.GuardConfig);
+        }
+
+        private static GuardConfig LoadConfig(string path)
+        {
             GuardConfig c = new GuardConfig();
             try
             {
-                if (!File.Exists(Paths.GuardConfig)) return c;
-                foreach (string raw in File.ReadAllLines(Paths.GuardConfig))
+                if (!File.Exists(path)) return c;
+                foreach (string raw in File.ReadAllLines(path))
                 {
                     string line = raw.Trim();
                     int eq = line.IndexOf('=');
@@ -178,23 +183,43 @@ namespace ShieldGate
         {
             get
             {
-                try { return File.Exists(Paths.GuardConfig); }
+                try
+                {
+                    return File.Exists(Paths.GuardConfig) || File.Exists(Paths.GuardLast);
+                }
                 catch { return false; }
             }
         }
 
+        private static bool AnyOn(GuardConfig c)
+        {
+            return c != null && (c.Autorun || c.Ini || c.Wsh || c.Registry
+                                 || c.WriteProtect || c.BlockExec);
+        }
+
         // Bộ công tắc dùng khi bấm "Bật bảo vệ": đúng lựa chọn đã lưu, không bật
-        // lại mục người dùng chủ động tắt. Chưa có lựa chọn nào thì dùng bộ mặc
-        // định của bản cài (chặn AutoRun, chặn autorun.inf, bảo vệ Registry).
+        // lại mục người dùng chủ động tắt. Khi guard.cfg toàn 0 (người dùng đã
+        // tắt hết), lấy lại lựa chọn trước đó từ guard.last.
         public static GuardConfig EnableConfig()
         {
-            GuardConfig c = LoadConfig();
-            if (!HasConfig)
+            // GuardConfig mặc định Autorun/Ini = true, nên chỉ dùng LoadConfig
+            // khi tệp thật sự tồn tại; nếu không sẽ coi "chưa có tệp" là đã bật.
+            if (File.Exists(Paths.GuardConfig))
             {
-                c.Autorun = true;
-                c.Ini = true;
-                c.Registry = true;
+                GuardConfig saved = LoadConfig();
+                if (AnyOn(saved)) return saved;
             }
+
+            if (File.Exists(Paths.GuardLast))
+            {
+                GuardConfig last = LoadConfig(Paths.GuardLast);
+                if (AnyOn(last)) return last;
+            }
+
+            GuardConfig c = new GuardConfig();
+            c.Autorun = true;
+            c.Ini = true;
+            c.Registry = true;
             return c;
         }
 
@@ -204,6 +229,18 @@ namespace ShieldGate
             try
             {
                 Paths.EnsureDirs();
+                // Tắt hết: guard.cfg phải phản ánh trạng thái thật (toàn 0) để
+                // công tắc Registry không tự bật lại sau khi làm mới. Giữ bản
+                // lựa chọn cũ trong guard.last cho lần "Bật bảo vệ" kế tiếp.
+                if (!autorun && !ini && !wsh && !registry && !writeProtect && !blockExec)
+                {
+                    try
+                    {
+                        if (File.Exists(Paths.GuardConfig))
+                            File.Copy(Paths.GuardConfig, Paths.GuardLast, true);
+                    }
+                    catch { }
+                }
                 File.WriteAllText(Paths.GuardConfig,
                     "autorun=" + (autorun ? "1" : "0") + "\r\n" +
                     "ini=" + (ini ? "1" : "0") + "\r\n" +
@@ -1299,9 +1336,9 @@ namespace ShieldGate
             // Ghi lựa chọn trước khi sửa registry: vòng lặp nền đọc guard.cfg mỗi
             // 60 giây. Nếu ghi sau, nó có thể đọc bản cũ và áp lại đúng phần vừa
             // được trả về, khiến công tắc người dùng vừa tắt tự bật lên.
-            // Khi tắt toàn bộ bảo vệ thì giữ nguyên guard.cfg, để lần bật sau
-            // dùng lại đúng lựa chọn cũ thay vì bật lại mọi mục.
-            if (guardOn) SaveConfig(autorun, ini, wsh, registry, writeProtect, blockExec);
+            // Luôn ghi, kể cả khi tắt hết: SaveConfig giữ bản cũ trong guard.last
+            // và ghi guard.cfg toàn 0 để UI phản ánh đúng trạng thái hiện tại.
+            SaveConfig(autorun, ini, wsh, registry, writeProtect, blockExec);
 
             if (autorun)
             {

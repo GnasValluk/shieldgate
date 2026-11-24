@@ -1819,6 +1819,7 @@ namespace ShieldGate
             public static string GuardConfig { get { return T("lưu và đọc lại lựa chọn bảo vệ", "save and reload protection choices"); } }
             public static string ProtectKeepsChoice { get { return T("bật bảo vệ giữ nguyên mục người dùng đã tắt", "turning protection on keeps items the user turned off"); } }
             public static string ProtectionStaysOn { get { return T("còn một lớp bảo vệ là vẫn tính đang bảo vệ", "one active layer still counts as protection on"); } }
+            public static string GuardOffSticks { get { return T("tắt hết ghi guard.cfg toàn 0, vẫn nhớ lựa chọn cũ", "turning everything off writes an all-zero guard.cfg and still remembers the old choices"); } }
             public static string TamperRefused { get { return T("không khôi phục bản cách ly đã bị sửa", "refuse to restore a modified quarantined file"); } }
             public static string Truncation { get { return T("báo đúng khi quét bị giới hạn", "report when a scan is truncated"); } }
             public static string LogLanguage { get { return T("nhật ký đổi theo ngôn ngữ", "log text follows the chosen language"); } }

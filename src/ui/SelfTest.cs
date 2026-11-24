@@ -33,7 +33,7 @@ namespace ShieldGate
             Policy.PauseAllowed = false;
 
             int passed = 0;
-            int total = 72;
+            int total = 73;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -308,6 +308,23 @@ namespace ShieldGate
             StatusInfo nothing = new StatusInfo();
             check(S.Selftest.ProtectionStaysOn,
                   partial.ProtectionOn && !partial.FullyProtected && !nothing.ProtectionOn);
+
+            // 12d. Tắt hết phải ghi guard.cfg toàn 0 để công tắc Registry không
+            //      tự bật lại sau khi làm mới; lựa chọn cũ vẫn nằm ở guard.last.
+            bool offSticks = false;
+            try
+            {
+                Guard.SaveConfig(true, true, true, true);
+                Guard.SaveConfig(false, false, false, false);
+                GuardConfig off = Guard.LoadConfig();
+                GuardConfig restoredCfg = Guard.EnableConfig();
+                offSticks = !off.Autorun && !off.Ini && !off.Wsh && !off.Registry
+                            && restoredCfg.Autorun && restoredCfg.Ini && restoredCfg.Registry;
+                File.Delete(Paths.GuardConfig);
+                File.Delete(Paths.GuardLast);
+            }
+            catch { }
+            check(S.Selftest.GuardOffSticks, offSticks);
 
             // 13. Bản cách ly bị sửa thì không được ghi trả về ổ.
             bool refused = false;
