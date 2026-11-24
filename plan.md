@@ -176,7 +176,7 @@ máy thật hoặc cần quyết định kiến trúc đều được ghi rõ.
 
 | Mốc | Nội dung | Mục | Ước lượng |
 | --- | --- | --- | --- |
-| 2.1.0 | Nền tảng an toàn: A1–A9 (đường dẫn công cụ, marker sao lưu, gỡ cài đặt, khôi phục, luật) | W1–W7 | 9–11 ngày |
+| 2.1.0 ✅ | Nền tảng an toàn: A1–A9 (đường dẫn công cụ, marker sao lưu, gỡ cài đặt, khôi phục, luật, chữ ký) | W1–W7 | 9–11 ngày |
 | 2.1.1 | Sửa tính năng sai: B1–B9, nợ kỹ thuật, hàng đợi sự kiện | W8–W16 | 12–15 ngày |
 | 2.2 | VirusTotal opt-in, `--help/--version/--json`, `PRIVACY.md` | W17–W19 | 5–6 ngày |
 | 2.3 | BadUSB: Raw Input + WMI process start, chỉ cảnh báo | W20–W22 | 12–15 ngày |
@@ -196,7 +196,7 @@ Ba quyết định đã chốt và đang được thi hành (chi tiết ở mụ
 1. Gỡ cài đặt mặc định **giữ** cách ly và bản sao lưu ổ — đã làm ở W3 (`--purge-data`
    để xoá hết).
 2. `chkdsk /f` chỉ cho ổ `Removable`; ổ cố định phụ chỉ chẩn đoán đọc — đã làm ở W2.
-3. `rules.json` chỉ đọc từ thư mục dữ liệu; tệp cạnh exe bị bỏ qua — còn ở W6.
+3. `rules.json` chỉ đọc từ thư mục dữ liệu; tệp cạnh exe bị bỏ qua — đã làm ở W6.
 
 ## 7. Nhật ký tiến độ
 
@@ -775,3 +775,537 @@ Giới hạn: đây vẫn là công cụ user-mode. Nếu nguồn lây là drive
 hoặc tiến trình được bảo vệ, ShieldGate chỉ phát hiện dấu vết và báo; việc loại bỏ
 phải làm bằng Microsoft Defender Offline hoặc môi trường WinPE. Không có mẫu sống
 trên máy phát triển nên chưa kiểm chứng việc `sc delete` trên dịch vụ thật.
+
+### 2026-11-21 — W7: xác minh chữ ký bằng WinVerifyTrust, hoàn tất 2.1.0
+
+Đã làm:
+
+- **`src/core/Signature.cs` mới.** `Signature.Verify` trả `Unsigned / Signed /
+  Invalid / Error`; gọi `WinVerifyTrust` với `WTD_UI_NONE`, `WTD_REVOKE_NONE`,
+  `WTD_CACHE_ONLY_URL_RETRIEVAL` và luôn đóng state bằng `WTD_STATEACTION_CLOSE`.
+  Cấu trúc `WINTRUST_DATA` dừng ở `dwProvFlags` (layout Windows 7); Windows 8+
+  chấp nhận `cbStruct` nhỏ hơn nên không cần `pSignatureSettings`.
+- **Catalog cho tệp hệ thống.** Nhiều tệp Windows không nhúng chữ ký mà nằm trong
+  catalog (`notepad.exe`, `cmd.exe`, driver). Sau khi thử chữ ký nhúng, chỉ với
+  `%WINDIR%` và `Program Files` mới chạy
+  `CryptCATAdminAcquireContext` → `CryptCATAdminCalcHashFromFileHandle` →
+  `CryptCATAdminEnumCatalogFromHash` → `CryptCATCatalogInfoFromContext` rồi
+  `WinVerifyTrust` với `WTD_CHOICE_CATALOG`. Exe trên USB không bị băm thêm.
+- **`Detect.IsSigned` dùng kết quả xác minh**, không còn
+  `X509Certificate.CreateFromSignedFile`: chữ ký giả, hết hạn, bị thu hồi hoặc
+  chuỗi tin cậy đứt đều tính là không ký. Không có lời gọi mạng.
+- `AssemblyInfo` lên `2.1.0.0` cho mốc 2.1.0.
+- Self-test 48: tệp văn bản → `Unsigned` và `Detect.IsSigned` false; chọn
+  `notepad.exe` / `cmd.exe` / `explorer.exe` đầu tiên có trên máy → `Signed`
+  (bỏ qua phần này nếu máy không có tệp nào). `total` 54 → 55.
+- README: thêm mục "Signatures are verified", cập nhật self-test 55/55 và phạm vi
+  kiểm tra.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  536 KB, SHA256 `c0794f243273d086…e09cc5205b39`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 55/55 phép kiểm tra.`,
+  exit 0.
+- Máy thử: `notepad.exe` và `cmd.exe` trả `TRUST_E_NOSIGNATURE` khi chỉ kiểm tra
+  chữ ký nhúng nhưng catalog trả `0`; `explorer.exe` có chữ ký nhúng trả `0`.
+
+Chưa kiểm chứng trên máy thật: Windows 7 (layout `WINTRUST_DATA` không có
+`dwUIContext`), máy offline thiếu catalog của Windows, và chữ ký bị thu hồi thật.
+Self-test chỉ bỏ qua phần tệp hệ thống khi máy không có `notepad.exe`/`cmd.exe`/
+`explorer.exe`. Mốc 2.1.0 đã đủ W1–W7; việc tiếp theo là W8 (đọc đường dẫn tiến
+trình 64-bit) mở mốc 2.1.1.
+
+### 2026-11-21 — W8: đọc đường dẫn tiến trình 64-bit
+
+Đã làm:
+
+- **`Native.ProcessImagePath(pid)`** dùng `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`
+  + `QueryFullProcessImageNameW` + `CloseHandle`; trả chuỗi rỗng khi tiến trình đã
+  thoát, thiếu quyền hoặc PID hệ thống, không ném lỗi. Không còn đọc
+  `Process.MainModule` trên đường nóng — bản build x86 không đọc được trường này
+  của tiến trình 64-bit nên trước đây bỏ qua âm thầm.
+- Thay ba điểm gọi: `Policy.StopRemovableProcesses` (dừng tiến trình chạy từ ổ
+  rời), `Guard.WaitGuardExit` (chờ bản nền nhả tệp) và `Scan` (kiểm tra đường dẫn
+  trước khi dừng tiến trình theo yêu cầu sửa). Ở `Scan`, nếu không đọc được đường
+  dẫn thì giữ hành vi cũ: chỉ kiểm tra tên tiến trình rồi mới dừng.
+- Self-test 49: đường dẫn tiến trình hiện tại khớp `Assembly.GetEntryAssembly().Location`;
+  gọi PID 4 (System) không ném. `total` 55 → 56.
+- README: thêm mục "64-bit processes are visible to the 32-bit build", cập nhật
+  56/56.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  538 KB, SHA256 `3523b9f4ec3f72a7…f446df938c`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 56/56 phép kiểm tra.`,
+  exit 0.
+
+Chưa kiểm chứng trên máy thật: dừng một tiến trình 64-bit thật đang chạy từ USB
+(cần quyền quản trị và USB thử); PID 4 có thể trả đường dẫn hoặc rỗng tùy quyền,
+self-test chỉ yêu cầu không ném. Việc tiếp theo: W9 (phân loại bàn phím ngoài).
+
+### 2026-11-21 — W9: phân loại bàn phím trong/ngoài theo bus
+
+Đã làm:
+
+- `Devices.IsInternalKeyboard(string)` tách khỏi mô hình `DeviceInfo` để kiểm thử
+  bằng chuỗi PNP mẫu. Quy tắc: `ACPI\`, `ROOT\`, `SWD\` là trong; `USB\`,
+  `BTHENUM\`, `BTHLEDEVICE\`, `BTH\` là ngoài; `HID\` có `VID_` là ngoài (USB HID
+  hoặc Bluetooth HID), `HID\` không có `VID_` là trong (I2C HID như
+  `MSFT0001`, `ELAN0001`). Chuỗi lạ mặc định là trong để tránh báo động giả.
+- `MarkComposite` và `DeviceScanResult.NewKeyboard` dùng chung quy tắc mới nên
+  bàn phím USB/Bluetooth ngoài mới kích hoạt được cảnh báo BadUSB/composite.
+- Self-test 50: 8 chuỗi PNP mẫu — ACPI, ROOT, SWD, I2C HID (trong); USB, USB HID,
+  Bluetooth HID, composite (ngoài). `total` 56 → 57.
+- README: thêm mục "External keyboards are recognised", cập nhật 57/57.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  539 KB, SHA256 `7802f83af3469cd9…ec3eaa4`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 57/57 phép kiểm tra.`,
+  exit 0.
+
+Chưa kiểm chứng trên máy thật: cắm bàn phím USB/Bluetooth ngoài và xem `--devices`;
+laptop có bàn phím nội bộ nối qua USB hoặc I2C HID có `VID_` có thể bị xếp là ngoài.
+Đây vẫn là heuristic, không phải chặn BadUSB. Việc tiếp theo: W10 (ngưỡng điểm và
+luật trong `rules.json`).
+
+### 2026-11-21 — W10: ngưỡng điểm và mẫu nhận diện vào rules.json
+
+Đã làm:
+
+- **Ngưỡng điểm có hiệu lực (AGENTS điều 7).** `UsbScan.Detect` không còn nâng điểm
+  của mục `High` lên ngưỡng; thay vào đó `High` bị hạ khi `Score < ScoreThreshold`.
+  Cùng một tệp `.pdf.exe` vẫn là `High` ở ngưỡng mặc định 3 nhưng chỉ còn cảnh báo
+  khi người dùng đặt `scoreThreshold` 10. Không cần chỉnh trọng số vì mọi mã
+  `Strong` hiện có đều có trọng số ≥ 3.
+- **Mẫu nhận diện đọc từ `rules.json` (AGENTS điều 8).** `RulesData` thêm
+  `dangerExes`, `systemNames`, `payloadNames`, `payloadHashes`, `payloadSizes`,
+  `scriptMarkers`, `highPatterns`, `medPatterns`. `Detect.cs` chỉ còn thuộc tính
+  chuyển tiếp tới `Rules.Current`; ba regex cấu trúc (tham số shortcut, autorun)
+  vẫn nằm trong mã vì là logic đọc tệp, không phải tên/đuôi/ký tự.
+  `RulesData.CurrentVersion` 3 → 4; tệp cũ được merge, không ghi đè.
+- **Giữ nguyên phạm vi bộ đọc script 1.0.** `scriptExts` sẵn có rộng hơn (có
+  `.bat`, `.ps1`, `.scr`…), nên thêm khoá riêng `scriptScanExts` cho đúng bộ cũ
+  (`.vbs .vbe .js .jse .wsf .hta`) để việc mở rộng luật không đổi cách phân loại
+  tệp trên ổ.
+- **Regex hỏng bị bỏ qua.** `MergePatterns` thử biên dịch từng mẫu, mẫu sai hoặc quá
+  500 ký tự bị bỏ để một dòng lỗi không làm hỏng cả tệp luật.
+- **Xoá `Devices.SetEnabled` (AGENTS điều 13).** Mã chết, không nơi gọi, dùng
+  `pnputil` chỉ có trên Windows 10 1809+.
+- Self-test 29 mở rộng: JSON nạp được `dangerExes`, `payloadSizes`, `scriptMarkers`,
+  `highPatterns` và vẫn giữ mặc định. Self-test 51: `.pdf.exe` là High ở ngưỡng 3,
+  không High ở ngưỡng 10. `total` 57 → 58.
+- README: thêm mục "Detection names and the score gate come from `rules.json`",
+  cập nhật 58/58.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  549 KB, SHA256 `33d89da34a29de86…902b17a1`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 58/58 phép kiểm tra.`,
+  exit 0.
+
+Chưa kiểm chứng trên máy thật: bộ mẫu lành và mẫu sống trong `viruts/` để đo báo
+nhầm/bỏ sót sau khi đổi ngưỡng. Việc tiếp theo: W11 (đường dẫn dài hơn 260 ký tự).
+
+### 2026-11-21 — W11: quét cây sâu hơn 260 ký tự
+
+Đã làm:
+
+- **`Tree.Walk` dùng `WinPath.List` thay cho `Directory.GetFileSystemEntries`.**
+  Mỗi thư mục được liệt kê qua `FindFirstFileW` với tiền tố `\\?\`, nên cây sâu
+  hơn `MAX_PATH` không còn bị `PathTooLongException` bỏ qua cả nhánh. Thuộc tính
+  lấy luôn từ `WIN32_FIND_DATA`, không gọi thêm `File.GetAttributes`.
+- Đường dẫn trả về vẫn ở dạng thường (`C:\...`), không phải `\\?\...`, để phần
+  lớn mã cũ (đọc tên, đuôi, hiển thị) giữ nguyên; các thao tác tệp đã dùng
+  `WinPath.Ext` từ trước.
+- Self-test 52: tạo cây 320 ký tự trong thư mục tạm, đặt `baocao.pdf.exe` ở cuối,
+  chạy `UsbScan.Detect` với độ sâu 100 và yêu cầu thấy mã `double-extension`.
+  `total` 58 → 59.
+- README: thêm mục "Long paths are scanned", cập nhật 59/59.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  550 KB, SHA256 `aa6114de0082d809…37e9eedd`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 59/59 phép kiểm tra.`,
+  exit 0.
+
+Chưa kiểm chứng trên USB thật có tên tệp dài; self-test chỉ dùng thư mục tạm trên
+NTFS. `WinPath.Ext` vẫn gọi `Path.GetFullPath` cho đường dẫn tương đối, nên đầu vào
+phải là đường dẫn tuyệt đối như hiện tại. Việc tiếp theo: W12 (hiệu năng và nhiễu
+quét).
+
+### 2026-11-21 — W12: hiệu năng và nhiễu quét
+
+Đã làm:
+
+- **Macro đọc đuôi ZIP.** `OfficeMacroDetector.HasVbaProject` đọc 1 MB cuối
+  (central directory) thay vì 8 MB đầu, bỏ trần 32 MB; tệp Office lớn không còn bị
+  bỏ qua và không cấp phát 8 MB cho mỗi tệp.
+- **ADS chỉ trên NTFS.** `ScanContext.IsNtfs` được đặt một lần trong
+  `UsbScan.Detect` bằng `Native.IsNtfsVolume`; `AdsDetector` trả về ngay trên
+  FAT32/exFAT thay vì gọi `FindFirstStreamW` cho từng tệp.
+- **Chữ ký rẻ hơn.** `Signature.PeHasSignature` đọc DOS/NT header để biết có
+  Certificate Table trước khi gọi `WinVerifyTrust`; kết quả `(path, size,
+  lastWrite)` được cache tối đa 4.096 mục. Lỗi đọc header trả `true` để không bỏ
+  sót chữ ký; trạng thái `Error` không vào cache. `WinPath.Stat` dùng
+  `GetFileAttributesExW` nên cache dùng được cả với đường dẫn dài.
+- **Mục chỉ gắn cờ ẩn mặc định.** `UsbListControl` tách `_rows` (toàn bộ) và
+  `_view` (đang hiện); mục `FlagOnly` không hiện cho tới khi bấm chip
+  "N mục chỉ gắn cờ" ở dòng ghi chú. Ẩn/hiện không làm mất lựa chọn; mỗi lần quét
+  mới quay về ẩn.
+- Self-test 53–55: tệp không phải PE không gọi `WinVerifyTrust` và vào cache;
+  marker `vbaProject.bin` chỉ nằm trong 1 MB cuối của tệp 9 MB vẫn được nhận;
+  stream ẩn thấy trên NTFS và bị bỏ qua khi `IsNtfs=false`. `total` 59 → 62.
+- README: thêm mục "Scans skip work that cannot help", cập nhật 62/62.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  556 KB, SHA256 `de202ff31e017827…0261d661`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 62/62 phép kiểm tra.`,
+  exit 0.
+
+Chưa đo được mốc "5.000 tệp không tăng > 20 %" trên USB thật; self-test chỉ kiểm
+tra đường đi và kết quả. Chip ẩn/hiện mục gắn cờ chưa có self-test giao diện (cần
+message loop). Việc tiếp theo: W13 (luồng WriteProtect ↔ làm sạch).
+
+### 2026-11-22 — W13: WriteProtect ↔ làm sạch
+
+Đã làm:
+
+- **Máy trạng thái `wp-pending`.** `Policy.BeginCleanPause` chỉ tạm mở khoá do
+  ShieldGate bật (còn `repair\write-protect.txt`), ghi `repair\wp-pending.txt`
+  gồm `pid` và hạn UTC 10 phút rồi mới tắt `StorageDevicePolicies\WriteProtect`.
+  `EndCleanPause` bật lại và xoá ghi chú; khoá do Windows/người dùng bật không
+  bao giờ bị tự mở.
+- **Một luồng duy nhất.** `UsbScan.Apply` và `UsbScan.Unhide` tự gọi Begin/End
+  sau khi giữ `CleanLock`, nên GUI, bảo vệ nền và dòng lệnh dùng chung. Bỏ các
+  lần mở khoá lặp ở `Guard.CleanRoot`, `Guard.ScanAndClean` và `UsbPage.DoApply`;
+  khôi phục cách ly và tiêm `autorun.inf` vẫn bọc ngoài vì không đi qua `UsbScan`.
+- **Khôi phục khi bị kill.** `Policy.RecoverPending` chạy lúc GUI/tray khởi động
+  và mỗi vòng bảo vệ: ghi chú hết hạn, hỏng, hoặc tiến trình giữ nó đã chết thì
+  bật khoá lại và ghi log. Vòng lặp 60 giây không bật lại khi ghi chú còn hạn,
+  nhưng lệnh tắt do người dùng chủ động vẫn đi qua và xoá ghi chú.
+- **Công tắc không nhảy trạng thái.** `Guard.GetStatus` báo WriteProtect = bật
+  khi đang tạm mở (`Policy.PendingPause`), nên trang Bảo vệ không tự hiện "tắt"
+  rồi bật lại sau 10 phút.
+- **Self-test 56:** hạn còn/hết, dữ liệu rác, thiếu `until`, và hướng chặn
+  (`BlockedByPause` chỉ chặn chiều bật lại, không chặn chiều tắt). `total` 62 → 63.
+- README: thêm mục "Write protection steps aside for cleaning", cập nhật 63/63.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  560 KB, SHA256 `2c72acfdb85e91f7…84e2fee9da`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 63/63 phép kiểm tra.`,
+  exit 0.
+
+Chưa kiểm chứng trên USB thật có công tắc khoá ghi vật lý (B7); self-test không
+đụng registry. Việc tiếp theo: W14 (quét lại thông minh).
+
+### 2026-11-22 — W14: quét lại thông minh
+
+Đã làm:
+
+- **Chỉ tệp nguy hiểm mới kích hoạt quét.** `RulesData.IsBurstRiskExt` gom `.lnk`,
+  script và payload. `BehaviorMonitor.ShouldAlert` chỉ báo khi `risky >=
+  lnkBurst` hoặc (`total >= writeBurst` **và** `risky > 0`); 300 `.txt`/`.jpg`
+  không còn khởi động quét cả ổ, còn 30 `.lnk` thì vẫn quét.
+- **Chống lặp toast.** Thêm `behavior.alertSeconds` (mặc định 600) thay cho hằng
+  số 120 giây trong `BehaviorMonitor`; cùng một ổ chỉ ghi sự kiện và hiện bong
+  bóng sau mỗi 10 phút.
+- `rules.json` có `behavior.alertSeconds`; `RulesData.CurrentVersion` 4 → 5 để tệp
+  cũ được ghép mặc định; giá trị nhỏ hơn 30 bị kẹp về 30.
+- **Self-test 57:** 300 `.txt` (0 nguy hiểm) không báo; 30 `.lnk` báo; 500 mục có
+  1 payload báo; 399 mục với 14 nguy hiểm không báo; cooldown 2 phút chưa hết,
+  11 phút thì hết; `.lnk/.exe/.vbs` là nguy hiểm, `.txt/.jpg` không. `total` 63 → 64.
+- README: thêm mục "Burst alerts look at what is written", cập nhật 64/64.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  560 KB, SHA256 `667f592ba4836382…a82fd7acc`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 64/64 phép kiểm tra.`,
+  exit 0.
+
+Chưa đo trên USB thật với 300 tài liệu và 30 shortcut; self-test chỉ kiểm tra hàm
+quyết định và cooldown. Việc tiếp theo: W15 (`chkdsk /f` không treo).
+
+### 2026-11-22 — W15: `chkdsk /f` không treo
+
+Đã làm:
+
+- **`Native.Run` nhận stdin.** Thêm overload `Run(file, args, timeoutMs, stdin,
+  out output)`: bật `RedirectStandardInput`, ghi sẵn câu trả lời rồi đóng. Bản
+  không có `stdin` giữ nguyên hành vi cho mọi lệnh khác.
+- **`Repair.RunChkdsk` trả lời dismount.** Chỉ khi `/f`, truyền `"Y\r\n"` để trả
+  lời câu hỏi "force a dismount? (Y/N)" khi ổ còn handle mở; trước đây không ai
+  trả lời nên tiến trình chờ tới hết timeout 6 giờ. Chế độ chỉ đọc không đổi.
+- Đóng stdin sau câu trả lời: prompt thứ hai nhận EOF và chkdsk đi tiếp hoặc
+  thoát thay vì treo. Timeout 6 giờ vẫn là chốt cuối cho ổ hỏng thật.
+- **Self-test 58 không chạy chkdsk.** Dùng `findstr` với `stdin` để chứng minh dữ
+  liệu vào tới tiến trình con và stdin được đóng đúng. `total` 64 → 65.
+- README: thêm mục "`chkdsk /f` answers the dismount prompt", cập nhật 65/65.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  561 KB, SHA256 `7f00e91257b0b9a9…0659c382`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 65/65 phép kiểm tra.`,
+  exit 0.
+
+Chưa chạy `chkdsk /f` trên VHD/USB thật theo mục 8 của roadmap; self-test chỉ kiểm
+tra đường ống stdin. Việc tiếp theo: W16 (hàng đợi sự kiện có ID cho tray).
+
+### 2026-11-22 — W16: hàng đợi sự kiện có ID cho tray
+
+Đã làm:
+
+- **Mỗi dòng `events.tsv` có ID tăng dần.** Bộ đếm nằm trong `events.tsv.id`, ngoài
+  tệp sự kiện, nên xoay tệp không làm mất con trỏ. Mất `.id` thì lấy ID lớn nhất
+  còn trong `.1`/tệp hiện tại rồi +1.
+- **Khoá liên tiến trình.** `Events.Add` giữ `events.tsv.lock` (`FileShare.None`,
+  chờ tối đa 1 giây) để GUI và bảo vệ nền không cấp trùng ID hoặc ghi xen dòng.
+- **`Events.ReadSince(id)` / `Events.MaxId`.** Đọc cả `.1` lẫn tệp hiện tại, lọc
+  `Id > id`, sắp xếp tăng dần; mỗi tệp chỉ đọc 512 KB cuối vì tray hỏi 5 giây một
+  lần. `MaxId` cho tray bỏ qua sự kiện cũ lúc khởi động.
+- **Tray đọc theo ID.** Bỏ bốn mốc thời gian trong `settings.txt`; dùng hàng đợi
+  `_pending` + `_lastEventId`, mỗi nhịp 5 giây hiện một bong bóng nên nhiều sự kiện
+  trong cùng một nhịp không ghi đè nhau. Sự kiện quét ổ và nhiễm lại có kind riêng
+  (`drive`, `reinfect`).
+- **Bỏ dead code.** `Settings.Set*Event`/`*EventTime` không còn nơi đọc; ba chuỗi
+  tray `DeviceBlocked`, `BadUsb`, `Composite` không còn dùng.
+- **Tương thích.** Dòng cũ 4/5 cột (không ID, có hoặc không severity) vẫn đọc được.
+- **Self-test 59.** 3 sự kiện có ID tăng dần; `ReadSince` chỉ trả mục mới; chuyển
+  tệp sang `.1` rồi ghi tiếp vẫn thấy mục mới với ID lớn hơn; dòng 4 cột cũ parse
+  đúng. `total` 65 → 66.
+- README: mục timeline nói rõ ID và hàng đợi; `settings.txt` không còn "tray notice
+  state"; cập nhật 66/66.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  562 KB, SHA256 `4010a773b527cb26…5c435b8d`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 66/66 phép kiểm tra.`,
+  exit 0.
+
+Chưa thử tray thật với hai tiến trình ghi đồng thời; self-test chỉ chạy trong một
+tiến trình. Việc tiếp theo: W17 (VirusTotal opt-in).
+
+### 2026-11-22 — W17: VirusTotal chỉ gửi hash (chưa nối UI/CLI)
+
+Đã làm:
+
+- **`src/core/VirusTotal.cs` là nơi duy nhất có mã mạng.** `Lookup(hash, key)` từ
+  chối hash không phải 64 ký tự hex và khoá rỗng trước khi tạo yêu cầu.
+- **URL chỉ có hash.** `BaseUrl + sha256`; không tên tệp, đường dẫn hay nội dung.
+  Khoá ở header `x-apikey`, không xuất hiện trong URL hay log.
+- **`HttpWebRequest` GET**, `Proxy = null`, `AllowAutoRedirect = false` để khoá
+  không bị gửi sang host khác; timeout/read-write 15 giây; TLS 1.2 bật bằng
+  `(SecurityProtocolType)3072` vì .NET 4.0 không có tên `Tls12`.
+- **`VtRateLimiter`:** 4 mốc trong 60 giây, `Wait()` ngủ tới khi có chỗ. Thử lại
+  một lần chỉ với lỗi mạng/timeout hoặc HTTP 5xx; 4xx là kết luận.
+- **Đọc tối đa 512 KB** phản hồi; tách `last_analysis_stats` rồi lấy `malicious`,
+  `suspicious`, `harmless`, `undetected`, `timeout`, `type-unsupported`.
+- **Chưa nối vào UI/CLI** (W18/W19), nên không có lời gọi mạng nào khi người dùng
+  chưa bật.
+- **Self-test 60** dựng `TcpListener` trên `127.0.0.1` (không ra Internet): request
+  line đúng hash, `x-apikey` đúng một lần, không có tên tệp; phản hồi giả cho
+  `malicious=3`, `Total=70`; hash sai/khoá rỗng không gửi; giới hạn 4 yêu cầu/phút
+  đúng ở mốc 59 và 61 giây. `total` 66 → 67.
+- AGENTS: ghi rõ self-test chỉ dùng loopback, không gọi mạng ngoài.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  570 KB, SHA256 `edcde6e63b263f39…ffe3e05cb`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 67/67 phép kiểm tra.`,
+  exit 0.
+
+Chưa gọi VirusTotal thật (không có khoá, và W18 mới thêm công tắc). Việc tiếp
+theo: W18 (khoá DPAPI + công tắc và hộp thoại đồng ý trong trang Bảo vệ).
+
+### 2026-11-22 — W18: khoá DPAPI + công tắc trong trang Bảo vệ
+
+Đã làm:
+
+- **`src/core/VtKey.cs`:** khoá API mã hoá bằng `ProtectedData.Protect` với scope
+  `CurrentUser`, entropy riêng, ghi ra `vt.key`. `Load()` trả rỗng khi tệp hỏng,
+  bị copy từ máy khác hoặc không phải của tài khoản này; không crash.
+- **Không rò rỉ:** khoá không vào `settings.txt` hay log; `settings.txt` chỉ có
+  `vt.enabled` và `vt.consent`. Ô nhập che ký tự và xoá sau khi lưu.
+- **`VirusTotal.Query(hash)`:** kiểm tra công tắc trước rồi mới nạp khoá; tắt
+  công tắc trả `Disabled` với `Ran=false`, không có yêu cầu mạng.
+- **Trang Bảo vệ:** mục VirusTotal với công tắc tắt mặc định, hộp thoại đồng ý
+  một lần (chỉ gửi hash; không tên/đường dẫn/nội dung), ô nhập khoá, nút Lưu,
+  liên kết Xoá khoá; trạng thái "đã lưu khoá"/"chưa có khoá".
+- **Gỡ cài đặt:** `vt.key` luôn nằm trong danh sách xoá, kể cả khi giữ cách ly/
+  bản sao lưu; thêm `.id`/`.lock` của timeline để dọn sạch thư mục.
+- `build.ps1` tham chiếu `System.Security.dll` cho `ProtectedData`.
+- **Self-test 61:** lưu/đọc lại khoá DPAPI, ciphertext không chứa khoá dạng chữ,
+  `settings.txt` không chứa khoá, tệp hỏng trả rỗng, công tắc tắt thì `Query`
+  không gửi, cờ đồng ý đọc lại được, `vt.key` có trong danh sách gỡ cài đặt,
+  xoá khoá hoạt động. `total` 67 → 68.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  580 KB, SHA256 `968aa5cf6b6ad787…bbcfa57`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 68/68 phép kiểm tra.`,
+  exit 0.
+
+Chưa thử nhập khoá thật và tra một tệp thật; W19 mới có lệnh `--vt`. Việc tiếp
+theo: W19 (`--vt`, `--help`, `--version`, `--scan --json`, `PRIVACY.md`).
+
+### 2026-11-23 — W19: CLI VirusTotal, JSON, trợ giúp và chính sách riêng tư
+
+Đã làm:
+
+- **`--vt <tệp>`:** kiểm tra tệp, công tắc rồi mới băm; in SHA-256 trước khi tra.
+  Mã thoát `0` (sạch), `2` (có hãng gắn cờ), `1` (tắt/thiếu khoá/không đọc
+  được/lỗi mạng). Không tự cách ly theo kết quả.
+- **`--scan <ổ> --json`:** `src/core/ScanJson.cs` dựng JSON gồm drive, files,
+  items, seconds, truncated, readOnly, counts, warnings, findings[]; mỗi finding
+  có path, relative, kind, score, high, flagOnly, size, codes, reason. Không có
+  nội dung tệp. Thêm `Json.Quote` vào `Json.cs` sẵn có (không tạo parser mới).
+  Mã thoát giữ `0/1/2`.
+- **`--help` / `--version`:** `--help` liệt kê lệnh, mã thoát và câu "không có
+  lời gọi mạng nào trừ khi bạn bật VirusTotal và chạy --vt"; `--version` in tên
+  và phiên bản.
+- **`Native.Sha256(path, maxBytes)`:** `maxBytes <= 0` là không giới hạn, dùng
+  cho `--vt`; call site cũ vẫn 10 MB.
+- **`PRIVACY.md`:** bảng dữ liệu trên máy, mô tả yêu cầu mạng duy nhất (URL chỉ
+  có hash, `x-apikey`, không tên/đường dẫn/nội dung), DPAPI, xoá khoá khi gỡ,
+  lựa chọn của người dùng; có tóm tắt tiếng Việt.
+- **README:** bỏ câu "chưa nối", thêm lệnh mới, mô tả JSON/mã thoát, sửa giới
+  hạn service/driver thành heuristic đúng thực tế, trỏ `PRIVACY.md`.
+- **AGENTS.md điều 10:** trỏ `PRIVACY.md`, nêu hiện chỉ có `--vt`.
+- **Self-test 62:** JSON có đường dẫn chứa `"` và `\` được `Json.Parse` đọc lại
+  đúng từng trường; `Json.Quote` không lọt newline; `--help` có `--scan`,
+  `--vt`, `--json`, `--version`, `--help`. `total` 68 → 69.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  588 KB, SHA256 `cf9e9517faa1922b…7df118db9`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 69/69 phép kiểm tra.`,
+  exit 0.
+- `--version` → `ShieldGate 2.1`, exit 0. `--help` exit 0.
+- `--scan <thư mục tạm> --json` → JSON hợp lệ, `files: 1`, exit 0.
+- `--vt <tệp>` khi VirusTotal tắt → in thông báo tắt, exit 1, không gọi mạng.
+
+Chưa thử tra VirusTotal thật (không có khoá). Việc tiếp theo: W20
+(`docs/design-badusb.md`).
+
+### 2026-11-23 — W20: thiết kế BadUSB
+
+Đã làm:
+
+- Viết `docs/design-badusb.md` (12 mục): mục tiêu/không làm, hiện trạng 2.1,
+  kiến trúc W21/W22, mô hình dữ liệu, ngưỡng, cảnh báo, quyền riêng tư, kiểm
+  thử, triển khai, câu hỏi duyệt, rủi ro.
+- Chốt kỹ thuật đề xuất:
+  - Raw Input trong tray, cửa sổ ẩn `HWND_MESSAGE`, `RIDEV_INPUTSINK |
+    RIDEV_DEVNOTIFY`; **chỉ đọc `RAWINPUTHEADER`**, bỏ `hDevice = 0`.
+  - Poll `Win32_Process` 1 giây + Toolhelp thay `Win32_ProcessStartTrace` vì tray
+    không chạy admin; cache cha 5 giây; đi ngược tối đa 3 cấp tìm
+    `explorer.exe`.
+  - Không log `CommandLine` của shell để tránh giữ nội dung người dùng gõ.
+  - Ngưỡng: 15 sự kiện/giây, cửa sổ 2 giây, tối thiểu 30 sự kiện, thiết bị mới
+    120 giây, shell trong 10 giây, cooldown 600 giây; mặc định bật, chỉ cảnh báo.
+  - W21 thêm kiểm tra tĩnh `test.ps1` chặn `RAWKEYBOARD`,
+    `SetWindowsHookEx`, `GetAsyncKeyState`, `GetKeyboardState`,
+    `MapVirtualKey`.
+- Cập nhật roadmap (W20 ✅, W22 đổi sang poll 1 giây), README trỏ tài liệu thiết
+  kế. Không đổi mã nguồn.
+
+Bằng chứng: chỉ tài liệu; lần build/test gần nhất vẫn là W19 (`69/69`, exit 0).
+
+Chờ duyệt §11 (ngưỡng, mặc định bật, polling, trust store, không log command
+line, có thiết bị thử BadUSB hay không) trước khi làm W21.
+
+### 2026-11-23 — W21: đo tốc độ gõ trong tray
+
+Chủ dự án duyệt mặc định §11. Đã làm:
+
+- **`src/core/InputRate.cs`:** 50 bucket × 100 ms, cửa sổ 20 bucket (2 giây);
+  `MinEvents = 30`, `MinPerSecond = 15`. Nghỉ > 5 giây hoặc đồng hồ lùi đều xoá
+  cửa sổ. `InputBurst` chỉ có nhãn thiết bị, mốc đầu/cuối, số sự kiện, đỉnh/giây;
+  không có trường mã phím.
+- **`src/ui/InputCollector.cs`:** cửa sổ ẩn message-only, đăng ký Raw Input
+  `0x01/0x06` với `RIDEV_INPUTSINK | RIDEV_DEVNOTIFY`. Chỉ đọc header của gói
+  tin; bỏ `hDevice = 0` (RDP/automation/on-screen keyboard). Tên raw chỉ trong
+  bộ nhớ; log dùng nhãn `VID_xxxx&PID_xxxx`. Rút thiết bị thì xoá trạng thái;
+  cooldown 600 giây/thiết bị.
+- **Tray:** collector chạy cùng icon; burst ghi INFO `BadUSB (chỉ đo): …`, tối đa
+  1 dòng/10 phút/thiết bị; đăng ký lỗi thì WARN. Thoát tray dừng collector.
+- **`test.ps1`:** kiểm tra tĩnh `src/**/*.cs`, fail nếu có `RAWKEYBOARD`,
+  `SetWindowsHookEx`, `GetAsyncKeyState`, `GetKeyboardState`, `MapVirtualKey`.
+- **`PRIVACY.md`:** mục "Input timing (BadUSB measurement)" + tóm tắt tiếng Việt.
+- **Self-test 63:** 6 sự kiện/giây không vượt; 100 sự kiện/~2 giây vượt; nghỉ
+  10 giây và đồng hồ lùi reset. `total` 69 → 70.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  594 KB, SHA256 `8d231966a494c7e7…87b85f4`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 70/70 phép kiểm tra.`,
+  exit 0.
+- Chạy `--tray` 4 giây rồi thoát: không có WARN "không đăng ký được Raw Input",
+  tức cửa sổ ẩn + đăng ký thành công.
+
+Chưa đo bằng bàn phím thật (môi trường không có thiết bị thử); chưa cảnh báo,
+chưa ghép shell. Việc tiếp theo: W22 (WMI + Toolhelp, cảnh báo BadUSB).
+
+### 2026-11-23 — W22: cảnh báo BadUSB
+
+Đã làm:
+
+- **`src/core/BadUsb.cs`:** logic thuần, không P/Invoke. Chỉ báo khi công tắc
+  bật, thiết bị chưa `Trusted`, `FirstSeen` trong 120 giây, burst đạt 30 sự kiện
+  và 15 sự kiện/giây, shell tạo trong `burst.First - 1s … burst.Last + 10s`, và
+  có tổ tiên `explorer.exe`. Cooldown 600 giây/khóa thiết bị; `Reset()` cho
+  self-test.
+- **`src/core/ProcessWatch.cs`:** thread nền poll 1 giây. WMI chỉ đọc PID, PID
+  cha, tên và `CreationDate` của 6 shell; **không** đọc `CommandLine`. Toolhelp
+  snapshot lấy tên cha, đi ngược tối đa 3 cấp. Poll đầu chỉ ghi nhớ shell đang
+  có; giữ 120 giây, tối đa 20 shell. WMI lỗi thì bỏ qua vòng, không cảnh báo.
+- **`src/core/Rules.cs`:** phiên bản 6, mục `badusb` với 7 khóa; giá trị ngoài
+  khoảng bị kẹp (`minEvents` 5..10000, `eventsPerSecond` 2..10000,
+  `shellSeconds` 1..120, `alertSeconds` 30..86400, `newDeviceSeconds`
+  10..3600).
+- **`src/core/Settings.cs`:** `badusb.enabled` ghi đè mặc định từ `rules.json`;
+  công tắc trong trang Bảo vệ bật/tắt cả Raw Input lẫn poll tiến trình.
+- **Tray:** `SyncBadUsb` kiểm tra công tắc mỗi 5 giây; burst được giữ tới hạn
+  `burst.Last + shellSeconds` để chờ shell; kho thiết bị đọc trên thread nền;
+  khớp đường dẫn raw với `devices.json` trước, VID/PID sau. Khi đủ điều kiện:
+  log WARN + sự kiện `device` WARN (balloon qua hàng đợi sẵn có). Không tắt
+  thiết bị.
+- **`src/core/Devices.cs`:** `MatchesRaw` chuẩn hoá `\\?\HID#…` → `HID\…`;
+  `RecentShellProcess` bỏ `CommandLine` để không giữ nội dung người dùng gõ.
+- **Self-test 64–65:** ma trận BadUSB (báo, cooldown, thiết bị tin cậy, không
+  explorer, shell cũ, shell muộn, gõ chậm, thiết bị cũ, công tắc tắt) và
+  đọc-kẹp mục `badusb`. `total` 70 → 72.
+
+Lỗi gặp và sửa: lần chạy tray đầu tiên ném `NullReferenceException` trong
+`SyncBadUsb` vì `Refresh()` được gọi trước khi `_input` được tạo. Đã chuyển khối
+khởi tạo `InputCollector`/`SyncBadUsb` lên trước `Refresh()`; chạy lại 7 giây
+không còn lỗi trong log.
+
+Bằng chứng:
+
+- `powershell -ExecutionPolicy Bypass -File build.ps1` → `dist\ShieldGate.exe`,
+  608 KB, SHA256 `badcfe5bb374e852…4184118a`.
+- `powershell -ExecutionPolicy Bypass -File test.ps1` → `Đạt 72/72 phép kiểm tra.`,
+  exit 0.
+- Chạy `--tray` 7 giây: không có ERROR/WARN mới; chỉ dòng merge `rules.json`
+  phiên bản 3 → 6.
+
+Chưa đo trên thiết bị BadUSB thật (môi trường không có). Kịch bản §9.2 của
+`docs/design-badusb.md` vẫn là việc của bản phát hành. Việc tiếp theo: W23
+(named pipe) nếu được duyệt; nếu không thì giữ mô hình tệp + ACL.

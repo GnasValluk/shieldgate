@@ -227,6 +227,11 @@ namespace ShieldGate
             }
             public static string SelectAll { get { return T("Chọn tất cả", "Select all"); } }
             public static string SelectNone { get { return T("Bỏ chọn tất cả", "Clear selection"); } }
+            public static string ShowFlagged(int n)
+            {
+                return T("Hiện " + n + " mục chỉ gắn cờ", "Show " + n + " flagged items");
+            }
+            public static string HideFlagged { get { return T("Ẩn mục chỉ gắn cờ", "Hide flagged items"); } }
             public static string ListName { get { return T("Danh sách tệp cần xử lý", "Files that need action"); } }
             public static string PartialNote(int n)
             {
@@ -456,6 +461,49 @@ namespace ShieldGate
                     return T("Theo dõi tiến trình đang chạy từ ổ rời và dừng tiến trình đó. Đây là lớp theo thời điểm, không phải chặn tuyệt đối.",
                              "Watch processes running from removable drives and stop them. This is a point-in-time layer, not an absolute block.");
                 }
+            }
+            public static string BadUsbSwitch { get { return T("Cảnh báo BadUSB", "Warn about BadUSB"); } }
+            public static string BadUsbSwitchDetail
+            {
+                get
+                {
+                    return T("Khi biểu tượng khay chạy: cảnh báo nếu bàn phím mới gõ rất nhanh rồi mở cmd/PowerShell từ Explorer. Chỉ đếm sự kiện, không đọc phím; chỉ cảnh báo, không tắt thiết bị.",
+                             "While the tray icon runs: warn if a new keyboard types very fast and then opens cmd/PowerShell from Explorer. Counts events only, never key codes; warning only, never disables a device.");
+                }
+            }
+            public static string VtTitle { get { return T("VirusTotal (tuỳ chọn)", "VirusTotal (optional)"); } }
+            public static string VtSwitch { get { return T("Tra cứu VirusTotal", "Look up VirusTotal"); } }
+            public static string VtSwitchDetail
+            {
+                get
+                {
+                    return T("Chỉ gửi SHA-256 của tệp khi bạn bấm tra cứu. Không gửi tên tệp, đường dẫn hay nội dung. Mặc định tắt.",
+                             "Sends only the file's SHA-256 when you ask for a lookup. No file names, paths or contents. Off by default.");
+                }
+            }
+            public static string VtKeyLabel { get { return T("Khoá API VirusTotal", "VirusTotal API key"); } }
+            public static string VtKeySaved
+            {
+                get { return T("Đã lưu khoá, mã hoá bằng DPAPI của tài khoản Windows này.", "Key saved, encrypted with DPAPI for this Windows account."); }
+            }
+            public static string VtNoKey { get { return T("Chưa có khoá. Tra cứu sẽ không chạy.", "No key saved. Lookups will not run."); } }
+            public static string VtSave { get { return T("Lưu khoá", "Save key"); } }
+            public static string VtClear { get { return T("Xoá khoá", "Remove key"); } }
+            public static string VtSaved { get { return T("Đã lưu khoá.", "Key saved."); } }
+            public static string VtBadKey { get { return T("Khoá phải là 64 ký tự hex.", "The key must be 64 hex characters."); } }
+            public static string VtSaveFailed { get { return T("Không lưu được khoá.", "Could not save the key."); } }
+            public static string VtCleared { get { return T("Đã xoá khoá.", "Key removed."); } }
+            public static string VtEnabled
+            {
+                get { return T("Đã bật tra cứu. Kết quả chỉ để tham khảo.", "Lookup is on. Results are advisory only."); }
+            }
+            public static string VtDisabled
+            {
+                get { return T("Đã tắt tra cứu; không có dữ liệu nào được gửi.", "Lookup is off; nothing is sent."); }
+            }
+            public static string VtOnNoKey
+            {
+                get { return T("Đã bật nhưng chưa có khoá; chưa có gì được gửi.", "Enabled, but no key yet; nothing is sent."); }
             }
             public static string On { get { return T("Bật bảo vệ", "Turn on protection"); } }
             public static string Off { get { return T("Tắt bảo vệ", "Turn off protection"); } }
@@ -1215,14 +1263,31 @@ namespace ShieldGate
                 return T((on ? "Bật" : "Tắt") + " chặn ghi ổ USB (ok=" + ok + ")",
                          (on ? "Enabled" : "Disabled") + " USB write protection (ok=" + ok + ")");
             }
+            public static string WriteProtectRecovered
+            {
+                get
+                {
+                    return T("Đã bật lại chặn ghi USB sau khi tạm mở để cách ly",
+                             "USB write protection was restored after a temporary cleaning pause");
+                }
+            }
+            public static string WriteProtectRecoverFailed
+            {
+                get
+                {
+                    return T("Không bật lại được chặn ghi USB sau khi tạm mở",
+                             "USB write protection could not be restored after a temporary pause");
+                }
+            }
             public static string PolicyError(string detail)
             {
                 return T("Lỗi chính sách bảo vệ: " + detail, "Protection policy error: " + detail);
             }
             public static string BehaviorBurst(string drive, int total, int risky)
             {
-                return T("Bùng nổ ghi trên " + drive + ": " + total + " mục, " + risky + " .lnk/script",
-                         "Write burst on " + drive + ": " + total + " items, " + risky + " .lnk/script files");
+                return T("Bùng nổ ghi trên " + drive + ": " + total + " mục, " + risky + " .lnk/script/payload",
+                         "Write burst on " + drive + ": " + total + " items, " + risky +
+                         " .lnk/script/payload files");
             }
             public static string BehaviorWatcherError(string detail)
             {
@@ -1252,6 +1317,21 @@ namespace ShieldGate
             {
                 return T("Nghi composite/BadUSB (vừa ổ vừa bàn phím): " + name,
                          "Composite/BadUSB suspect (storage and keyboard): " + name);
+            }
+            public static string BadUsbRate(string device, int events, double seconds, double peak)
+            {
+                return T("BadUSB (chỉ đo): " + device + " " + events + " sự kiện trong "
+                         + seconds.ToString("0.0") + " giây, đỉnh " + peak.ToString("0") + "/giây",
+                         "BadUSB (measure only): " + device + " " + events + " events in "
+                         + seconds.ToString("0.0") + " s, peak " + peak.ToString("0") + "/s");
+            }
+            public static string BadUsbUnavailable
+            {
+                get
+                {
+                    return T("Không đăng ký được Raw Input; không đo tốc độ gõ.",
+                             "Could not register Raw Input; typing rate is not measured.");
+                }
             }
             public static string DeviceBaseline(int count)
             {
@@ -1291,8 +1371,10 @@ namespace ShieldGate
             public static string ExecBlocked { get { return T("Dừng tiến trình chạy từ ổ rời", "Stopped a process running from a removable drive"); } }
             public static string BehaviorBurst(int total, int risky, int window)
             {
-                return T("Trong " + window + " giây: " + total + " mục mới, " + risky + " tệp .lnk/script",
-                         "Within " + window + " seconds: " + total + " new items, " + risky + " .lnk/script files");
+                return T("Trong " + window + " giây: " + total + " mục mới, " + risky +
+                         " tệp .lnk/script/payload",
+                         "Within " + window + " seconds: " + total + " new items, " + risky +
+                         " .lnk/script/payload files");
             }
             public static string DefenderClean { get { return T("Windows Defender: không phát hiện gì", "Windows Defender: nothing found"); } }
             public static string DefenderThreat { get { return T("Windows Defender: phát hiện mối nguy", "Windows Defender: threat found"); } }
@@ -1304,6 +1386,17 @@ namespace ShieldGate
             }
             public static string DeviceBlocked(string name) { return T("Thiết bị đã chặn: " + name, "Blocked device: " + name); }
             public static string DeviceBadUsb(string name) { return T("Nghi BadUSB: bàn phím mới + shell", "BadUSB suspect: new keyboard + shell"); }
+            public static string BadUsbAlert(string device, string ids, int events, double seconds,
+                                             string shell, string parent)
+            {
+                string who = parent.Length > 0 ? shell + " (" + parent + ")" : shell;
+                return T("Nghi BadUSB: " + device + " (" + ids + ") gõ " + events +
+                         " sự kiện trong " + seconds.ToString("0.0") + " giây rồi mở " + who +
+                         ". Đây là dấu hiệu, không phải kết luận; không tắt thiết bị.",
+                         "BadUSB suspect: " + device + " (" + ids + ") sent " + events +
+                         " events in " + seconds.ToString("0.0") + " s then opened " + who +
+                         ". This is a sign, not a verdict; no device was disabled.");
+            }
             public static string DeviceComposite(string name) { return T("Nghi composite: " + name, "Composite suspect: " + name); }
             public static string DeviceBaseline(int count) { return T("Kho thiết bị ban đầu: " + count, "Initial device inventory: " + count); }
             public static string DeviceTrust(string name, string trust) { return T(name + " -> " + trust, name + " -> " + trust); }
@@ -1311,6 +1404,53 @@ namespace ShieldGate
             {
                 return T("Ổ " + volume + " bị nhiễm lại liên tục: nguồn lây đang chạy trên máy",
                          "Drive " + volume + " keeps getting re-infected: the source is running on this computer");
+            }
+            public static string DriveScan(string volume, int cleaned, int review)
+            {
+                if (cleaned > 0 && review > 0)
+                    return S.Tray.CleanedReview(volume, cleaned, review);
+                if (cleaned > 0) return S.Tray.Cleaned(volume, cleaned);
+                return S.Tray.Attention(review);
+            }
+        }
+
+        public static class Vt
+        {
+            public static string BadHash
+            {
+                get { return T("mã băm không hợp lệ", "invalid hash"); }
+            }
+            public static string NoKey
+            {
+                get { return T("chưa có khoá VirusTotal", "no VirusTotal API key"); }
+            }
+            public static string NotFound
+            {
+                get { return T("VirusTotal không có mẫu này", "VirusTotal does not know this file"); }
+            }
+            public static string Auth
+            {
+                get { return T("khoá VirusTotal bị từ chối", "VirusTotal rejected the API key"); }
+            }
+            public static string RateLimited
+            {
+                get { return T("VirusTotal giới hạn 4 yêu cầu/phút, thử lại sau", "VirusTotal allows 4 requests per minute; try again later"); }
+            }
+            public static string HttpError(int status)
+            {
+                return T("VirusTotal trả về HTTP " + status, "VirusTotal returned HTTP " + status);
+            }
+            public static string Network
+            {
+                get { return T("không kết nối được VirusTotal", "could not reach VirusTotal"); }
+            }
+            public static string NoStats
+            {
+                get { return T("VirusTotal trả về dữ liệu không đọc được", "VirusTotal returned data that could not be read"); }
+            }
+            public static string Disabled
+            {
+                get { return T("VirusTotal đang tắt", "VirusTotal is turned off"); }
             }
         }
 
@@ -1462,6 +1602,16 @@ namespace ShieldGate
             }
             public static string QuarantineOk(int n) { return T("Cách ly " + n + " tệp", "Quarantine " + n + " files"); }
             public static string Cancel { get { return T("Huỷ", "Cancel"); } }
+            public static string VtTitle { get { return T("Bật VirusTotal?", "Turn on VirusTotal?"); } }
+            public static string VtBody
+            {
+                get
+                {
+                    return T("Khi bật, ShieldGate chỉ gửi mã băm SHA-256 của tệp tới virustotal.com và nhận số lượng hãng phát hiện. Không gửi tên tệp, đường dẫn hay nội dung. Khoá API được lưu mã hoá bằng DPAPI cho tài khoản Windows này và có thể xoá bất cứ lúc nào.\n\nKết quả chỉ để tham khảo; ShieldGate không tự cách ly dựa trên VirusTotal.",
+                             "When enabled, ShieldGate sends only the file's SHA-256 hash to virustotal.com and receives the number of engines that flagged it. It does not send file names, paths or contents. The API key is stored with DPAPI for this Windows account and can be removed at any time.\n\nResults are advisory only; ShieldGate never quarantines based on VirusTotal.");
+                }
+            }
+            public static string VtOk { get { return T("Bật VirusTotal", "Turn on VirusTotal"); } }
             public static string FixTitle(int n) { return T("Sửa " + n + " mục?", "Fix " + n + " items?"); }
             public static string FixBody(string list)
             {
@@ -1740,6 +1890,150 @@ namespace ShieldGate
                              "fix order: processes, then startup mechanisms, then files");
                 }
             }
+            public static string SignatureVerify
+            {
+                get
+                {
+                    return T("tệp chưa ký là Unsigned, tệp hệ thống có chữ ký hợp lệ là Signed",
+                             "an unsigned file is Unsigned; a signed system file is Signed");
+                }
+            }
+            public static string ProcessPath
+            {
+                get
+                {
+                    return T("đọc được đường dẫn tiến trình 64-bit, PID hệ thống không gây lỗi",
+                             "read a 64-bit process path; the system PID does not throw");
+                }
+            }
+            public static string KeyboardBus
+            {
+                get
+                {
+                    return T("phân loại bàn phím trong/ngoài theo bus ACPI, USB, Bluetooth, ROOT, SWD và composite",
+                             "classify internal/external keyboards by ACPI, USB, Bluetooth, ROOT, SWD and composite bus");
+                }
+            }
+            public static string ScoreGate
+            {
+                get
+                {
+                    return T("dấu hiệu mạnh nhưng dưới ngưỡng điểm thì không còn là mục High",
+                             "a strong signal below the score threshold is no longer High");
+                }
+            }
+            public static string DeepWalk
+            {
+                get
+                {
+                    return T("cây sâu hơn 300 ký tự vẫn được quét tới tệp cuối",
+                             "a tree deeper than 300 characters is still scanned to the last file");
+                }
+            }
+            public static string SignatureCache
+            {
+                get
+                {
+                    return T("tệp không phải PE không gọi WinVerifyTrust và được nhớ trong cache",
+                             "a non-PE file skips WinVerifyTrust and is remembered in the cache");
+                }
+            }
+            public static string MacroTail
+            {
+                get
+                {
+                    return T("macro trong 1 MB cuối của tệp lớn vẫn được nhận ra",
+                             "a macro in the last 1 MB of a large file is still found");
+                }
+            }
+            public static string AdsNtfs
+            {
+                get
+                {
+                    return T("chỉ dò luồng ẩn trên NTFS, bỏ qua trên FAT32/exFAT",
+                             "hidden streams are only probed on NTFS, skipped on FAT32/exFAT");
+                }
+            }
+            public static string WriteProtectPending
+            {
+                get
+                {
+                    return T("ghi chú mở khoá hết hạn hoặc hỏng thì tự bật lại chặn ghi",
+                             "an expired or corrupt unlock note restores write protection");
+                }
+            }
+            public static string SmartRescan
+            {
+                get
+                {
+                    return T("300 tệp .txt không kích hoạt quét, 30 .lnk thì quét; báo lại sau 10 phút",
+                             "300 .txt files do not trigger a scan, 30 .lnk files do; alerts repeat after 10 minutes");
+                }
+            }
+            public static string ChkdskStdin
+            {
+                get
+                {
+                    return T("chkdsk nhận câu trả lời dismount qua stdin thay vì chờ vô hạn",
+                             "chkdsk receives the dismount answer on stdin instead of waiting forever");
+                }
+            }
+            public static string EventQueue
+            {
+                get
+                {
+                    return T("hàng đợi sự kiện có ID: đọc từ ID cũ chỉ trả mục mới, xoay tệp giữ con trỏ, dòng cũ vẫn đọc được",
+                             "event queue with IDs: reading from an old ID returns only new entries, rotation keeps the cursor, legacy rows still parse");
+                }
+            }
+            public static string VirusTotal
+            {
+                get
+                {
+                    return T("VirusTotal chỉ nhận hash trong URL + x-apikey, 4 yêu cầu/phút; hash/khoá sai thì không gửi",
+                             "VirusTotal gets only the hash in the URL + x-apikey, 4 requests/minute; a bad hash or key sends nothing");
+                }
+            }
+            public static string VirusTotalKey
+            {
+                get
+                {
+                    return T("khoá VirusTotal mã hoá DPAPI, không nằm trong settings/log; tắt công tắc thì không gửi",
+                             "VirusTotal key is DPAPI-encrypted and absent from settings/log; switching off sends nothing");
+                }
+            }
+            public static string CliJson
+            {
+                get
+                {
+                    return T("--scan --json đọc lại được, thoát ký tự đúng; --help liệt kê --scan/--vt/--json/--version",
+                             "--scan --json parses back with correct escaping; --help lists --scan/--vt/--json/--version");
+                }
+            }
+            public static string InputRate
+            {
+                get
+                {
+                    return T("bộ đếm tốc độ gõ chỉ đếm sự kiện, không đọc mã phím; burst 100 sự kiện/2 giây vượt ngưỡng, gõ 6/giây thì không",
+                             "typing-rate counter counts events only, never key codes; a 100-event/2s burst crosses the threshold, 6/s does not");
+                }
+            }
+            public static string BadUsb
+            {
+                get
+                {
+                    return T("BadUSB chỉ báo khi đủ: thiết bị mới/chưa tin cậy + gõ nhanh + shell trong cửa sổ + cha explorer; thiết bị tin cậy, shell ngoài cửa sổ, công tắc tắt hoặc cooldown thì không báo",
+                             "BadUSB warns only when all hold: new/untrusted device + fast typing + shell in the window + explorer parent; trusted device, late shell, disabled switch or cooldown do not warn");
+                }
+            }
+            public static string BadUsbConfig
+            {
+                get
+                {
+                    return T("rules.json có mục badusb phiên bản 6; giá trị âm/quá lớn bị kẹp về khoảng an toàn",
+                             "rules.json has a version-6 badusb section; negative or huge values are clamped to a safe range");
+                }
+            }
         }
 
         // Biểu tượng khay hệ thống của bản chạy nền.
@@ -1769,20 +2063,6 @@ namespace ShieldGate
             public static string DeviceNew(string name)
             {
                 return T("Thiết bị mới vừa kết nối: " + name, "A new device was connected: " + name);
-            }
-            public static string DeviceBlocked(string name)
-            {
-                return T("Thiết bị đã chặn đang kết nối: " + name, "A blocked device is connected: " + name);
-            }
-            public static string BadUsb(string name)
-            {
-                return T("Nghi BadUSB: bàn phím mới " + name + " kèm tiến trình shell. Kiểm tra ngay.",
-                         "BadUSB suspect: new keyboard " + name + " with a shell process. Check now.");
-            }
-            public static string Composite(string name)
-            {
-                return T("Thiết bị " + name + " vừa có ổ nhớ vừa có bàn phím. Kiểm tra ngay.",
-                         "Device " + name + " exposes both storage and a keyboard. Check now.");
             }
             public static string Behavior(string drive)
             {
@@ -1922,11 +2202,68 @@ namespace ShieldGate
             }
             public static string StatusWriteProtect(bool on) { return T("Chặn ghi USB: " + (on ? "bật" : "tắt"), "USB write protection: " + (on ? "on" : "off")); }
             public static string StatusBlockExec(bool on) { return T("Chặn chạy từ ổ rời: " + (on ? "bật" : "tắt"), "Removable execution block: " + (on ? "on" : "off")); }
+            public static string VtUsage { get { return T("Cách dùng: ShieldGate.exe --vt <tệp>", "Usage: ShieldGate.exe --vt <file>"); } }
+            public static string VtMissing(string path) { return T("Không thấy tệp: " + path, "File not found: " + path); }
+            public static string VtOff
+            {
+                get
+                {
+                    return T("VirusTotal đang tắt. Bật trong trang Bảo vệ và lưu khoá API trước.",
+                             "VirusTotal is off. Turn it on in the Protect page and save an API key first.");
+                }
+            }
+            public static string VtHashFailed(string path)
+            {
+                return T("Không đọc được tệp để băm: " + path, "Could not read the file to hash: " + path);
+            }
+            public static string VtHash(string hash) { return T("SHA-256: " + hash, "SHA-256: " + hash); }
+            public static string VtResult(int malicious, int suspicious, int total)
+            {
+                return T("VirusTotal: " + malicious + " ác ý, " + suspicious + " đáng ngờ trong " + total + " hãng. Chỉ để tham khảo.",
+                         "VirusTotal: " + malicious + " malicious, " + suspicious + " suspicious out of " + total + " engines. Advisory only.");
+            }
+            public static string Help
+            {
+                get
+                {
+                    return T(
+                        "ShieldGate " + AppInfo.Version + " — bảo vệ thiết bị ngoại vi\n" +
+                        "\n" +
+                        "  ShieldGate.exe                      mở giao diện\n" +
+                        "  --install | --uninstall [--keep-data|--purge-data]\n" +
+                        "  --watch | --tray | --status\n" +
+                        "  --scan <ổ> [--json]                 quét ổ, --json cho script\n" +
+                        "  --repair <ổ>                        xem và sửa lỗi ổ\n" +
+                        "  --defender <tệp hoặc thư mục>       nhờ Windows Defender quét\n" +
+                        "  --devices | --events [số dòng]\n" +
+                        "  --vt <tệp>                          tra SHA-256 trên VirusTotal (phải bật)\n" +
+                        "  --import-rules <rules.json> --yes\n" +
+                        "  --selftest | --version | --help\n" +
+                        "\n" +
+                        "Mã thoát: 0 bình thường, 1 lỗi, 2 có mục cần xử lý (--scan, --vt).\n" +
+                        "Không có lời gọi mạng nào trừ khi bạn bật VirusTotal và chạy --vt.",
+                        "ShieldGate " + AppInfo.Version + " — peripheral device protection\n" +
+                        "\n" +
+                        "  ShieldGate.exe                      open the window\n" +
+                        "  --install | --uninstall [--keep-data|--purge-data]\n" +
+                        "  --watch | --tray | --status\n" +
+                        "  --scan <drive> [--json]             scan a drive; --json for scripts\n" +
+                        "  --repair <drive>                    inspect and repair a drive\n" +
+                        "  --defender <file or folder>         ask Windows Defender to scan\n" +
+                        "  --devices | --events [count]\n" +
+                        "  --vt <file>                         look up the SHA-256 on VirusTotal (must be on)\n" +
+                        "  --import-rules <rules.json> --yes\n" +
+                        "  --selftest | --version | --help\n" +
+                        "\n" +
+                        "Exit codes: 0 normal, 1 error, 2 items need attention (--scan, --vt).\n" +
+                        "No network call happens unless you turn on VirusTotal and run --vt.");
+                }
+            }
             public static string Usage
             {
                 get
                 {
-                    return "ShieldGate.exe --watch | --status | --install | --uninstall [--keep-data|--purge-data] | --scan <drive> | --devices | --events [n] | --repair <drive> | --defender <path> | --import-rules <rules.json> --yes | --selftest";
+                    return "ShieldGate.exe --watch | --status | --install | --uninstall [--keep-data|--purge-data] | --scan <drive> [--json] | --devices | --events [n] | --repair <drive> | --defender <path> | --vt <file> | --import-rules <rules.json> --yes | --selftest | --version | --help";
                 }
             }
             public static string TempDir(string path) { return T("Thư mục tạm: " + path, "Temporary folder: " + path); }

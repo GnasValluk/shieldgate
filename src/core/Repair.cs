@@ -617,8 +617,12 @@ namespace ShieldGate
             string args = fix ? letter + " /f" : letter;
             string output;
             if (log != null) log(fix ? S.Repair.ChkdskFixRunning : S.Repair.ChkdskReadRunning);
+            // chkdsk /f hoi "force a dismount? (Y/N)" khi o con handle mo. Khong
+            // redirect stdin thi tien trinh cho vo han (truoc day toi 6 gio).
+            // Tra loi Y san; dong stdin de lan hoi sau nhan EOF thay vi treo.
             int code = Native.Run(Native.SysExe("chkdsk.exe"), args,
-                                  fix ? 6 * 60 * 60 * 1000 : 20 * 60 * 1000, out output);
+                                  fix ? 6 * 60 * 60 * 1000 : 20 * 60 * 1000,
+                                  fix ? "Y\r\n" : null, out output);
             if (log != null && !string.IsNullOrEmpty(output))
             {
                 string[] lines = output.Replace("\r", "").Split('\n');

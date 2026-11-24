@@ -23,15 +23,18 @@ namespace ShieldGate
 
     internal static class Detect
     {
-        public static readonly HashSet<string> DangerExes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        // Ten tep / duoi tep / mau nhan dien doc tu rules.json (Rules.Current).
+        // Nho vay nguoi dung them mau moi ma khong phai build lai; xem AGENTS.md
+        // dieu 8. Khong con hang so nhan dien nam trong tep nay.
+        public static HashSet<string> DangerExes
         {
-            "wscript.exe", "cscript.exe", "mshta.exe", "cmd.exe", "powershell.exe",
-            "pwsh.exe", "rundll32.exe", "regsvr32.exe", "schtasks.exe", "bitsadmin.exe",
-            "certutil.exe", "msiexec.exe", "wmic.exe"
-        };
+            get { return Rules.Current.DangerExes; }
+        }
 
-        public static readonly HashSet<string> ScriptExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        { ".vbs", ".vbe", ".js", ".jse", ".wsf", ".hta" };
+        public static HashSet<string> ScriptExts
+        {
+            get { return Rules.Current.ScriptScanExts; }
+        }
 
         private static readonly Regex ArgsRe = new Regex(
             @"(-e:vbscript|-e:jscript|//e:vbscript|//e:jscript|\.vbs\b|\.vbe\b|\.jse?\b|mshta|https?://|powershell.*(-enc|-windowstyle\s+hidden|-w\s+hidden)|\bcmd(\.exe)?\s*/c\b)",
@@ -42,50 +45,26 @@ namespace ShieldGate
             @"(open|shellexecute|action)\s*=.*(\.exe|\.vbs|\.vbe|\.bat|\.cmd|\.com|\.pif|\.scr|\.lnk|wscript|cscript|mshta|cmd|powershell)",
             RegexOptions.IgnoreCase);
 
-        private static readonly string[] ScriptMarkers =
+        private static List<string> ScriptMarkers
         {
-            "wscript.shell", "createobject", "scripting.filesystemobject",
-            "shell.application", "attrib +", "-h -s", ".lnk", "wscript.exe",
-            "vbscript", "on error resume next"
-        };
+            get { return Rules.Current.ScriptMarkers; }
+        }
 
-        private static readonly string[][] HighPatterns =
+        private static List<string[]> HighPatterns
         {
-            new[] { @"\b(wscript|cscript|mshta)(\.exe)?\b", "wscript/mshta" },
-            new[] { @"\.vbe?\b|\.jse?\b", "script-file" },
-            new[] { @"powershell(\.exe)?.*(-enc|-encodedcommand)\b", "encoded-powershell" },
-            new[] { @"(bitsadmin|certutil).*(-urlcache|http)", "download-lolbin" },
-            new[] { @"regsvr32.*(/i|scrobj|http)", "regsvr32-remote" },
-            new[] { @"attrib\s+[+\-][hsrc]", "attrib-hiding" }
-        };
+            get { return Rules.Current.HighPatterns; }
+        }
 
-        private static readonly string[][] MedPatterns =
+        private static List<string[]> MedPatterns
         {
-            new[] { @"powershell(\.exe)?.*(-windowstyle\s+hidden|-w\s+hidden|bypass)", "hidden-powershell" },
-            new[] { @"\\appdata\\local\\temp\\|\\windows\\temp\\", "temp-path" }
-        };
+            get { return Rules.Current.MedPatterns; }
+        }
 
-        // ---------------------------------------------------- cau truc virus shortcut
-        // Mau thu thap 2026: <nhan o>.lnk -> cmd /c "Docusment\1\1.exe ..."
-        // Docusment la thu muc gia mao "Documents", ben trong la goi chuong trinh
-        // (1.exe ky so cua Opera, opera_elf.dll, adback.dat, link.dat, icudtl.dat).
-        // Cac ten tep duoi day chi co trong goi payload nay, khong phai tep he thong.
-        public static readonly HashSet<string> PayloadNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        // Ten tep / hash / kich thuoc cua goi payload doc tu rules.json.
+        public static HashSet<string> PayloadNames
         {
-            "adback.dat", "link.dat", "opera_elf.dll"
-        };
-
-        // SHA256 cua mau da thu thap: van nhan ra khi virus doi ten tep.
-        private static readonly Dictionary<string, string> PayloadHashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            { "1668A64F5EFAC6B932FC725F33ECA219136EB49BE4115A731EFE877FFEBCD461", "1.exe" },
-            { "065DCE8809D18B824844A820F1AD9F9663752540F36B53F6162546089E3624A4", "opera_elf.dll" },
-            { "CF4D1B6917B4A26711E2A3C54D5466299C6D46DB446C215A70BD9389ECFF263E", "icudtl.dat" },
-            { "B09FB3D4E84EC43C8E1EB39892F59B406E87AB5FA175713D75C045CD79D1CC67", "adback.dat" },
-            { "E0DA42C12597D6D8620E7A4C477C4B94928F3CC34894FA0EFCCA2E3C02940931", "shortcut.lnk" }
-        };
-
-        private static readonly long[] PayloadSizes = { 943, 3936, 177152, 303718, 1040920 };
+            get { return Rules.Current.PayloadNames; }
+        }
 
         // Tep thuoc goi payload: ten da biet, hoac dung kich thuoc + hash cua mau.
         public static bool IsPayloadFile(string path)
@@ -94,12 +73,13 @@ namespace ShieldGate
             {
                 FileInfo fi = new FileInfo(path);
                 if (fi.Length > 10 * 1024 * 1024) return false;
-                if (PayloadNames.Contains(fi.Name)) return true;
-                foreach (long size in PayloadSizes)
+                RulesData rules = Rules.Current;
+                if (rules.IsPayloadName(fi.Name)) return true;
+                foreach (long size in rules.PayloadSizes)
                     if (fi.Length == size)
                     {
                         string hash = Native.Sha256(path);
-                        if (hash.Length > 0 && PayloadHashes.ContainsKey(hash)) return true;
+                        if (hash.Length > 0 && rules.IsPayloadHash(hash)) return true;
                         break;
                     }
             }
@@ -214,12 +194,10 @@ namespace ShieldGate
         }
 
         // Ten tien trinh he thong: chay ngoai thu muc Windows la gia mao.
-        public static readonly HashSet<string> SystemNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        public static HashSet<string> SystemNames
         {
-            "svchost.exe", "csrss.exe", "lsass.exe", "services.exe", "smss.exe", "winlogon.exe",
-            "wininit.exe", "explorer.exe", "spoolsv.exe", "taskhost.exe", "taskhostw.exe",
-            "conhost.exe", "dwm.exe", "ctfmon.exe", "lsm.exe", "userinit.exe", "taskmgr.exe"
-        };
+            get { return Rules.Current.SystemNames; }
+        }
 
         // Thu muc nguoi dung ghi duoc, noi virus hay tha tep chay.
         public static List<string> DropDirs()
@@ -245,15 +223,11 @@ namespace ShieldGate
             return dirs;
         }
 
-        // Chi kiem tra tep co chu ky so hay khong (khong xac minh chuoi tin cay).
+        // Chu ky phai xac minh duoc bang WinVerifyTrust, khong chi co blob chu ky.
+        // Chu ky gia, bi thu hoi hoac chuoi tin cay dut deu tinh la khong ky.
         public static bool IsSigned(string path)
         {
-            try
-            {
-                System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(path);
-                return true;
-            }
-            catch { return false; }
+            return Signature.Verify(path) == SignatureStatus.Signed;
         }
 
         private static string ExePathOf(string cmd)

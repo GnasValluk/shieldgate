@@ -73,6 +73,10 @@ namespace ShieldGate
                     case "events": return EventsCommand(args);
                     case "repair": return RepairCommand(args);
                     case "defender": return DefenderCommand(args);
+                    case "vt": return VtCommand(args);
+                    case "help":
+                    case "?": return Help();
+                    case "version": return VersionCommand();
                     case "import-rules":
                     case "importrules": return ImportRules(args);
                     case "selftest": return SelfTest.Run();
@@ -175,6 +179,9 @@ namespace ShieldGate
 
                 try
                 {
+                    // Khoá ghi có thể còn tắt do lần chạy trước bị kill giữa lúc
+                    // cách ly; trả lại trạng thái trước khi mở giao diện.
+                    try { Policy.RecoverPending(); } catch { }
                     Log.Write(S.Log.Open(AppInfo.Version, S.Language));
                     Application.Run(new MainForm());
                 }
@@ -304,18 +311,35 @@ namespace ShieldGate
 
         private static int Scan(string[] args)
         {
-            if (args.Length < 2 || args[1].Trim().Length < 2)
+            bool json = false;
+            string root = "";
+            for (int i = 1; i < args.Length; i++)
+            {
+                string a = args[i].Trim();
+                if (string.Equals(a.TrimStart('-'), "json", StringComparison.OrdinalIgnoreCase))
+                {
+                    json = true;
+                    continue;
+                }
+                if (root.Length == 0) root = a;
+            }
+            if (root.Trim().Length < 2)
             {
                 Console.WriteLine(S.Cli.ScanUsage);
                 return 1;
             }
 
-            string root = args[1].Trim();
             try { root = System.IO.Path.GetFullPath(root); }
             catch { }
             if (!root.EndsWith("\\")) root += "\\";
 
             UsbScanResult result = UsbScan.Detect(root, null, null);
+            if (json)
+            {
+                Console.Write(ScanJson.Text(root, result));
+                return result.Items.Count == 0 ? 0 : 2;
+            }
+
             Console.WriteLine(S.Cli.ScanSummary(root, result.Files, result.Items.Count, result.Seconds));
             if (result.Truncated) Console.WriteLine(S.Cli.ScanTruncated(result.Files));
             if (result.Items.Count == 0)
@@ -328,6 +352,59 @@ namespace ShieldGate
                 Console.WriteLine(S.Cli.ScanItem(item.Rel, item.ReasonText));
             // Mã 2: tìm thấy mục cần xử lý, khác với lỗi chạy (1).
             return 2;
+        }
+
+        // ------------------------------------------------------- lệnh VirusTotal
+
+        private static int VtCommand(string[] args)
+        {
+            if (args.Length < 2 || args[1].Trim().Length == 0)
+            {
+                Console.WriteLine(S.Cli.VtUsage);
+                return 1;
+            }
+            string path = args[1].Trim();
+            if (!File.Exists(path))
+            {
+                Console.WriteLine(S.Cli.VtMissing(path));
+                return 1;
+            }
+            if (!Settings.VirusTotalEnabled)
+            {
+                Console.WriteLine(S.Cli.VtOff);
+                return 1;
+            }
+
+            // Chi gui hash; khong gui ten/duong dan. Khong gioi han kich thuoc vi
+            // chi doc de bam, khong tai len.
+            string hash = Native.Sha256(path, 0);
+            if (hash.Length == 0)
+            {
+                Console.WriteLine(S.Cli.VtHashFailed(path));
+                return 1;
+            }
+            Console.WriteLine(S.Cli.VtHash(hash));
+
+            VtResult r = VirusTotal.Query(hash);
+            if (!r.Ran || !r.Ok)
+            {
+                Console.WriteLine(r.Error);
+                return 1;
+            }
+            Console.WriteLine(S.Cli.VtResult(r.Malicious, r.Suspicious, r.Total));
+            return r.Clean ? 0 : 2;
+        }
+
+        private static int Help()
+        {
+            Console.WriteLine(S.Cli.Help);
+            return 0;
+        }
+
+        private static int VersionCommand()
+        {
+            Console.WriteLine(AppInfo.Name + " " + AppInfo.Version);
+            return 0;
         }
 
         // ------------------------------------------------------- lệnh ngoại vi

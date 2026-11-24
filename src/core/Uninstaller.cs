@@ -72,6 +72,11 @@ namespace ShieldGate
             Add(list, Paths.DevicesFile + ".tmp");
             Add(list, Paths.EventsFile);
             Add(list, Paths.EventsFile + ".1");
+            Add(list, Paths.EventsFile + ".id");
+            Add(list, Paths.EventsFile + ".lock");
+            // Khoa VirusTotal la du lieu ca nhan: go cai dat luon xoa, ke ca khi
+            // nguoi dung chon giu cach ly/ban sao luu.
+            Add(list, Paths.VtKeyFile);
             if (!keepData)
             {
                 // Cach ly la mau song va ban sao luu o la du lieu nguoi dung: chi xoa khi duoc yeu cau.

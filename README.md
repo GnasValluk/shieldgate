@@ -15,15 +15,16 @@
   <img src="https://img.shields.io/badge/license-MIT-1f5e3d?style=flat-square" alt="MIT license">
   <img src="https://img.shields.io/badge/platform-Windows%207%2B-0078d4?style=flat-square" alt="Windows 7 or later">
   <img src="https://img.shields.io/badge/.NET%20Framework-4.0-5b6472?style=flat-square" alt=".NET Framework 4.0">
-  <img src="https://img.shields.io/badge/download-530%20KB-5b6472?style=flat-square" alt="About 530 KB">
+  <img src="https://img.shields.io/badge/download-590%20KB-5b6472?style=flat-square" alt="About 590 KB">
 </p>
 
 <p align="center">
   <img src="docs/screenshots/overview.png" width="900" alt="ShieldGate overview">
 </p>
 
-One portable `.exe`. No installer, no drivers, no network access, no telemetry.
-Vietnamese and English interface.
+One portable `.exe`. No installer, no drivers, no telemetry, and no network access
+unless you turn on the optional VirusTotal lookup and run `--vt` yourself.
+Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
 
 ## Why
 
@@ -44,6 +45,56 @@ Vietnamese and English interface.
 
 ## What is new in 2.1
 
+- **Signatures are verified, not just detected.** Executables and DLLs go through
+  `WinVerifyTrust`; Windows catalog signatures are checked for system files, and
+  the check uses only local caches (no network). A fake, revoked or broken
+  signature no longer counts as signed.
+- **64-bit processes are visible to the 32-bit build.** Blocking execution from
+  removable drives now reads each process path with
+  `QueryFullProcessImageName`, so a 64-bit program started from a USB drive is no
+  longer skipped silently.
+- **External keyboards are recognised.** A USB, Bluetooth or composite HID
+  keyboard is no longer mistaken for the built-in laptop keyboard, so the
+  new-keyboard and composite-device warnings can actually fire. Internal ACPI,
+  ROOT, SWD and I2C HID keyboards stay excluded. This remains a heuristic.
+- **Detection names and the score gate come from `rules.json`.** Executable
+  names, system-process names, payload names/hashes/sizes, script markers and
+  command patterns are no longer hard-coded. A strong signal whose score stays
+  below `scoreThreshold` is now only a warning and is never auto-quarantined by
+  the background guard.
+- **Long paths are scanned.** Directory walking uses the `\\?\` API, so a USB
+  tree deeper than 260 characters is no longer skipped at the first long folder.
+- **Scans skip work that cannot help.** A file without a PE certificate table
+  never enters `WinVerifyTrust`, and signature results are cached by path, size
+  and last-write time. Alternate data streams are only probed on NTFS, and
+  Office macro detection reads the last 1 MB (the ZIP central directory)
+  instead of the first 8 MB. Flag-only findings are hidden behind an
+  "N flagged items" chip so they do not bury the real threats.
+- **Write protection steps aside for cleaning.** When ShieldGate itself enabled
+  write protection, quarantine, restore, unhide and vaccinate lift it for the
+  duration of the operation, then put it back. A `wp-pending` note with a
+  10-minute expiry re-locks the drive at startup or from the background loop if
+  the app was killed mid-clean. A lock set by Windows or the user is never
+  lifted automatically.
+- **Burst alerts look at what is written.** Copying 300 `.txt` files to a drive
+  no longer starts a full scan. A burst now needs 15+ `.lnk`/script/payload
+  files, or 400 items that include at least one of them. The same drive alerts
+  at most once every 10 minutes instead of every two minutes.
+- **`chkdsk /f` answers the dismount prompt.** Standard input is redirected with
+  `Y`, so a drive with open handles no longer waits until the six-hour timeout.
+  If another prompt appears, stdin is already closed and `chkdsk` takes its
+  default instead of blocking. The self-test never runs `chkdsk`.
+- **VirusTotal is opt-in and the key is never stored in plaintext.** The Protect
+  page has an off-by-default switch, a one-time consent dialog and an API key
+  field. The key is encrypted with DPAPI for the current Windows account, never
+  written to `settings.txt` or the log, and deleted on uninstall. When a lookup
+  is requested, only the file's SHA-256 hash is sent.
+- **Scriptable CLI and a real privacy note.** `--scan <drive> --json` prints
+  drive, counts, warnings and findings as JSON (paths and reasons only, never
+  contents) and keeps the `0/1/2` exit codes. `--vt <file>` looks up one file's
+  hash when VirusTotal is on. `--help` lists every command and exit code;
+  `--version` prints the version. [PRIVACY.md](PRIVACY.md) documents every file
+  ShieldGate writes and the single optional network request.
 - **Re-infection loop is treated as a PC problem.** If one drive is cleaned three
   times in ten minutes, ShieldGate logs a warning, shows a tray balloon, and starts
   a read-only source hunt on the PC in the background. The log then names the
@@ -84,6 +135,9 @@ Vietnamese and English interface.
 - **Event timeline.** Device, scan, behaviour, protection and repair events in
   one local timeline, exportable to CSV or HTML. CSV cells that start with
   `=`, `+`, `-` or `@` are prefixed with `'` so a spreadsheet does not run them.
+  Every row has a monotonic ID; the tray reads from its last ID, so several
+  notifications in the same five seconds are queued instead of overwritten, and
+  rotating the file does not lose the cursor.
 - **Drive repair page.** Diagnose, read-test, preview and create a backup, run
   `chkdsk`, read the boot sector. Every write refuses the system drive.
 - **Optional write protection and execution blocking.** Both off by default,
@@ -141,6 +195,10 @@ wrong path, and Explorer registry keys.
   clears items marked Hidden **and** System (the worm's `attrib +h +s`), so a
   real `desktop.ini`, `$RECYCLE.BIN` and folders you hid yourself keep their
   attributes; the button also clears Hidden-only items after you confirm.
+- **BadUSB warning** (tray, on by default, no admin): counts key events per
+  device (never key codes) and polls shell processes. It warns only when a new
+  untrusted keyboard types very fast and opens a shell from Explorer. Warning
+  only; it never disables a device.
 
 ## Protection
 
@@ -153,7 +211,8 @@ Optional, off by default, needs administrator rights.
   drive roots, inventories devices, watches for write bursts and warns about
   new, blocked, composite or suspected BadUSB devices.
 - **USB write protection** (opt-in) sets the Windows storage policy so removable
-  volumes mount read-only.
+  volumes mount read-only. ShieldGate lifts its own lock only while it is
+  cleaning a drive, then restores it.
 - **Execution block** (opt-in) periodically stops processes whose executable is
   on a removable drive. This is a point-in-time stop, not a kernel guarantee.
 
@@ -193,7 +252,8 @@ folder and a language (Vietnamese or English); the choice is stored in
 6. Use **Drive repair** only when a drive misbehaves; preview the backup first.
 
 The GUI and protection request administrator rights through UAC. `--scan`,
-`--status`, `--devices`, `--events`, `--repair` and `--selftest` do not.
+`--status`, `--devices`, `--events`, `--repair`, `--vt`, `--help`, `--version`
+and `--selftest` do not.
 
 ## Command line
 
@@ -201,10 +261,12 @@ The GUI and protection request administrator rights through UAC. `--scan`,
 ShieldGate.exe                            GUI
 ShieldGate.exe --status                   protection state
 ShieldGate.exe --scan E:\                 read-only scan
+ShieldGate.exe --scan E:\ --json          same scan as JSON for scripts
 ShieldGate.exe --devices                  list peripheral devices
 ShieldGate.exe --events [n]               last n timeline events
 ShieldGate.exe --repair E:\               diagnose a drive (read-only)
 ShieldGate.exe --defender <path>          manual Windows Defender scan
+ShieldGate.exe --vt <file>                SHA-256 lookup on VirusTotal (must be on)
 ShieldGate.exe --import-rules <file> --yes  replace rules.json after a validated import
 ShieldGate.exe --install                  install background protection
 ShieldGate.exe --install --blockscript    also block Windows Script Host
@@ -213,20 +275,31 @@ ShieldGate.exe --uninstall --purge-data   also delete quarantine and drive backu
 ShieldGate.exe --watch                    background worker, used by the task
 ShieldGate.exe --tray                     tray icon worker
 ShieldGate.exe --selftest                 self-test in a temp folder
+ShieldGate.exe --version                  print the version
+ShieldGate.exe --help                     list commands and exit codes
 ```
 
 - `--uninstall` keeps `quarantine` and `repair` (quarantined samples and drive
   backups) inside the data folder by default; `--purge-data` deletes them too.
-  The GUI asks with a switch that is on by default.
+  The GUI asks with a switch that is on by default. The VirusTotal key is always
+  deleted.
 
 - `--scan` exits `0` when clean, `2` when it finds items and `1` on error. It
   stops after 150,000 files or 300 seconds and reports that the drive was only
-  partly checked.
+  partly checked. With `--json`, stdout is one JSON object: `drive`, `files`,
+  `items`, `seconds`, `truncated`, `readOnly`, `counts`, `warnings` and
+  `findings[]` (each with `path`, `relative`, `kind`, `score`, `high`,
+  `flagOnly`, `size`, `codes`, `reason`). Strings are escaped, and no file
+  contents are included.
 - `--repair` only diagnoses and prints results. It never backs up, runs
   `chkdsk` or writes to a drive; those actions live in the GUI with explicit
   confirmation.
 - `--defender` exits `0` when clean, `2` when Defender reports a threat and `1`
   on error.
+- `--vt` exits `0` when no engine flags the file, `2` when at least one engine
+  reports it as malicious or suspicious, and `1` when VirusTotal is off, the key
+  is missing, the file cannot be read or the request fails. It sends only the
+  SHA-256 hash; see [PRIVACY.md](PRIVACY.md).
 - `--import-rules` parses the file first, keeps the previous one as
   `rules.json.bak`, then replaces the rules file in the data folder. It refuses
   to run without `--yes`, and exits `1` on a missing, oversized (>1 MB) or
@@ -239,12 +312,14 @@ Default folder: `C:\ProgramData\ShieldGate`, falling back to
 `%LOCALAPPDATA%\ShieldGate`.
 
 ```
-settings.txt        settings, scan counters, tray notice state
+settings.txt        settings and scan counters
 guard.cfg           protection choices
 rules.json          detection rules and weights (created from defaults)
 rules.json.bak      previous rules file, kept by --import-rules
 devices.json        device trust store, keyed by instance/VID/PID/serial
 events.tsv          event timeline, rotated at 2 MB
+events.tsv.id       event counter; keeps the tray cursor across rotation
+vt.key              VirusTotal API key, DPAPI-encrypted for this Windows account
 last_scan.txt       last machine scan result
 log\shieldgate.log  activity log, rotated at 5 MB
 clean.lock          one cleaner per data folder at a time (GUI vs background)
@@ -257,7 +332,8 @@ bin\ShieldGate.exe  background copy plus SHA256
 While protection is on, the data folder is limited to Administrators and SYSTEM.
 Standard users get read access only where needed, not to `quarantine`, `backup`
 or `repair`. `events.tsv` stores device names, paths and action results, never
-file contents. Nothing leaves the machine.
+file contents. Nothing leaves the machine unless you turn on VirusTotal and run
+`--vt`; that request carries only the SHA-256 hash. See [PRIVACY.md](PRIVACY.md).
 
 ## Build
 
@@ -266,7 +342,7 @@ not required.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File build.ps1   # dist\ShieldGate.exe
-powershell -ExecutionPolicy Bypass -File test.ps1    # self-test, 35/35
+powershell -ExecutionPolicy Bypass -File test.ps1    # self-test, 72/72
 ```
 
 The source is C# 5 and WinForms. `src\core` holds the logic, `src\ui` the
@@ -284,8 +360,11 @@ legacy\4.8\    old single-file PowerShell version
 ```
 
 The self-test writes only inside its temp folder and covers detection,
-quarantine, restore, hidden folders, JSON, rules, scoring, the detector
-pipeline, device trust, the event timeline, repair guards and the backup marker.
+quarantine, restore, hidden folders, long paths, JSON, rules, scoring, the score
+gate, the detector pipeline, signature verification, the signature cache, the
+macro tail read, ADS gating, device trust, the event timeline, repair guards,
+the backup marker, VirusTotal, the CLI JSON/help output, the typing-rate
+counter and the BadUSB decision matrix.
 
 ## Limits
 
@@ -294,21 +373,27 @@ pipeline, device trust, the event timeline, repair guards and the backup marker.
   more samples will be added.
 - Not an antivirus. It does not scan the whole system drive and does not replace
   Defender.
-- No checks for services, drivers, IFEO/COM hijacks or Defender exclusions.
-  Registry coverage is limited to Explorer keys and the policies that block
-  repairs.
+- No checks for IFEO/COM hijacks or Defender exclusions. Service and driver
+  checks are path/name heuristics, not a full integrity check. Registry coverage
+  is limited to Explorer keys and the policies that block repairs.
 - USB write protection is the Windows global removable-storage policy, not a
   per-device setting. Execution blocking is a periodic process stop, not an
   absolute kernel block.
-- BadUSB detection is a heuristic: a new keyboard plus a recent shell process.
-  It is not a guarantee and does not attribute individual keystrokes.
+- BadUSB detection is a heuristic: a new untrusted keyboard that types at a
+  non-human rate and then opens a shell from Explorer. It is not a guarantee and
+  does not attribute individual keystrokes. The tray counts events and timing
+  only (never key codes) and polls process names/parents once per second (never
+  command lines). It warns at most once per device per 10 minutes and never
+  disables or blocks a device. It has not yet been measured against real BadUSB
+  hardware; the test plan is in [docs/design-badusb.md](docs/design-badusb.md).
 - Drive repair deliberately does **not** write boot sectors or MBRs, format
   drives, carve deleted files, or run TestDisk/PhotoRec. Those need a
   clean-sample comparison and stronger safeguards first.
 - `chkdsk /f` writes to the drive and may change data. The backup is a file
   copy, not a sector image; it cannot restore boot-sector damage.
-- VirusTotal and YARA are not included. Both need extra network or native
-  components and a clear opt-in design.
+- VirusTotal is opt-in and manual. `--vt <file>` is the only command that sends
+  anything, and it sends only the SHA-256 hash. Nothing is looked up in the
+  background, and YARA is not included.
 - The GUI and the SYSTEM watcher exchange files in the data folder with ACLs.
   There is no authenticated named pipe, so do not run the GUI as a standard
   user with a shared data folder.

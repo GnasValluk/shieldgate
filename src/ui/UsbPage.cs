@@ -14,7 +14,7 @@ namespace ShieldGate
 
         private readonly SelectBox _drive;
         private readonly List<string> _driveRoots = new List<string>();
-        private readonly LinkText _refresh, _vaccine, _unhide, _selectAll, _selectNone, _undo, _log;
+        private readonly LinkText _refresh, _vaccine, _unhide, _selectAll, _selectNone, _flagToggle, _undo, _log;
         private readonly FlatButton _scan, _apply, _cancel;
         private readonly Notice _notice;
         private readonly Spinner _spinner;
@@ -116,6 +116,17 @@ namespace ShieldGate
             _selectNone = MakeLink(S.Usb.SelectNone, "");
             _selectNone.Click += delegate { _list.SetAll(false); UpdateApplyButton(); };
             Controls.Add(_selectNone);
+
+            _flagToggle = MakeLink(S.Usb.ShowFlagged(0), "eye");
+            _flagToggle.IconSize = 13;
+            _flagToggle.Click += delegate
+            {
+                _list.ShowFlagged = !_list.ShowFlagged;
+                UpdateFlagToggle();
+                UpdateApplyButton();
+                LayoutPage();
+            };
+            Controls.Add(_flagToggle);
 
             _apply = MakeButton(S.Usb.Apply(0), ButtonKind.Primary);
             _apply.Click += delegate { DoApply(); };
@@ -266,6 +277,7 @@ namespace ShieldGate
             _selectAll.Visible = results;
             _selectNone.Visible = results;
             _apply.Visible = results;
+            UpdateFlagToggle();
 
             _undo.Visible = state == UsbState.Done;
             _log.Visible = state == UsbState.Done;
@@ -333,6 +345,16 @@ namespace ShieldGate
             int n = _list.CheckedCount;
             _apply.Text = S.Usb.Apply(n);
             _apply.Enabled = n > 0 && !_applying && !ReadOnlyResult();
+        }
+
+        // Muc chi gan co (macro, DLL nghi van) mac dinh an; chip chi hien khi
+        // co it nhat mot muc de nguoi dung chu dong mo ra xem.
+        private void UpdateFlagToggle()
+        {
+            int n = _list.FlaggedCount;
+            _flagToggle.Visible = _state == UsbState.Results && n > 0;
+            _flagToggle.Text = _list.ShowFlagged ? S.Usb.HideFlagged : S.Usb.ShowFlagged(n);
+            _flagToggle.AccessibleName = _flagToggle.Text;
         }
 
         // Ổ chỉ đọc: kiểm tra được nhưng không sửa được, nên tắt các thao tác ghi.
@@ -446,6 +468,21 @@ namespace ShieldGate
 
         // ---------------------------------------------------------------- cách ly
 
+        // Tạm mở khoá ghi của ShieldGate để thao tác lên USB. Trả true khi đã mở;
+        // người gọi phải gọi ResumeWriteProtect trong finally.
+        private static bool PauseWriteProtect()
+        {
+            try { return Policy.BeginCleanPause(); }
+            catch { return false; }
+        }
+
+        private static void ResumeWriteProtect(bool paused)
+        {
+            if (!paused) return;
+            try { Policy.EndCleanPause(); }
+            catch { }
+        }
+
         private void DoApply()
         {
             if (_result == null || _applying || _unhiding) return;
@@ -454,8 +491,14 @@ namespace ShieldGate
 
             string drive = SelectedDrive();
             if (drive == null) return;
-            // Kiểm tra quyền ghi trước khi hỏi: ổ chỉ đọc thì không có gì để xác nhận.
-            if (_result.ReadOnly || !Native.CanWrite(drive))
+            // Kiểm tra quyền ghi trước khi hỏi: ổ chỉ đọc thật thì không có gì để
+            // xác nhận. Khoá ghi do ShieldGate bật thì được tạm mở sau khi xác nhận.
+            if (_result.ReadOnly)
+            {
+                _notice.SetMessage(S.Err.DriveReadOnly(drive), true);
+                return;
+            }
+            if (!Policy.CanPauseWriteProtect && !Native.CanWrite(drive))
             {
                 _notice.SetMessage(S.Err.DriveReadOnly(drive), true);
                 return;
@@ -484,6 +527,7 @@ namespace ShieldGate
                 string batch = "";
                 try
                 {
+                    // Apply/Unhide tự tạm mở khoá ghi và bật lại sau khi xong.
                     done = UsbScan.Apply(scan, selected, out failed, out batch, out stopped, null);
                     if (done > 0) unhidden = UsbScan.Unhide(drive, null);
                 }
@@ -553,6 +597,7 @@ namespace ShieldGate
                 return;
 
             int restored, skipped, missing, refused = 0;
+            bool paused = PauseWriteProtect();
             try
             {
                 Quarantine.RestoreBatch(_batch, out restored, out skipped, out missing, out refused);
@@ -563,6 +608,7 @@ namespace ShieldGate
                 Log.Write(S.Log.UndoError(e.Message), "ERROR");
                 restored = 0; skipped = 0; missing = _doneCount;
             }
+            finally { ResumeWriteProtect(paused); }
 
             _batch = "";
             _list.Clear();
@@ -583,7 +629,11 @@ namespace ShieldGate
             }
             bool existed;
             string error;
-            if (Guard.Vaccinate(drive, out existed, out error))
+            bool paused = PauseWriteProtect();
+            bool ok;
+            try { ok = Guard.Vaccinate(drive, out existed, out error); }
+            finally { ResumeWriteProtect(paused); }
+            if (ok)
                 _notice.SetMessage(existed ? S.Usb.VaccineExists : S.Usb.VaccineDone(drive), false);
             else
                 _notice.SetMessage(error, true);
@@ -612,8 +662,10 @@ namespace ShieldGate
             Thread t = new Thread(delegate()
             {
                 int count = 0;
+                bool paused = false;
                 try
                 {
+                    paused = PauseWriteProtect();
                     List<string> nameless = UsbRestore.FindNameless(drive);
                     if (nameless.Count > 0)
                         count += UsbRestore.Restore(drive, nameless, delegate { return _cancelFlag; }).Moved;
@@ -621,6 +673,7 @@ namespace ShieldGate
                                             delegate { return _cancelFlag; });
                 }
                 catch (Exception e) { Log.Write(S.Log.UnhideError(e.Message), "ERROR"); }
+                finally { ResumeWriteProtect(paused); }
                 if (IsDisposed || !IsHandleCreated) return;
                 _unhiding = false;
                 try
@@ -683,8 +736,14 @@ namespace ShieldGate
                 contentTop - Ui.Px(4), TextWidth(S.Overview.Cancel, Theme.BodyStrong),
                 Ui.Px(Theme.ControlHeight));
 
+            int flagW = Math.Max(Ui.Measure(S.Usb.HideFlagged, Theme.Small).Width,
+                Ui.Measure(S.Usb.ShowFlagged(999), Theme.Small).Width) + Ui.Px(24);
+            _flagToggle.Bounds = new Rectangle(right - flagW, contentTop + Ui.Px(20),
+                flagW, Ui.Px(20));
+
             _resultsTitle.Bounds = new Rectangle(pad, contentTop - Ui.Px(6), width, Ui.Px(24));
-            _resultsNote.Bounds = new Rectangle(pad, contentTop + Ui.Px(20), width, Ui.Px(20));
+            _resultsNote.Bounds = new Rectangle(pad, contentTop + Ui.Px(20),
+                Math.Max(Ui.Px(120), width - flagW - Ui.Px(12)), Ui.Px(20));
 
             int listTop = contentTop + Ui.Px(48);
             int listBottom = ClientSize.Height - Ui.Px(70);

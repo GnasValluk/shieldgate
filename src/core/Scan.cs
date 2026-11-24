@@ -151,6 +151,7 @@ namespace ShieldGate
             context.Root = root;
             context.Rules = rules;
             context.Stats = stats;
+            context.IsNtfs = Native.IsNtfsVolume(root);
             List<string> nameless = UsbRestore.FindNameless(root);
             List<TreeItem> rootExes = new List<TreeItem>();
             List<string> dirs = new List<string>();
@@ -254,8 +255,9 @@ namespace ShieldGate
                 if (item != null)
                 {
                     if (item.Score == 0) item.Score = Scoring.Evaluate(item.Codes, rules);
-                    if (item.High && item.Score < rules.ScoreThreshold)
-                        item.Score = rules.ScoreThreshold;
+                    // AGENTS điều 7: dấu hiệu mạnh nhưng chưa đủ điểm thì chỉ cảnh báo,
+                    // không cho bảo vệ nền tự cách ly. Ngưỡng lấy từ rules.json.
+                    if (item.High && item.Score < rules.ScoreThreshold) item.High = false;
                     try { item.Size = new FileInfo(item.Path).Length; }
                     catch { }
                     result.Items.Add(item);
@@ -411,8 +413,15 @@ namespace ShieldGate
                 Log.Write(S.Log.CleanBusy(scan.Root), "WARN");
                 return 0;
             }
+            // Tam mo khoa ghi sau khi da giu CleanLock: chi mot tien trinh sua o
+            // tai mot thoi diem, nen khong ai bat lai khoa giua luc cach ly.
+            bool paused = Policy.BeginCleanPause();
             try { return ApplyLocked(scan, selected, out failed, out batch, out stopped, progress); }
-            finally { CleanLock.Exit(); }
+            finally
+            {
+                if (paused) Policy.EndCleanPause();
+                CleanLock.Exit();
+            }
         }
 
         private static int ApplyLocked(UsbScanResult scan, IList<UsbItem> selected,
@@ -615,20 +624,34 @@ namespace ShieldGate
         public static int Unhide(string root, UnhideScope scope, Func<bool> cancelled)
         {
             int count = 0;
-            foreach (TreeItem t in Tree.Walk(root))
+            if (!CleanLock.Enter(60000))
             {
-                if (cancelled != null && cancelled()) break;
-                try
+                Log.Write(S.Log.CleanBusy(root), "WARN");
+                return 0;
+            }
+            bool paused = Policy.BeginCleanPause();
+            try
+            {
+                foreach (TreeItem t in Tree.Walk(root))
                 {
-                    if (!File.Exists(t.Path) && !Directory.Exists(t.Path)) continue;
-                    if (KeepSystemAttributes(t.Name)) continue;
-                    FileAttributes a = File.GetAttributes(t.Path);
-                    if ((a & FileAttributes.Hidden) == 0) continue;
-                    if (scope == UnhideScope.VirusOnly
-                        && (a & FileAttributes.System) == 0) continue;
-                    if (Native.ClearHidden(t.Path)) count++;
+                    if (cancelled != null && cancelled()) break;
+                    try
+                    {
+                        if (!File.Exists(t.Path) && !Directory.Exists(t.Path)) continue;
+                        if (KeepSystemAttributes(t.Name)) continue;
+                        FileAttributes a = File.GetAttributes(t.Path);
+                        if ((a & FileAttributes.Hidden) == 0) continue;
+                        if (scope == UnhideScope.VirusOnly
+                            && (a & FileAttributes.System) == 0) continue;
+                        if (Native.ClearHidden(t.Path)) count++;
+                    }
+                    catch { }
                 }
-                catch { }
+            }
+            finally
+            {
+                if (paused) Policy.EndCleanPause();
+                CleanLock.Exit();
             }
             if (count > 0) Log.Write(S.Log.Unhidden(count, root));
             return count;
@@ -1932,16 +1955,13 @@ namespace ShieldGate
                     string expected = Str(f, "path");
                     if (expected.Length > 0)
                     {
-                        try
+                        string actual = Native.ProcessImagePath(pid);
+                        if (actual.Length > 0
+                            && !string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
                         {
-                            if (!string.Equals(p.MainModule.FileName, expected,
-                                               StringComparison.OrdinalIgnoreCase))
-                            {
-                                error = S.Err.ProcessChanged(name);
-                                return false;
-                            }
+                            error = S.Err.ProcessChanged(name);
+                            return false;
                         }
-                        catch { }
                     }
                     p.Kill();
                 }

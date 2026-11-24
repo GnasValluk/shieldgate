@@ -31,7 +31,7 @@ namespace ShieldGate
             _timer = new Timer(Tick, null, 2000, 2000);
         }
 
-        // Bao mot lan cho moi o trong khoang 2 phut de khong dong tin nhan.
+        // Bao mot lan cho moi o trong khoang 10 phut (cau hinh) de khong dong tin nhan.
         public event Action<string> Suspicious;
 
         public void Update(IList<string> drives)
@@ -126,8 +126,7 @@ namespace ShieldGate
                         string ext = "";
                         try { ext = Path.GetExtension(h.Name); }
                         catch { }
-                        if (string.Equals(ext, ".lnk", StringComparison.OrdinalIgnoreCase) ||
-                            rules.IsScriptExt(ext))
+                        if (rules.IsBurstRiskExt(ext))
                         {
                             risky.TryGetValue(h.Drive, out n);
                             risky[h.Drive] = n + 1;
@@ -140,18 +139,16 @@ namespace ShieldGate
                 {
                     int n;
                     risky.TryGetValue(kv.Key, out n);
-                    bool burst = kv.Value >= rules.BehaviorWriteBurst || n >= rules.BehaviorLnkBurst;
-                    if (!burst) continue;
+                    if (!ShouldAlert(kv.Value, n, rules)) continue;
 
                     DateTime last;
                     if (_lastAlert.TryGetValue(kv.Key, out last) &&
-                        (DateTime.Now - last).TotalSeconds < 120) continue;
+                        !CooldownElapsed(last, DateTime.Now, rules.BehaviorAlertSeconds)) continue;
                     _lastAlert[kv.Key] = DateTime.Now;
 
                     string detail = S.Events.BehaviorBurst(kv.Value, n, window);
                     Log.Write(S.Log.BehaviorBurst(kv.Key, kv.Value, n), "WARN");
                     Events.Add(Events.KindBehavior, "WARN", kv.Key, detail);
-                    Settings.SetBehaviorEvent(kv.Key, detail);
 
                     Action<string> handler = Suspicious;
                     if (handler != null)
@@ -166,6 +163,20 @@ namespace ShieldGate
                 try { Log.Write(S.Log.BehaviorWatcherError(e.Message), "WARN"); }
                 catch { }
             }
+        }
+
+        // Thuan tuy de self-test: tai lieu hang loat khong duoc kich hoat quet,
+        // chi .lnk/script/payload moi dang ngo.
+        internal static bool ShouldAlert(int total, int risky, RulesData rules)
+        {
+            if (rules == null) return false;
+            return risky >= rules.BehaviorLnkBurst ||
+                   (risky > 0 && total >= rules.BehaviorWriteBurst);
+        }
+
+        internal static bool CooldownElapsed(DateTime last, DateTime now, int seconds)
+        {
+            return (now - last).TotalSeconds >= seconds;
         }
 
         public void Stop()

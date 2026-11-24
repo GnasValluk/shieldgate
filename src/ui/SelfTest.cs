@@ -4,9 +4,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using Microsoft.Win32;
 
 namespace ShieldGate
@@ -26,8 +29,11 @@ namespace ShieldGate
             // Phải đặt trước lần đầu chạm tới Paths: thư mục dữ liệu tách khỏi bản thật.
             Environment.SetEnvironmentVariable("SHIELDGATE_HOME", root);
 
+            // Self-test chạy trên thư mục tạm; không được tạm mở WriteProtect thật.
+            Policy.PauseAllowed = false;
+
             int passed = 0;
-            int total = 54;
+            int total = 72;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -463,13 +469,20 @@ namespace ShieldGate
                 Paths.EnsureDirs();
                 File.WriteAllText(Paths.RulesFile,
                     "{ \"scoreThreshold\": 7, \"weights\": { \"double-extension\": 9, \"target\": 99 }, " +
-                    "\"scriptExts\": [\"abc\"] }", new UTF8Encoding(false));
+                    "\"scriptExts\": [\"abc\"], \"dangerExes\": [\"evil.exe\"], " +
+                    "\"payloadSizes\": [12345], \"scriptMarkers\": [\"BadMarker\"], " +
+                    "\"highPatterns\": [[\"evil\", \"evil-code\"]] }", new UTF8Encoding(false));
                 Rules.Reload();
                 RulesData d = Rules.Current;
                 rulesCustom = d.ScoreThreshold == 7 && d.Weight("double-extension") == 9
                            && d.Weight("target") == 10
                            && d.IsScriptExt(".abc") && d.IsScriptExt(".vbs")
                            && d.IsDangerousExt(".exe") && d.IsPayloadExt(".dll")
+                           && d.IsDangerExe("evil.exe") && d.IsDangerExe("cmd.exe")
+                           && d.PayloadSizes.Contains(12345)
+                           && d.ScriptMarkers.Contains("badmarker")
+                           && d.HighPatterns.Count == 7
+                           && d.IsScriptScanExt(".vbs") && !d.IsScriptScanExt(".bat")
                            && d.Version == RulesData.CurrentVersion;
             }
             catch { }
@@ -1210,6 +1223,694 @@ namespace ShieldGate
                          && PcScan.FixPass(PcKind.Task) < PcScan.FixPass(PcKind.RunValue)
                          && PcScan.FixPass(PcKind.RunValue) < PcScan.FixPass(PcKind.DroppedFile);
             check(S.Selftest.FixOrder, fixOrder);
+
+            // 48. Chữ ký số: tệp văn bản không có chữ ký là Unsigned; một tệp hệ
+            //     thống có chữ ký phải xác minh được qua WinVerifyTrust, không mạng.
+            bool signatureOk = false;
+            try
+            {
+                string plain = Path.Combine(root, "unsigned.txt");
+                File.WriteAllText(plain, "khong co chu ky", new UTF8Encoding(false));
+                bool unsigned = Signature.Verify(plain) == SignatureStatus.Unsigned
+                             && !Detect.IsSigned(plain);
+
+                // Bỏ qua phần tệp hệ thống nếu máy không có tệp nào trong danh sách.
+                string signedPath = "";
+                string[] candidates = new string[]
+                {
+                    Path.Combine(Environment.SystemDirectory, "notepad.exe"),
+                    Native.SysExe("cmd.exe"),
+                    Native.ShellExe("explorer.exe")
+                };
+                foreach (string candidate in candidates)
+                {
+                    if (!string.IsNullOrEmpty(candidate) && File.Exists(candidate))
+                    {
+                        signedPath = candidate;
+                        break;
+                    }
+                }
+                bool signedOk = signedPath.Length == 0
+                             || (Signature.Verify(signedPath) == SignatureStatus.Signed
+                                 && Detect.IsSigned(signedPath));
+                signatureOk = unsigned && signedOk;
+            }
+            catch { }
+            check(S.Selftest.SignatureVerify, signatureOk);
+
+            // 49. Đường dẫn tiến trình: đọc được tiến trình hiện tại (32-bit trên
+            //     Windows 64-bit) và PID hệ thống không ném lỗi.
+            bool processPathOk = false;
+            try
+            {
+                int pid = System.Diagnostics.Process.GetCurrentProcess().Id;
+                string actual = Native.ProcessImagePath(pid);
+                string expected = Assembly.GetEntryAssembly().Location;
+                bool same = actual.Length > 0
+                         && string.Equals(Path.GetFullPath(actual), Path.GetFullPath(expected),
+                                          StringComparison.OrdinalIgnoreCase);
+                Native.ProcessImagePath(4); // PID hệ thống: phải trả rỗng, không ném.
+                processPathOk = same;
+            }
+            catch { }
+            check(S.Selftest.ProcessPath, processPathOk);
+
+            // 50. Bàn phím trong/ngoài theo bus: ACPI, ROOT, SWD và HID không VID
+            //     là trong; USB, USB HID, Bluetooth và composite là ngoài.
+            bool keyboardBusOk = false;
+            try
+            {
+                bool acpiOk = Devices.IsInternalKeyboard(@"ACPI\PNP0303\4&2A1B3C4D&0");
+                bool rootOk = Devices.IsInternalKeyboard(@"ROOT\RDP_KBD\0000");
+                bool swdOk = Devices.IsInternalKeyboard(@"SWD\MMDEVAPI\{0.0.0.00000000}.{1}");
+                bool i2cOk = Devices.IsInternalKeyboard(@"HID\MSFT0001&Col01\5&1A2B3C4D&0&0000");
+                bool usbOk = !Devices.IsInternalKeyboard(@"USB\VID_046D&PID_C31C\5&1A2B3C4D&0&1");
+                bool usbHidOk = !Devices.IsInternalKeyboard(@"HID\VID_046D&PID_C31C&MI_00\7&2B3C4D5E&0&0000");
+                bool btOk = !Devices.IsInternalKeyboard(
+                    @"BTHENUM\{00001124-0000-1000-8000-00805F9B34FB}_VID&0001000F_PID&0000\8&3C4D5E6F&0&1");
+                bool compositeOk = !Devices.IsInternalKeyboard(@"USB\VID_1234&PID_5678&MI_00\6&4D5E6F70&0&0000");
+                keyboardBusOk = acpiOk && rootOk && swdOk && i2cOk
+                             && usbOk && usbHidOk && btOk && compositeOk;
+            }
+            catch { }
+            check(S.Selftest.KeyboardBus, keyboardBusOk);
+
+            // 51. Ngưỡng điểm có hiệu lực: cùng tệp .pdf.exe là High ở ngưỡng mặc
+            //     định nhưng chỉ còn cảnh báo khi rules.json nâng ngưỡng lên 10.
+            bool scoreGateOk = false;
+            try
+            {
+                string gate = Path.Combine(root, "gate");
+                Directory.CreateDirectory(gate);
+                File.WriteAllText(Path.Combine(gate, "baocao.pdf.exe"), "MZ",
+                                  new UTF8Encoding(false));
+                UsbScanResult normal = UsbScan.Detect(gate, null, null, 0);
+                bool highAtDefault = normal.Items.Count == 1 && normal.Items[0].High
+                                  && normal.Items[0].Score >= Rules.Current.ScoreThreshold;
+
+                File.WriteAllText(Paths.RulesFile,
+                    "{ \"scoreThreshold\": 10, \"weights\": { \"double-extension\": 5 } }",
+                    new UTF8Encoding(false));
+                Rules.Reload();
+                UsbScanResult strict = UsbScan.Detect(gate, null, null, 0);
+                bool lowAtStrict = strict.Items.Count == 1 && !strict.Items[0].High
+                                && strict.Items[0].Score == 5;
+                scoreGateOk = highAtDefault && lowAtStrict;
+            }
+            catch { }
+            finally
+            {
+                try
+                {
+                    File.WriteAllText(Paths.RulesFile, Rules.DefaultJson,
+                                      new UTF8Encoding(false));
+                    Rules.Reload();
+                }
+                catch { }
+            }
+            check(S.Selftest.ScoreGate, scoreGateOk);
+
+            // 52. Cây sâu hơn 300 ký tự: Tree.Walk dùng WinPath nên vẫn quét tới
+            //     tệp cuối thay vì bỏ cả nhánh vì PathTooLongException.
+            bool deepWalkOk = false;
+            List<string> deepDirs = new List<string>();
+            string deepSeed = "";
+            string deepFile = "";
+            try
+            {
+                string deepRoot = Path.Combine(root, "deepscan");
+                Directory.CreateDirectory(deepRoot);
+                deepDirs.Add(deepRoot);
+                string deepDir = deepRoot;
+                while (deepDir.Length < 310)
+                {
+                    deepDir = Path.Combine(deepDir, "0123456789");
+                    deepDirs.Add(deepDir);
+                }
+                bool built = WinPath.CreateDirTree(WinPath.Ext(deepDir));
+                deepSeed = Path.Combine(root, "deep-seed.bin");
+                File.WriteAllText(deepSeed, "MZ", new UTF8Encoding(false));
+                deepFile = Path.Combine(deepDir, "baocao.pdf.exe");
+                bool made = built
+                         && WinPath.CopyFile(WinPath.Ext(deepSeed), WinPath.Ext(deepFile)) == 0;
+
+                UsbScanResult deep = UsbScan.Detect(deepRoot, null, null, 100);
+                bool found = false;
+                foreach (UsbItem it in deep.Items)
+                {
+                    if (!string.Equals(Path.GetFileName(it.Path), "baocao.pdf.exe",
+                                       StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (string code in it.Codes)
+                        if (code.StartsWith("double-extension", StringComparison.OrdinalIgnoreCase))
+                        {
+                            found = true;
+                            break;
+                        }
+                    break;
+                }
+                deepWalkOk = made && found;
+            }
+            catch { }
+            if (deepFile.Length > 0) { try { WinPath.DeleteFile(WinPath.Ext(deepFile)); } catch { } }
+            for (int i = deepDirs.Count - 1; i >= 0; i--)
+                WinPath.RemoveDir(WinPath.Ext(deepDirs[i]));
+            if (deepSeed.Length > 0) { try { File.Delete(deepSeed); } catch { } }
+            check(S.Selftest.DeepWalk, deepWalkOk);
+
+            // 53. Chu ky: tep khong phai PE duoc tra loi ngay va vao cache, khong
+            //     goi WinVerifyTrust moi lan quet lai.
+            bool sigCacheOk = false;
+            try
+            {
+                string plain = Path.Combine(root, "sig-cache.txt");
+                File.WriteAllText(plain, "khong phai PE", new UTF8Encoding(false));
+                int before = Signature.CacheCount;
+                SignatureStatus first = Signature.Verify(plain);
+                SignatureStatus second = Signature.Verify(plain);
+                sigCacheOk = first == SignatureStatus.Unsigned
+                          && second == SignatureStatus.Unsigned
+                          && Signature.CacheCount > before;
+            }
+            catch { }
+            check(S.Selftest.SignatureCache, sigCacheOk);
+
+            // 54. Macro: ten vbaProject.bin chi nam trong 1 MB cuoi (central
+            //     directory). Ban cu doc 8 MB dau nen bo sot tep lon.
+            bool macroTailOk = false;
+            string macroFile = Path.Combine(root, "tail.docx");
+            try
+            {
+                byte[] big = new byte[9 * 1024 * 1024];
+                byte[] macroMarker = Encoding.ASCII.GetBytes("vbaProject.bin");
+                Array.Copy(macroMarker, 0, big, big.Length - 4096, macroMarker.Length);
+                File.WriteAllBytes(macroFile, big);
+
+                ScanContext ctx = new ScanContext();
+                ctx.Rules = Rules.Current;
+                TreeItem ti = new TreeItem();
+                ti.Path = macroFile;
+                ti.Name = "tail.docx";
+                ti.IsDir = false;
+                ti.Depth = 1;
+                foreach (Finding fd in DetectorPipeline.InspectFile(ctx, ti))
+                    if (fd.Code == "office-macro" && fd.FlagOnly) macroTailOk = true;
+            }
+            catch { }
+            try { File.Delete(macroFile); } catch { }
+            check(S.Selftest.MacroTail, macroTailOk);
+
+            // 55. ADS: tren NTFS thi thay stream an, tren FAT32/exFAT thi bo qua
+            //     truoc khi goi FindFirstStreamW cho tung tep.
+            bool adsGateOk = false;
+            string adsHost = Path.Combine(root, "ads-host.txt");
+            try
+            {
+                File.WriteAllText(adsHost, "host", new UTF8Encoding(false));
+                bool made = false;
+                try
+                {
+                    File.WriteAllText(adsHost + ":evil.exe", "MZ", new UTF8Encoding(false));
+                    made = true;
+                }
+                catch { }
+
+                ScanContext ctx = new ScanContext();
+                ctx.Rules = Rules.Current;
+                TreeItem ti = new TreeItem();
+                ti.Path = adsHost;
+                ti.Name = "ads-host.txt";
+                ti.IsDir = false;
+                ti.Depth = 1;
+                ti.Attrs = FileAttributes.Normal;
+
+                ctx.IsNtfs = true;
+                bool on = false;
+                foreach (Finding fd in DetectorPipeline.InspectFile(ctx, ti))
+                    if (fd.Code == "hidden-ads") on = true;
+                ctx.IsNtfs = false;
+                bool off = false;
+                foreach (Finding fd in DetectorPipeline.InspectFile(ctx, ti))
+                    if (fd.Code == "hidden-ads") off = true;
+
+                adsGateOk = made ? (on && !off) : !off;
+            }
+            catch { }
+            try { File.Delete(adsHost + ":evil.exe"); } catch { }
+            try { File.Delete(adsHost); } catch { }
+            check(S.Selftest.AdsNtfs, adsGateOk);
+
+            // 56. WriteProtect: ghi chú wp-pending còn hạn thì giữ khoá đang mở;
+            //     hết hạn hoặc hỏng thì phải bật lại. Không chạm registry.
+            bool wpPendingOk = false;
+            try
+            {
+                DateTime now = new DateTime(2026, 11, 22, 12, 0, 0, DateTimeKind.Utc);
+                string future = "pid=1\r\nuntil=" +
+                    now.AddMinutes(5).ToString("o", CultureInfo.InvariantCulture) + "\r\n";
+                string past = "pid=1\r\nuntil=" +
+                    now.AddMinutes(-1).ToString("o", CultureInfo.InvariantCulture) + "\r\n";
+                wpPendingOk = !Policy.PendingExpired(future, now)
+                           && Policy.PendingExpired(past, now)
+                           && Policy.PendingExpired("rac", now)
+                           && Policy.PendingExpired("pid=1\r\n", now)
+                           // Chỉ chặn chiều bật lại; người dùng tắt thì vẫn đi qua.
+                           && Policy.BlockedByPause(true, false, true)
+                           && !Policy.BlockedByPause(false, false, true)
+                           && !Policy.BlockedByPause(true, true, true);
+            }
+            catch { }
+            check(S.Selftest.WriteProtectPending, wpPendingOk);
+
+            // 57. Quét lại thông minh: 300 .txt không kích hoạt, 30 .lnk thì có;
+            //     cùng ổ chỉ báo lại sau 10 phút.
+            bool smartRescanOk = false;
+            try
+            {
+                RulesData r = Rules.Current;
+                DateTime now = new DateTime(2026, 11, 22, 12, 0, 0, DateTimeKind.Utc);
+                smartRescanOk = !BehaviorMonitor.ShouldAlert(300, 0, r)
+                             && BehaviorMonitor.ShouldAlert(30, 30, r)
+                             && BehaviorMonitor.ShouldAlert(500, 1, r)
+                             && !BehaviorMonitor.ShouldAlert(399, 14, r)
+                             && !BehaviorMonitor.CooldownElapsed(now.AddMinutes(-2), now,
+                                                                 r.BehaviorAlertSeconds)
+                             && BehaviorMonitor.CooldownElapsed(now.AddMinutes(-11), now,
+                                                                r.BehaviorAlertSeconds)
+                             && r.IsBurstRiskExt(".lnk") && r.IsBurstRiskExt(".exe")
+                             && r.IsBurstRiskExt(".vbs") && !r.IsBurstRiskExt(".txt")
+                             && !r.IsBurstRiskExt(".jpg");
+            }
+            catch { }
+            check(S.Selftest.SmartRescan, smartRescanOk);
+
+            // 58. chkdsk nhận câu trả lời qua stdin. Không chạy chkdsk trong
+            //     self-test; dùng findstr để chứng minh dữ liệu vào tới tiến trình con.
+            bool chkdskStdinOk = false;
+            try
+            {
+                string stdinOut;
+                int stdinCode = Native.Run(Native.SysExe("findstr.exe"), "w15",
+                                           10000, "w15-stdin\r\n", out stdinOut);
+                chkdskStdinOk = stdinCode == 0 && stdinOut != null
+                             && stdinOut.IndexOf("w15-stdin", StringComparison.Ordinal) >= 0;
+            }
+            catch { }
+            check(S.Selftest.ChkdskStdin, chkdskStdinOk);
+
+            // 59. Hàng đợi sự kiện: ID tăng dần, đọc từ ID cũ chỉ trả mục mới,
+            //     xoay tệp vẫn giữ con trỏ, dòng 4 cột cũ vẫn đọc được.
+            bool eventQueueOk = false;
+            try
+            {
+                Paths.EnsureDirs();
+                Events.Add("selftest", "INFO", "w16-a", "one");
+                Events.Add("selftest", "INFO", "w16-b", "two");
+                Events.Add("selftest", "INFO", "w16-c", "three");
+
+                EventEntry a = null, b = null, c = null;
+                foreach (EventEntry e in Events.ReadSince(0))
+                {
+                    if (e.Subject == "w16-a") a = e;
+                    else if (e.Subject == "w16-b") b = e;
+                    else if (e.Subject == "w16-c") c = e;
+                }
+                bool ordered = a != null && b != null && c != null
+                            && a.Id > 0 && b.Id > a.Id && c.Id > b.Id;
+
+                bool sinceOk = false;
+                if (ordered)
+                {
+                    bool sawA = false, sawB = false, sawC = false;
+                    foreach (EventEntry e in Events.ReadSince(a.Id))
+                    {
+                        if (e.Subject == "w16-a") sawA = true;
+                        else if (e.Subject == "w16-b") sawB = true;
+                        else if (e.Subject == "w16-c") sawC = true;
+                    }
+                    sinceOk = !sawA && sawB && sawC;
+                }
+
+                // Xoay tệp: chuyển tệp hiện tại sang .1 rồi ghi tiếp.
+                bool rotateOk = false;
+                if (ordered)
+                {
+                    string old = Paths.EventsFile + ".1";
+                    try { File.Delete(old); } catch { }
+                    File.Move(Paths.EventsFile, old);
+                    Events.Add("selftest", "INFO", "w16-d", "four");
+                    foreach (EventEntry e in Events.ReadSince(c.Id))
+                        if (e.Subject == "w16-d" && e.Id > c.Id) rotateOk = true;
+                }
+
+                // Dòng cũ 4 cột: có và không có cột severity.
+                File.AppendAllText(Paths.EventsFile,
+                    "2026-11-22 12:00:00\tselftest\tlegacy-four-subject\tlegacy-four-detail\r\n" +
+                    "2026-11-22 12:00:01\tselftest\tWARN\tlegacy-four-warn\r\n",
+                    new UTF8Encoding(false));
+                bool legacyOk = false;
+                bool legacyPlain = false, legacyWarn = false;
+                foreach (EventEntry e in Events.Read(50))
+                {
+                    if (e.Subject == "legacy-four-subject"
+                        && e.Detail == "legacy-four-detail" && e.Severity == "INFO")
+                        legacyPlain = true;
+                    if (e.Subject == "legacy-four-warn"
+                        && e.Severity == "WARN" && e.Detail.Length == 0)
+                        legacyWarn = true;
+                }
+                legacyOk = legacyPlain && legacyWarn;
+
+                eventQueueOk = ordered && sinceOk && rotateOk && legacyOk
+                            && Events.MaxId >= (c == null ? 0 : c.Id);
+            }
+            catch { }
+            check(S.Selftest.EventQueue, eventQueueOk);
+
+            // 60. VirusTotal: chỉ gửi hash trong URL + x-apikey, không có tên tệp;
+            //     4 yêu cầu/phút; hash hoặc khoá sai thì không gửi gì.
+            bool vtOk = false;
+            TcpListener vtServer = null;
+            string vtRequest = "";
+            try
+            {
+                VtRateLimiter limiter = new VtRateLimiter();
+                DateTime t0 = new DateTime(2026, 11, 22, 12, 0, 0, DateTimeKind.Utc);
+                bool rateOk = limiter.TryTake(t0) && limiter.TryTake(t0)
+                           && limiter.TryTake(t0) && limiter.TryTake(t0)
+                           && !limiter.TryTake(t0)
+                           && !limiter.TryTake(t0.AddSeconds(59))
+                           && limiter.TryTake(t0.AddSeconds(61));
+
+                vtServer = new TcpListener(IPAddress.Loopback, 0);
+                vtServer.Start();
+                int port = ((IPEndPoint)vtServer.LocalEndpoint).Port;
+                Thread server = new Thread(delegate()
+                {
+                    try
+                    {
+                        using (TcpClient client = vtServer.AcceptTcpClient())
+                        using (NetworkStream stream = client.GetStream())
+                        {
+                            StringBuilder req = new StringBuilder();
+                            int state = 0;
+                            while (true)
+                            {
+                                int b = stream.ReadByte();
+                                if (b < 0) break;
+                                req.Append((char)b);
+                                if (b == '\r' && (state == 0 || state == 2)) state++;
+                                else if (b == '\n' && (state == 1 || state == 3)) state++;
+                                else state = 0;
+                                if (state == 4) break;
+                            }
+                            vtRequest = req.ToString();
+
+                            string body = "{\"data\":{\"attributes\":{\"last_analysis_stats\":" +
+                                          "{\"harmless\":60,\"malicious\":3,\"suspicious\":2," +
+                                          "\"undetected\":5,\"timeout\":0,\"type-unsupported\":0}}}}";
+                            byte[] bytes = Encoding.UTF8.GetBytes(body);
+                            string head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
+                                          "Content-Length: " + bytes.Length +
+                                          "\r\nConnection: close\r\n\r\n";
+                            byte[] headBytes = Encoding.ASCII.GetBytes(head);
+                            stream.Write(headBytes, 0, headBytes.Length);
+                            stream.Write(bytes, 0, bytes.Length);
+                        }
+                    }
+                    catch { }
+                });
+                server.IsBackground = true;
+                server.Start();
+
+                string hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+                VirusTotal.BaseUrl = "http://127.0.0.1:" + port + "/api/v3/files/";
+                VtResult got = VirusTotal.Lookup(hash, "test-key");
+                server.Join(5000);
+
+                bool requestOk = vtRequest.IndexOf("GET /api/v3/files/" + hash + " HTTP/1.1",
+                                                   StringComparison.Ordinal) >= 0;
+                bool headerOk = vtRequest.IndexOf("x-apikey: test-key",
+                                                  StringComparison.OrdinalIgnoreCase) >= 0;
+                int keyCount = 0;
+                for (int i = vtRequest.IndexOf("test-key", StringComparison.Ordinal); i >= 0;
+                     i = vtRequest.IndexOf("test-key", i + 8, StringComparison.Ordinal))
+                    keyCount++;
+                bool statsOk = got.Ran && got.Ok && got.Malicious == 3 && got.Total == 70
+                            && !got.Clean;
+
+                VtResult badHash = VirusTotal.Lookup("not-a-hash", "test-key");
+                VtResult noKey = VirusTotal.Lookup(hash, "");
+                bool guarded = !badHash.Ran && badHash.Error.Length > 0
+                            && !noKey.Ran && noKey.Error.Length > 0;
+
+                vtOk = rateOk && requestOk && headerOk && keyCount == 1 && statsOk && guarded;
+            }
+            catch { }
+            finally
+            {
+                try { VirusTotal.BaseUrl = VirusTotal.DefaultBaseUrl; } catch { }
+                if (vtServer != null) { try { vtServer.Stop(); } catch { } }
+            }
+            check(S.Selftest.VirusTotal, vtOk);
+
+            // 61. Khoá VirusTotal: DPAPI round-trip, không lộ trong settings/log,
+            //     tệp hỏng trả rỗng, công tắc tắt thì Query không gửi gì.
+            bool vtKeyOk = false;
+            try
+            {
+                string key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+                bool saved = VtKey.Save(key);
+                string loaded = VtKey.Load();
+                byte[] raw = File.ReadAllBytes(Paths.VtKeyFile);
+                bool encrypted = Encoding.ASCII.GetString(raw).IndexOf(key,
+                    StringComparison.Ordinal) < 0;
+
+                Settings.SetVirusTotalEnabled(false);
+                VtResult off = VirusTotal.Query(key);
+                bool gated = !off.Ran && off.Error.Length > 0;
+
+                Settings.SetVirusTotalEnabled(true);
+                bool enabled = Settings.VirusTotalEnabled;
+                Settings.SetVirusTotalConsent();
+                bool consent = Settings.VirusTotalConsent;
+
+                string settingsText = "";
+                try { settingsText = File.ReadAllText(Paths.SettingsFile, Encoding.UTF8); }
+                catch { }
+                bool noLeak = settingsText.IndexOf(key, StringComparison.Ordinal) < 0;
+
+                File.WriteAllBytes(Paths.VtKeyFile, new byte[] { 1, 2, 3, 4, 5 });
+                bool corruptSafe = VtKey.Load().Length == 0;
+
+                bool listed = Uninstaller.DataEntries(true).Contains(Paths.VtKeyFile)
+                           && Uninstaller.DataEntries(false).Contains(Paths.VtKeyFile);
+
+                VtKey.Delete();
+                bool deleted = !VtKey.HasKey;
+
+                vtKeyOk = saved && loaded == key && encrypted && gated && enabled
+                       && consent && noLeak && corruptSafe && listed && deleted;
+            }
+            catch { }
+            check(S.Selftest.VirusTotalKey, vtKeyOk);
+
+            // 62. W19: JSON của --scan --json đọc lại được (kể cả dấu " và \),
+            //     và --help liệt kê đủ lệnh mới.
+            bool cliJsonOk = false;
+            try
+            {
+                UsbScanResult sample = new UsbScanResult();
+                sample.Files = 3;
+                sample.Seconds = 0.25;
+                UsbItem item = new UsbItem();
+                item.Path = "E:\\a\"b\\x.lnk";
+                item.Rel = "a\"b\\x.lnk";
+                item.Kind = UsbKind.Shortcut;
+                item.Score = 7;
+                item.High = true;
+                item.Size = 42;
+                item.Codes.Add("target-on-drive");
+                sample.Items.Add(item);
+
+                Dictionary<string, object> map =
+                    Json.AsObject(Json.Parse(ScanJson.Text("E:\\", sample)));
+                List<object> findings = Json.AsArray(Json.Get(map, "findings"));
+                Dictionary<string, object> first = findings != null && findings.Count == 1
+                    ? Json.AsObject(findings[0]) : null;
+                bool parsed = map != null && first != null
+                    && Json.Str(map, "drive", "") == "E:\\"
+                    && Json.Str(first, "relative", "") == item.Rel
+                    && Json.Str(first, "path", "") == item.Path
+                    && Json.Str(first, "kind", "") == "shortcut"
+                    && Json.Str(first, "reason", "").Length > 0;
+
+                // Chuoi thoat phai nam tren mot dong; khong duoc lot newline that.
+                bool escaped = Json.Quote("a\"b\\c\n").IndexOf('\n') < 0;
+
+                string help = S.Cli.Help;
+                bool helpOk = help.IndexOf("--scan", StringComparison.Ordinal) >= 0
+                           && help.IndexOf("--vt", StringComparison.Ordinal) >= 0
+                           && help.IndexOf("--json", StringComparison.Ordinal) >= 0
+                           && help.IndexOf("--version", StringComparison.Ordinal) >= 0
+                           && help.IndexOf("--help", StringComparison.Ordinal) >= 0;
+                cliJsonOk = parsed && escaped && helpOk;
+            }
+            catch { }
+            check(S.Selftest.CliJson, cliJsonOk);
+
+            // 63. W21: bộ đếm tốc độ gõ chỉ đếm sự kiện; người gõ 6/giây không
+            //     vượt ngưỡng, burst 50/giây thì vượt; nghỉ > 5 giây hoặc đồng hồ
+            //     lùi đều bắt đầu cửa sổ mới.
+            bool inputOk = false;
+            try
+            {
+                DateTime t0 = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+
+                InputRate human = new InputRate("VID_1234&PID_0001");
+                for (int i = 0; i < 12; i++) human.Add(t0.AddMilliseconds(i * 166));
+                InputBurst hb = human.Snapshot();
+                bool humanOk = !human.Crossed && hb.Events == 12
+                            && hb.PeakPerSecond < InputRate.MinPerSecond;
+
+                InputRate fast = new InputRate("VID_1234&PID_0001");
+                for (int i = 0; i < 100; i++) fast.Add(t0.AddMilliseconds(i * 20));
+                InputBurst fb = fast.Snapshot();
+                bool fastOk = fast.Crossed && fb.Events == 100
+                           && fb.PeakPerSecond >= InputRate.MinPerSecond
+                           && fb.Seconds > 1.5 && fb.Seconds < 2.5;
+
+                InputRate gap = new InputRate("x");
+                for (int i = 0; i < 40; i++) gap.Add(t0.AddMilliseconds(i * 20));
+                gap.Add(t0.AddSeconds(10));
+                bool gapOk = gap.Snapshot().Events == 1 && !gap.Crossed;
+
+                InputRate rewind = new InputRate("x");
+                rewind.Add(t0.AddSeconds(10));
+                rewind.Add(t0);
+                bool backOk = rewind.Snapshot().Events == 1 && !rewind.Crossed;
+
+                inputOk = humanOk && fastOk && gapOk && backOk;
+            }
+            catch { }
+            check(S.Selftest.InputRate, inputOk);
+
+            // 64. W22: chỉ cảnh báo khi đủ bốn mảnh; thiết bị tin cậy, shell sai
+            //     cha/cửa sổ, gõ chậm, thiết bị cũ, công tắc tắt đều không báo.
+            bool badUsbOk = false;
+            try
+            {
+                DateTime t0 = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+                DeviceInfo dev = new DeviceInfo();
+                dev.Key = "VID:1234:PID:0001:SN";
+                dev.Name = "Test keyboard";
+                dev.Keyboard = true;
+                dev.Trust = DeviceTrust.Unknown;
+                dev.FirstSeen = t0.AddSeconds(-5);
+
+                InputBurst burst = new InputBurst();
+                burst.Device = "VID_1234&PID_0001";
+                burst.First = t0;
+                burst.Last = t0.AddSeconds(1.9);
+                burst.Events = 100;
+                burst.PeakPerSecond = 50;
+
+                ShellStart shell = new ShellStart();
+                shell.Name = "cmd.exe";
+                shell.ParentName = "explorer.exe";
+                shell.Created = t0.AddSeconds(2);
+                shell.ExplorerAncestor = true;
+
+                Settings.SetBadUsbEnabled(true);
+                BadUsb.Reset();
+                bool alert = BadUsb.Evaluate(burst, dev, shell, t0.AddSeconds(3)).Alert;
+                bool cooldown = !BadUsb.Evaluate(burst, dev, shell, t0.AddSeconds(4)).Alert;
+
+                dev.Trust = DeviceTrust.Trusted;
+                BadUsb.Reset();
+                bool trusted = !BadUsb.Evaluate(burst, dev, shell, t0.AddSeconds(3)).Alert;
+                dev.Trust = DeviceTrust.Unknown;
+
+                shell.ExplorerAncestor = false;
+                BadUsb.Reset();
+                bool noExplorer = !BadUsb.Evaluate(burst, dev, shell, t0.AddSeconds(3)).Alert;
+                shell.ExplorerAncestor = true;
+
+                shell.Created = t0.AddSeconds(-30);
+                BadUsb.Reset();
+                bool oldShell = !BadUsb.Evaluate(burst, dev, shell, t0.AddSeconds(3)).Alert;
+
+                shell.Created = t0.AddSeconds(15);
+                BadUsb.Reset();
+                bool lateShell = !BadUsb.Evaluate(burst, dev, shell, t0.AddSeconds(16)).Alert;
+
+                InputBurst slow = new InputBurst();
+                slow.Device = burst.Device;
+                slow.First = t0;
+                slow.Last = t0.AddSeconds(1.9);
+                slow.Events = 12;
+                slow.PeakPerSecond = 6;
+                shell.Created = t0.AddSeconds(2);
+                BadUsb.Reset();
+                bool slowOk = !BadUsb.Evaluate(slow, dev, shell, t0.AddSeconds(3)).Alert;
+
+                dev.FirstSeen = t0.AddSeconds(-300);
+                BadUsb.Reset();
+                bool oldDevice = !BadUsb.Evaluate(burst, dev, shell, t0.AddSeconds(3)).Alert;
+                dev.FirstSeen = t0.AddSeconds(-5);
+
+                Settings.SetBadUsbEnabled(false);
+                BadUsb.Reset();
+                bool disabled = !BadUsb.Evaluate(burst, dev, shell, t0.AddSeconds(3)).Alert;
+                Settings.SetBadUsbEnabled(true);
+
+                // Raw Input tra ve \\?\HID#...#{GUID}; phai ghep duoc voi
+                // InstanceId trong devices.json truoc khi xet trust store.
+                DeviceInfo rawDev = new DeviceInfo();
+                rawDev.InstanceId = @"HID\VID_1234&PID_0001\7&ABC&0&0000";
+                rawDev.Vid = "1234";
+                rawDev.Pid = "0001";
+                bool rawOk = Devices.MatchesRaw(rawDev,
+                    @"\\?\HID#VID_1234&PID_0001#7&ABC&0&0000" +
+                    "#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}");
+
+                badUsbOk = alert && cooldown && trusted && noExplorer && oldShell
+                        && lateShell && slowOk && oldDevice && disabled && rawOk;
+            }
+            catch { }
+            check(S.Selftest.BadUsb, badUsbOk);
+
+            // 65. W22: mục badusb trong rules.json được đọc và kẹp giá trị.
+            bool badUsbCfg = false;
+            try
+            {
+                Paths.EnsureDirs();
+                File.WriteAllText(Paths.RulesFile,
+                    "{ \"version\": 6, \"badusb\": { \"enabled\": true, " +
+                    "\"newDeviceSeconds\": 999999, \"minEvents\": -5, " +
+                    "\"eventsPerSecond\": 99999, \"shellSeconds\": 0, " +
+                    "\"alertSeconds\": 1, \"requireExplorerParent\": false } }",
+                    new UTF8Encoding(false));
+                Rules.Reload();
+                RulesData d = Rules.Current;
+                badUsbCfg = d.Version == 6 && d.BadUsbEnabled
+                         && d.BadUsbNewDeviceSeconds == 3600
+                         && d.BadUsbMinEvents == 5
+                         && d.BadUsbEventsPerSecond == 10000
+                         && d.BadUsbShellSeconds == 1
+                         && d.BadUsbAlertSeconds == 30
+                         && !d.BadUsbRequireExplorerParent;
+            }
+            catch { }
+            finally
+            {
+                try
+                {
+                    File.WriteAllText(Paths.RulesFile, Rules.DefaultJson, new UTF8Encoding(false));
+                    Rules.Reload();
+                }
+                catch { }
+            }
+            check(S.Selftest.BadUsbConfig, badUsbCfg);
 
             try { Directory.Delete(root, true); }
             catch { }

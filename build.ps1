@@ -31,7 +31,8 @@ $sources = @(Get-ChildItem 'src\core\*.cs' | ForEach-Object { $_.FullName }) +
 
 $out = Join-Path $root 'dist\ShieldGate.exe'
 $refs = @('/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll',
-          '/r:System.Windows.Forms.dll', '/r:System.Management.dll', '/r:System.Xml.dll')
+          '/r:System.Windows.Forms.dll', '/r:System.Management.dll', '/r:System.Xml.dll',
+          '/r:System.Security.dll')
 
 $build = @('/nologo', '/target:winexe', '/platform:x86', '/codepage:65001',
            '/optimize+', '/debug-', '/win32manifest:src\core\app.manifest',

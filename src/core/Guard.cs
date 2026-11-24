@@ -98,7 +98,17 @@ namespace ShieldGate
                 && (DateTime.Now - seen).TotalSeconds < 60)
                 return false;
 
-            if (Native.IsReadOnlyVolume(volume) || !Native.CanWrite(volume))
+            bool unwritable = Native.IsReadOnlyVolume(volume);
+            if (!unwritable && Policy.WriteProtectActive)
+            {
+                // Khoa do ShieldGate bat se duoc tam mo khi cach ly; khoa do
+                // nguoi dung bat thi van phai coi la khong ghi duoc.
+                unwritable = !Policy.CanPauseWriteProtect;
+            }
+            if (!unwritable && !Policy.WriteProtectActive && !Native.CanWrite(volume))
+                unwritable = true;
+
+            if (unwritable)
             {
                 UnwritableUntil[volume] = DateTime.Now.AddMinutes(5);
                 WritableSeen.Remove(volume);
@@ -446,7 +456,7 @@ namespace ShieldGate
                     {
                         try
                         {
-                            if (!IsSamePath(p.MainModule.FileName, Paths.GuardExe)) continue;
+                            if (!IsSamePath(Native.ProcessImagePath(p.Id), Paths.GuardExe)) continue;
                             found = true;
                             p.WaitForExit(200);
                         }
@@ -792,7 +802,8 @@ namespace ShieldGate
                      && Convert.ToInt32(value) == 0;
             st.Registry = LoadConfig().Registry;
             GuardConfig cfg = LoadConfig();
-            st.WriteProtect = cfg.WriteProtect && Policy.WriteProtectActive;
+            st.WriteProtect = cfg.WriteProtect &&
+                              (Policy.WriteProtectActive || Policy.PendingPause);
             st.BlockExec = cfg.BlockExec;
             st.Running = HeartbeatAge() < 30;
             foreach (BatchInfo b in Quarantine.ListBatches())
@@ -894,11 +905,15 @@ namespace ShieldGate
 
                 try
                 {
+                // Neu lan chay truoc bi kill khi dang tam mo khoa de cach ly,
+                // bat khoa lai ngay khi tien trinh bao ve khoi dong.
+                Policy.RecoverPending();
                 while (true)
                 {
                     if (File.Exists(Paths.StopFlag)) break;
                     try
                     {
+                        Policy.RecoverPending();
                         DateTime now = DateTime.Now;
                         if ((now - lastPolicy).TotalSeconds >= 60)
                         {
@@ -1027,13 +1042,11 @@ namespace ShieldGate
                 Log.Write(S.Log.DeviceNew(d.Name, d.DeviceClass));
                 Events.Add(Events.KindDevice, "INFO", d.Name,
                            S.Events.DeviceNew(d.Name, d.DeviceClass, ids));
-                Settings.SetDeviceEvent(S.Tray.DeviceNew(d.Name));
 
                 if (d.CompositeSuspect)
                 {
                     Log.Write(S.Log.DeviceComposite(d.Name), "WARN");
                     Events.Add(Events.KindDevice, "WARN", d.Name, S.Events.DeviceComposite(d.Name));
-                    Settings.SetDeviceEvent(S.Tray.Composite(d.Name));
                 }
 
                 // Chỉ là heuristic: bàn phím mới + shell trong 20 giây. Không tự tắt thiết bị.
@@ -1045,7 +1058,6 @@ namespace ShieldGate
                     {
                         Log.Write(S.Log.DeviceBadUsb(d.Name, shell), "WARN");
                         Events.Add(Events.KindDevice, "WARN", d.Name, S.Events.DeviceBadUsb(d.Name));
-                        Settings.SetDeviceEvent(S.Tray.BadUsb(d.Name));
                     }
                 }
             }
@@ -1068,7 +1080,6 @@ namespace ShieldGate
                 {
                     Log.Write(S.Log.DeviceBlocked(d.Name), "WARN");
                     Events.Add(Events.KindDevice, "WARN", d.Name, S.Events.DeviceBlocked(d.Name));
-                    Settings.SetDeviceEvent(S.Tray.DeviceBlocked(d.Name));
                 }
             }
             lock (warnedBlocked)
@@ -1107,9 +1118,11 @@ namespace ShieldGate
 
             int failed = 0, stopped = 0;
             string batch = "";
+            int done = 0;
             // Apply tra ve so tep da di chuyen, khong phai so muc da chon:
             // truoc day "auto.Count - failed" cho ra so am (-67).
-            int done = UsbScan.Apply(root, auto, out failed, out batch, out stopped, null);
+            // UsbScan.Apply tu tam mo khoa ghi va bat lai trong finally.
+            done = UsbScan.Apply(root, auto, out failed, out batch, out stopped, null);
             int unhidden = 0;
             if (done > 0)
             {
@@ -1150,7 +1163,11 @@ namespace ShieldGate
                 if (ReinfectWatch.Observe(volume, done, DateTime.Now)) ReportReinfection(volume);
             }
             Settings.SetDriveScan(volume, scan.Files, review);
-            Settings.SetDriveEvent(volume, done, review);
+            // Sự kiện có ID cho tray: một lần quét có thể sinh nhiều thông báo
+            // trong cùng 5 giây, mốc thời gian trong settings.txt làm mất bớt.
+            if (done > 0 || review > 0)
+                Events.Add(Events.KindDrive, done > 0 ? "INFO" : "WARN", volume,
+                           S.Events.DriveScan(volume, done, review));
             Log.Write(S.Log.AutoScan(volume, scan.Files, scan.Items.Count, done,
                                       review, unhidden, stopped));
         }
@@ -1174,16 +1191,15 @@ namespace ShieldGate
             if (afterFix)
             {
                 Log.Write(S.Log.DriveReinfectedAfterFix(volume), "ERROR");
-                try { Events.Add(Events.KindBehavior, "ERROR", volume, S.Events.DriveReinfected(volume)); }
+                try { Events.Add(Events.KindReinfect, "ERROR", volume, S.Events.DriveReinfected(volume)); }
                 catch { }
             }
             else
             {
                 Log.Write(S.Log.DriveReinfected(volume), "WARN");
-                try { Events.Add(Events.KindBehavior, "WARN", volume, S.Events.DriveReinfected(volume)); }
+                try { Events.Add(Events.KindReinfect, "WARN", volume, S.Events.DriveReinfected(volume)); }
                 catch { }
             }
-            Settings.SetReinfectEvent(volume, afterFix);
             HuntSource(volume);
         }
 

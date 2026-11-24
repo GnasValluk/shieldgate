@@ -46,6 +46,7 @@ namespace ShieldGate
         public static string DevicesFile;
         public static string EventsFile;
         public static string RepairDir;
+        public static string VtKeyFile;
 
         static Paths()
         {
@@ -97,6 +98,8 @@ namespace ShieldGate
             DevicesFile = Path.Combine(Root, "devices.json");
             EventsFile = Path.Combine(Root, "events.tsv");
             RepairDir = Path.Combine(Root, "repair");
+            // Khoa VirusTotal luu bang DPAPI (CurrentUser); khong nam trong settings.txt.
+            VtKeyFile = Path.Combine(Root, "vt.key");
             EnsureDirs();
         }
 
@@ -233,6 +236,43 @@ namespace ShieldGate
         [DllImport("kernel32.dll")]
         public static extern bool AttachConsole(int processId);
 
+        private const uint ProcessQueryLimitedInformation = 0x1000;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags,
+                                                              StringBuilder exeName, ref int size);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        // Doc duong dan tep chay cua tien trinh khac. Khong dung
+        // Process.MainModule: tien trinh 32-bit khong doc duoc MainModule cua
+        // tien trinh 64-bit. Tra ve chuoi rong khi khong mo duoc (da thoat,
+        // thieu quyen, PID he thong) de nguoi goi bo qua thay vi nem loi.
+        public static string ProcessImagePath(int processId)
+        {
+            if (processId <= 0) return "";
+            IntPtr handle = IntPtr.Zero;
+            try
+            {
+                handle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+                if (handle == IntPtr.Zero) return "";
+                int size = 1024;
+                StringBuilder sb = new StringBuilder(size);
+                if (!QueryFullProcessImageNameW(handle, 0, sb, ref size)) return "";
+                if (size <= 0 || size > sb.Length) return "";
+                return sb.ToString(0, size);
+            }
+            catch { return ""; }
+            finally
+            {
+                if (handle != IntPtr.Zero) { try { CloseHandle(handle); } catch { } }
+            }
+        }
+
         public static bool IsAdmin()
         {
             try
@@ -276,6 +316,21 @@ namespace ShieldGate
                                            out flags, fs, 8))
                     return false;
                 return (flags & FileReadOnlyVolume) != 0;
+            }
+            catch { return false; }
+        }
+
+        // ADS chi ton tai tren NTFS. Goi mot lan cho moi o quet, khong phai moi tep.
+        public static bool IsNtfsVolume(string root)
+        {
+            try
+            {
+                uint serial, maxComponent, flags;
+                StringBuilder label = new StringBuilder(8), fs = new StringBuilder(16);
+                if (!GetVolumeInformationW(root, label, 8, out serial, out maxComponent,
+                                           out flags, fs, 16))
+                    return false;
+                return string.Equals(fs.ToString(), "NTFS", StringComparison.OrdinalIgnoreCase);
             }
             catch { return false; }
         }
@@ -391,6 +446,14 @@ namespace ShieldGate
 
         public static int Run(string file, string args, int timeoutMs, out string output)
         {
+            return Run(file, args, timeoutMs, null, out output);
+        }
+
+        // stdin != null: ghi san cau tra loi roi dong stdin. Dung cho chkdsk /f,
+        // lenh hoi "force a dismount? (Y/N)" va se cho mai neu khong ai tra loi.
+        public static int Run(string file, string args, int timeoutMs, string stdin,
+                              out string output)
+        {
             StringBuilder sb = new StringBuilder();
             try
             {
@@ -399,6 +462,7 @@ namespace ShieldGate
                 psi.CreateNoWindow = true;
                 psi.RedirectStandardOutput = true;
                 psi.RedirectStandardError = true;
+                psi.RedirectStandardInput = stdin != null;
                 using (Process p = new Process())
                 {
                     p.StartInfo = psi;
@@ -409,6 +473,15 @@ namespace ShieldGate
                     p.Start();
                     p.BeginOutputReadLine();
                     p.BeginErrorReadLine();
+                    if (stdin != null)
+                    {
+                        try
+                        {
+                            p.StandardInput.Write(stdin);
+                            p.StandardInput.Close();
+                        }
+                        catch { }
+                    }
                     if (!p.WaitForExit(timeoutMs))
                     {
                         try { p.Kill(); } catch { }
@@ -429,13 +502,20 @@ namespace ShieldGate
 
         public static string Sha256(string path)
         {
+            return Sha256(path, 10 * 1024 * 1024);
+        }
+
+        // maxBytes <= 0: khong gioi han (dung cho --vt; chi can hash, khong doc
+        // noi dung). Cac call site cu van giu gioi han 10 MB.
+        public static string Sha256(string path, long maxBytes)
+        {
             try
             {
                 // Mo bang handle de doc duoc ca duong dan dai hon 260 ky tu.
                 using (SHA256 sha = SHA256.Create())
                 using (FileStream fs = WinPath.OpenRead(WinPath.Ext(path)))
                 {
-                    if (fs.Length > 10 * 1024 * 1024) return "";
+                    if (maxBytes > 0 && fs.Length > maxBytes) return "";
                     byte[] hash = sha.ComputeHash(fs);
                     StringBuilder sb = new StringBuilder(hash.Length * 2);
                     foreach (byte b in hash) sb.Append(b.ToString("X2"));
@@ -495,23 +575,24 @@ namespace ShieldGate
                     yield break;
                 }
                 KeyValuePair<string, int> cur = stack.Pop();
-                string[] entries;
-                try { entries = Directory.GetFileSystemEntries(cur.Key); }
+                // WinPath.List doc duoc ca cay dai hon 260 ky tu; System.IO thi
+                // nem PathTooLongException va ca nhanh thu muc bi bo qua.
+                List<DirEntry> entries;
+                try { entries = WinPath.List(WinPath.Ext(cur.Key)); }
                 catch { continue; }
-                foreach (string full in entries)
+                foreach (DirEntry e in entries)
                 {
                     if (++count > maxFiles)
                     {
                         if (stats != null) stats.Truncated = true;
                         yield break;
                     }
-                    string name = System.IO.Path.GetFileName(full);
+                    string name = e.Name;
                     if (SkipNames.Contains(name)) continue;
-                    FileAttributes attrs;
-                    try { attrs = File.GetAttributes(full); }
-                    catch { continue; }
+                    FileAttributes attrs = (FileAttributes)e.Attr;
                     if ((attrs & FileAttributes.ReparsePoint) != 0) continue;
                     bool isDir = (attrs & FileAttributes.Directory) != 0;
+                    string full = WinPath.Join(cur.Key, name);
                     TreeItem item = new TreeItem();
                     item.Path = full;
                     item.Name = name;

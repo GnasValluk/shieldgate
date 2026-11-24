@@ -67,7 +67,8 @@ Luồng chính:
 8. Tên tệp/đuôi/ký tự/trọng số phải nằm trong `rules.json` (hoặc default
    trong `Rules.cs`), không rải hằng số khắp nơi.
 9. Không tự cách ly mẫu `FlagOnly` (macro Office, DLL nghi vấn). Chỉ gắn cờ.
-10. Không thêm mạng. Mọi tính năng mạng phải opt-in, chỉ gửi hash, có tài liệu.
+10. Không thêm mạng. Mọi tính năng mạng phải opt-in, chỉ gửi hash, có tài liệu
+    (xem `PRIVACY.md`); hiện chỉ có `--vt` khi người dùng đã bật VirusTotal.
 
 ### Thiết bị
 
@@ -129,7 +130,8 @@ Luồng chính:
 
 - Self-test chỉ ghi trong `%TEMP%\shieldgate-selftest-<pid>` và đặt
   `SHIELDGATE_HOME` trước lần chạm `Paths`.
-- Không gọi mạng, không quét ổ thật, không đổi cấu hình máy.
+- Không gọi mạng ngoài (self-test VirusTotal chỉ dùng loopback `127.0.0.1`),
+  không quét ổ thật, không đổi cấu hình máy.
 - Mẫu giả phải sinh bằng code; không commit mẫu virus.
 - Khi thêm mục, tăng `total` trong `SelfTest.Run` và thêm chuỗi `S.Selftest`.
 

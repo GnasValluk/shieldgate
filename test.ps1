@@ -1,4 +1,4 @@
-# ShieldGate - dựng và chạy bộ tự kiểm tra lõi trên thư mục tạm.
+﻿# ShieldGate - dựng và chạy bộ tự kiểm tra lõi trên thư mục tạm.
 # Không cần quyền quản trị và không đụng tới USB thật hay cấu hình máy.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -6,6 +6,16 @@ Set-Location $root
 
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
 if (-not (Test-Path $csc)) { throw "Không tìm thấy csc.exe của .NET Framework 4.0." }
+
+# W21: không được đọc mã phím. Kiểm tra tĩnh để không vô tình thành keylogger.
+$forbidden = @('RAWKEYBOARD', 'SetWindowsHookEx', 'GetAsyncKeyState',
+               'GetKeyboardState', 'MapVirtualKey')
+$sourceFiles = @(Get-ChildItem 'src' -Recurse -Filter *.cs | ForEach-Object { $_.FullName })
+$hits = @(Select-String -Path $sourceFiles -Pattern $forbidden -SimpleMatch)
+if ($hits.Count -gt 0) {
+    $list = ($hits | ForEach-Object { $_.Path + ':' + $_.LineNumber }) -join ', '
+    throw "Forbidden key-reading API in source: $list"
+}
 
 New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
 

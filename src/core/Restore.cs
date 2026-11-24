@@ -48,6 +48,24 @@ namespace ShieldGate
             public string Alt;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileTime
+        {
+            public uint Low;
+            public uint High;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct AttributeData
+        {
+            public uint Attr;
+            public FileTime Created;
+            public FileTime Accessed;
+            public FileTime Written;
+            public uint SizeHigh;
+            public uint SizeLow;
+        }
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr FindFirstFileW(string name, out FindData data);
 
@@ -77,6 +95,9 @@ namespace ShieldGate
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern bool CreateDirectoryW(string path, IntPtr security);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool GetFileAttributesExW(string name, int level, out AttributeData data);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr CreateFileW(string name, uint access, uint share,
@@ -220,6 +241,19 @@ namespace ShieldGate
                 return GetFileSizeEx(h, out size) ? size : -1;
             }
             finally { CloseHandle(h); }
+        }
+
+        // Kich thuoc va thoi diem sua cuoi de lam khoa cache chu ky.
+        // GetFileAttributesExW khong mo tep nen khong bi khoa chia se chan.
+        public static bool Stat(string pathExt, out long size, out long writeTicks)
+        {
+            size = -1;
+            writeTicks = 0;
+            AttributeData d;
+            if (!GetFileAttributesExW(pathExt, 0, out d)) return false;
+            size = ((long)d.SizeHigh << 32) | d.SizeLow;
+            writeTicks = ((long)d.Written.High << 32) | d.Written.Low;
+            return true;
         }
 
         public static string ErrorText(int code)

@@ -173,102 +173,47 @@ namespace ShieldGate
         public static int DriveScanFiles(string drive) { return Int("usb." + Letter(drive) + ".files"); }
         public static int DriveScanFound(string drive) { return Int("usb." + Letter(drive) + ".found"); }
 
-        // Sự kiện gần nhất của bảo vệ nền, để biểu tượng khay báo cho người dùng.
-        public static void SetDriveEvent(string drive, int cleaned, int review)
+        // Sự kiện gần nhất của bảo vệ nền nằm trong events.tsv (có ID). Trước đây
+        // mỗi loại sự kiện ghi thêm một mốc thời gian vào settings.txt; tray chỉ
+        // so sánh mốc nên nhiều sự kiện trong cùng 5 giây bị mất. Đã bỏ để chỉ
+        // còn một nguồn.
+
+        // VirusTotal là opt-in: mặc định tắt. Công tắc và hộp thoại đồng ý nằm ở
+        // trang Bảo vệ; khoá API không nằm trong tệp này.
+        public static bool VirusTotalEnabled
         {
-            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            v["event.time"] = DateTime.Now.ToString("o");
-            v["event.drive"] = drive ?? "";
-            v["event.cleaned"] = cleaned.ToString();
-            v["event.review"] = review.ToString();
-            SetMany(v);
+            get { return string.Equals(Get("vt.enabled", "0"), "1", StringComparison.Ordinal); }
         }
 
-        public static DateTime DriveEventTime
+        public static void SetVirusTotalEnabled(bool on)
+        {
+            Set("vt.enabled", on ? "1" : "0");
+        }
+
+        public static bool VirusTotalConsent
+        {
+            get { return string.Equals(Get("vt.consent", "0"), "1", StringComparison.Ordinal); }
+        }
+
+        public static void SetVirusTotalConsent()
+        {
+            Set("vt.consent", "1");
+        }
+
+        // BadUSB là thiết lập của riêng bản tray: mặc định lấy từ rules.json,
+        // người dùng đổi bằng công tắc thì ghi đè trong settings.txt.
+        public static bool BadUsbEnabled
         {
             get
             {
-                DateTime t;
-                return DateTime.TryParse(Get("event.time", ""), out t) ? t : DateTime.MinValue;
+                string fallback = Rules.Current.BadUsbEnabled ? "1" : "0";
+                return string.Equals(Get("badusb.enabled", fallback), "1", StringComparison.Ordinal);
             }
         }
 
-        public static string DriveEventDrive { get { return Get("event.drive", ""); } }
-        public static int DriveEventCleaned { get { return Int("event.cleaned"); } }
-        public static int DriveEventReview { get { return Int("event.review"); } }
-
-        // Sự kiện thiết bị (mới/chặn/BadUSB) cho biểu tượng khay.
-        public static void SetDeviceEvent(string text)
+        public static void SetBadUsbEnabled(bool on)
         {
-            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            v["device.time"] = DateTime.Now.ToString("o");
-            v["device.text"] = text ?? "";
-            SetMany(v);
-        }
-
-        public static DateTime DeviceEventTime
-        {
-            get
-            {
-                DateTime t;
-                return DateTime.TryParse(Get("device.time", ""), out t) ? t : DateTime.MinValue;
-            }
-        }
-
-        public static string DeviceEventText { get { return Get("device.text", ""); } }
-
-        // Sự kiện hành vi: ghi hàng loạt trên một ổ.
-        public static void SetBehaviorEvent(string drive, string text)
-        {
-            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            v["behavior.time"] = DateTime.Now.ToString("o");
-            v["behavior.drive"] = drive ?? "";
-            v["behavior.text"] = text ?? "";
-            SetMany(v);
-        }
-
-        public static DateTime BehaviorEventTime
-        {
-            get
-            {
-                DateTime t;
-                return DateTime.TryParse(Get("behavior.time", ""), out t) ? t : DateTime.MinValue;
-            }
-        }
-
-        public static string BehaviorEventDrive { get { return Get("behavior.drive", ""); } }
-        public static string BehaviorEventText { get { return Get("behavior.text", ""); } }
-
-        // Ổ bị nhiễm lại liên tục: nguồn lây nằm trên máy, không phải trên ổ.
-        public static void SetReinfectEvent(string drive)
-        {
-            SetReinfectEvent(drive, false);
-        }
-
-        // afterFix: máy vừa được sửa mà ổ vẫn nhiễm lại — nguồn lây nằm ngoài
-        // những gì người dùng đã xử lý (driver/rootkit hoặc tiến trình được bảo vệ).
-        public static void SetReinfectEvent(string drive, bool afterFix)
-        {
-            Dictionary<string, string> v = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            v["reinfect.time"] = DateTime.Now.ToString("o");
-            v["reinfect.drive"] = drive ?? "";
-            v["reinfect.afterfix"] = afterFix ? "1" : "0";
-            SetMany(v);
-        }
-
-        public static DateTime ReinfectEventTime
-        {
-            get
-            {
-                DateTime t;
-                return DateTime.TryParse(Get("reinfect.time", ""), out t) ? t : DateTime.MinValue;
-            }
-        }
-
-        public static string ReinfectEventDrive { get { return Get("reinfect.drive", ""); } }
-        public static bool ReinfectEventAfterFix
-        {
-            get { return string.Equals(Get("reinfect.afterfix", "0"), "1", StringComparison.Ordinal); }
+            Set("badusb.enabled", on ? "1" : "0");
         }
 
         // Lần sửa máy gần nhất, để phân biệt "chưa sửa" với "sửa rồi vẫn nhiễm lại".

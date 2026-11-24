@@ -269,6 +269,10 @@ namespace ShieldGate
         }
 
         private readonly List<Row> _rows = new List<Row>();
+        // _view chi gom dong dang hien; mac dinh an muc chi gan co (macro, DLL
+        // nghi van) de danh sach khong bi lan voi muc chac chan doc hai.
+        private readonly List<Row> _view = new List<Row>();
+        private bool _showFlagged;
         private int _focus = -1;
         private int _hot = -1;
         private int _downRow = -1;
@@ -296,6 +300,7 @@ namespace ShieldGate
 
         public void SetItems(IList<UsbItem> items)
         {
+            _showFlagged = false;
             _rows.Clear();
             if (items != null)
             {
@@ -307,7 +312,37 @@ namespace ShieldGate
                     _rows.Add(r);
                 }
             }
-            _focus = _rows.Count > 0 ? 0 : -1;
+            RebuildView();
+        }
+
+        // An/hien muc chi gan co ma khong mat lua chon cua nguoi dung.
+        public bool ShowFlagged
+        {
+            get { return _showFlagged; }
+            set
+            {
+                if (_showFlagged == value) return;
+                _showFlagged = value;
+                RebuildView();
+            }
+        }
+
+        public int FlaggedCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (Row r in _rows) if (r.Item.FlagOnly) n++;
+                return n;
+            }
+        }
+
+        private void RebuildView()
+        {
+            _view.Clear();
+            foreach (Row r in _rows)
+                if (_showFlagged || !r.Item.FlagOnly) _view.Add(r);
+            _focus = _view.Count > 0 ? 0 : -1;
             AutoScrollPosition = new Point(0, 0);
             UpdateScroll();
             Invalidate();
@@ -320,10 +355,10 @@ namespace ShieldGate
 
         private void UpdateScroll()
         {
-            AutoScrollMinSize = new Size(0, _rows.Count * RowHeight);
+            AutoScrollMinSize = new Size(0, _view.Count * RowHeight);
         }
 
-        public int ItemCount { get { return _rows.Count; } }
+        public int ItemCount { get { return _view.Count; } }
 
         public int CheckedCount
         {
@@ -364,15 +399,16 @@ namespace ShieldGate
                         TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak);
                 return;
             }
+            if (_view.Count == 0) return;
 
             int oy = AutoScrollPosition.Y;
             int rh = RowHeight;
             int first = Math.Max(0, (-oy) / rh);
-            int last = Math.Min(_rows.Count - 1, (-oy + Height) / rh + 1);
+            int last = Math.Min(_view.Count - 1, (-oy + Height) / rh + 1);
 
             for (int i = first; i <= last; i++)
             {
-                Row row = _rows[i];
+                Row row = _view[i];
                 Rectangle r = new Rectangle(0, oy + i * rh, Width, rh);
 
                 if (i == _hot) Ui.Fill(g, new Rectangle(0, r.Y, Width, rh), Theme.HoverSoft);
@@ -429,7 +465,7 @@ namespace ShieldGate
         private int HitRow(Point p)
         {
             int idx = (p.Y - AutoScrollPosition.Y) / RowHeight;
-            return (idx >= 0 && idx < _rows.Count) ? idx : -1;
+            return (idx >= 0 && idx < _view.Count) ? idx : -1;
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -472,8 +508,8 @@ namespace ShieldGate
             _downRow = -1;
             if (idx < 0) return;
             _focus = idx;
-            if (_rows[idx].Item.FlagOnly) { Invalidate(); return; }
-            _rows[idx].Checked = !_rows[idx].Checked;
+            if (_view[idx].Item.FlagOnly) { Invalidate(); return; }
+            _view[idx].Checked = !_view[idx].Checked;
             Invalidate();
             if (SelectionChanged != null) SelectionChanged(this, EventArgs.Empty);
         }
@@ -492,7 +528,7 @@ namespace ShieldGate
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
-            if (_rows.Count == 0) return;
+            if (_view.Count == 0) return;
             if (e.Control && e.KeyCode == Keys.A)
             {
                 bool anyOff = false;
@@ -504,14 +540,14 @@ namespace ShieldGate
             if (e.KeyCode == Keys.Up) { MoveFocus(_focus - 1); e.Handled = true; }
             else if (e.KeyCode == Keys.Down) { MoveFocus(_focus + 1); e.Handled = true; }
             else if (e.KeyCode == Keys.Home) { MoveFocus(0); e.Handled = true; }
-            else if (e.KeyCode == Keys.End) { MoveFocus(_rows.Count - 1); e.Handled = true; }
+            else if (e.KeyCode == Keys.End) { MoveFocus(_view.Count - 1); e.Handled = true; }
             else if (e.KeyCode == Keys.Space)
             {
-                if (_focus >= 0 && _focus < _rows.Count)
+                if (_focus >= 0 && _focus < _view.Count)
                 {
-                    if (!_rows[_focus].Item.FlagOnly)
+                    if (!_view[_focus].Item.FlagOnly)
                     {
-                        _rows[_focus].Checked = !_rows[_focus].Checked;
+                        _view[_focus].Checked = !_view[_focus].Checked;
                         Invalidate();
                         if (SelectionChanged != null) SelectionChanged(this, EventArgs.Empty);
                     }
@@ -522,8 +558,8 @@ namespace ShieldGate
 
         private void MoveFocus(int index)
         {
-            if (_rows.Count == 0) return;
-            int v = Math.Max(0, Math.Min(_rows.Count - 1, index));
+            if (_view.Count == 0) return;
+            int v = Math.Max(0, Math.Min(_view.Count - 1, index));
             _focus = v;
             int top = -AutoScrollPosition.Y;
             int want = v * RowHeight;

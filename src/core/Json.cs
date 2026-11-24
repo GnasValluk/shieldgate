@@ -254,6 +254,12 @@ namespace ShieldGate
             return sb.ToString();
         }
 
+        // Chuoi da boc ngoac kep, dung cho --scan --json.
+        public static string Quote(string s)
+        {
+            return "\"" + Escape(s) + "\"";
+        }
+
         public static string Serialize(object value, bool pretty)
         {
             StringBuilder sb = new StringBuilder();

@@ -11,10 +11,12 @@ namespace ShieldGate
     internal sealed class ProtectPage : PageBase
     {
         private readonly StatusInfo _status = new StatusInfo();
-        private readonly Label _title, _intro, _backup, _tech, _adminNote;
-        private readonly SwitchRow _autorun, _ini, _wsh, _registry, _guard, _writeProtect, _blockExec;
-        private readonly LinkText _techLink, _reload;
-        private readonly FlatButton _toggle;
+        private readonly Label _title, _intro, _backup, _tech, _adminNote, _vtTitle, _vtState;
+        private readonly SwitchRow _autorun, _ini, _wsh, _registry, _guard, _writeProtect, _blockExec, _badUsbSwitch, _vtSwitch;
+        private readonly LinkText _techLink, _reload, _vtClear;
+        private readonly FlatButton _toggle, _vtSave;
+        private readonly Panel _vtKeyBox;
+        private readonly TextBox _vtKey;
         private readonly Notice _notice;
 
         private bool _busy, _loading, _techOpen;
@@ -55,6 +57,64 @@ namespace ShieldGate
             _guard = MakeSwitch(S.Protect.SwitchGuard, S.Protect.SwitchGuardDetail);
             _writeProtect = MakeSwitch(S.Protect.SwitchWriteProtect, S.Protect.SwitchWriteProtectDetail);
             _blockExec = MakeSwitch(S.Protect.SwitchBlockExec, S.Protect.SwitchBlockExecDetail);
+
+            // BadUSB là thiết lập của bản tray, không đi qua Guard.Configure;
+            // chỉ ghi settings.txt và có hiệu lực ở nhịp làm mới kế tiếp.
+            _badUsbSwitch = new SwitchRow();
+            _badUsbSwitch.Text = S.Protect.BadUsbSwitch;
+            _badUsbSwitch.Detail = S.Protect.BadUsbSwitchDetail;
+            _badUsbSwitch.CheckedChanged += delegate
+            {
+                if (_loading || _busy) return;
+                Settings.SetBadUsbEnabled(_badUsbSwitch.Checked);
+            };
+            Controls.Add(_badUsbSwitch);
+
+            // VirusTotal là opt-in riêng: công tắc này không đi qua Guard.Configure,
+            // chỉ ghi settings.txt và không gửi gì khi tắt.
+            _vtTitle = MakeLabel(S.Protect.VtTitle, Theme.Section, Theme.Ink);
+            Controls.Add(_vtTitle);
+
+            _vtSwitch = new SwitchRow();
+            _vtSwitch.Text = S.Protect.VtSwitch;
+            _vtSwitch.Detail = S.Protect.VtSwitchDetail;
+            _vtSwitch.CheckedChanged += delegate
+            {
+                if (_loading || _busy) return;
+                ApplyVtSwitch();
+            };
+            Controls.Add(_vtSwitch);
+
+            _vtKeyBox = new Panel();
+            _vtKeyBox.BackColor = Theme.Surface;
+            _vtKeyBox.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (Pen pen = new Pen(Theme.Line))
+                    e.Graphics.DrawRectangle(pen, 0, 0, _vtKeyBox.Width - 1, _vtKeyBox.Height - 1);
+            };
+            Controls.Add(_vtKeyBox);
+
+            _vtKey = new TextBox();
+            _vtKey.BorderStyle = BorderStyle.None;
+            _vtKey.BackColor = Theme.Surface;
+            _vtKey.ForeColor = Theme.Ink;
+            _vtKey.Font = Theme.Mono;
+            _vtKey.UseSystemPasswordChar = true;
+            _vtKey.AccessibleName = S.Protect.VtKeyLabel;
+            _vtKeyBox.Controls.Add(_vtKey);
+
+            _vtSave = MakeButton(S.Protect.VtSave, ButtonKind.Secondary);
+            _vtSave.Click += delegate { SaveVtKey(); };
+            Controls.Add(_vtSave);
+
+            _vtClear = MakeLink(S.Protect.VtClear, "ban");
+            _vtClear.IconSize = 13;
+            _vtClear.Click += delegate { ClearVtKey(); };
+            Controls.Add(_vtClear);
+
+            _vtState = MakeLabel(S.Protect.VtNoKey, Theme.Small, Theme.InkMuted);
+            _vtState.AutoEllipsis = false;
+            Controls.Add(_vtState);
 
             _techLink = MakeLink(S.Protect.Tech, "chevron");
             _techLink.IconSize = 11;
@@ -149,7 +209,10 @@ namespace ShieldGate
             _guard.Checked = _status.Running;
             _writeProtect.Checked = _status.WriteProtect;
             _blockExec.Checked = _status.BlockExec;
+            _badUsbSwitch.Checked = Settings.BadUsbEnabled;
+            _vtSwitch.Checked = Settings.VirusTotalEnabled;
             _loading = false;
+            UpdateVtState();
 
             _toggle.Text = _status.ProtectionOn ? S.Protect.Off : S.Protect.On;
             _toggle.Kind = _status.ProtectionOn ? ButtonKind.Secondary : ButtonKind.Primary;
@@ -171,7 +234,75 @@ namespace ShieldGate
             _guard.Enabled = on;
             _writeProtect.Enabled = on;
             _blockExec.Enabled = on;
+            _badUsbSwitch.Enabled = on;
             _toggle.Enabled = _status.Admin && !_busy;
+            // VirusTotal là thiết lập của người dùng, không phải chính sách hệ
+            // thống; vẫn cần quyền ghi thư mục dữ liệu nên đi cùng điều kiện.
+            _vtSwitch.Enabled = on;
+            _vtKey.Enabled = on;
+            _vtSave.Enabled = on;
+            _vtClear.Enabled = on;
+        }
+
+        // ------------------------------------------------------------ VirusTotal
+
+        private void ApplyVtSwitch()
+        {
+            if (_busy) return;
+            bool on = _vtSwitch.Checked;
+            if (on && !Settings.VirusTotalConsent)
+            {
+                if (!ConfirmDialog.Ask(FindForm(), S.Dlg.VtTitle, S.Dlg.VtBody,
+                                       S.Dlg.VtOk, S.Dlg.Cancel, ButtonKind.Primary, true))
+                {
+                    _loading = true;
+                    _vtSwitch.Checked = false;
+                    _loading = false;
+                    return;
+                }
+                Settings.SetVirusTotalConsent();
+            }
+
+            Settings.SetVirusTotalEnabled(on);
+            UpdateVtState();
+            if (!on) _notice.SetMessage(S.Protect.VtDisabled, false);
+            else if (VtKey.HasKey) _notice.SetMessage(S.Protect.VtEnabled, false);
+            else _notice.SetMessage(S.Protect.VtOnNoKey, false);
+        }
+
+        private void SaveVtKey()
+        {
+            if (_busy) return;
+            string key = (_vtKey.Text ?? "").Trim();
+            if (!VirusTotal.IsApiKey(key))
+            {
+                _notice.SetMessage(S.Protect.VtBadKey, true);
+                return;
+            }
+            if (!VtKey.Save(key))
+            {
+                _notice.SetMessage(S.Protect.VtSaveFailed, true);
+                return;
+            }
+            _vtKey.Text = "";
+            _notice.SetMessage(S.Protect.VtSaved, false);
+            UpdateVtState();
+        }
+
+        private void ClearVtKey()
+        {
+            if (_busy) return;
+            VtKey.Delete();
+            _vtKey.Text = "";
+            _notice.SetMessage(S.Protect.VtCleared, false);
+            UpdateVtState();
+        }
+
+        private void UpdateVtState()
+        {
+            bool has = VtKey.HasKey;
+            _vtState.Text = has ? S.Protect.VtKeySaved : S.Protect.VtNoKey;
+            _vtState.ForeColor = has ? Theme.InkMuted : Theme.Warn;
         }
 
         // --------------------------------------------------------------- áp dụng
@@ -320,6 +451,21 @@ namespace ShieldGate
             _guard.Bounds = new Rectangle(pad, y, width, rowH); y += rowH;
             _writeProtect.Bounds = new Rectangle(pad, y, width, rowH); y += rowH;
             _blockExec.Bounds = new Rectangle(pad, y, width, rowH); y += rowH;
+            _badUsbSwitch.Bounds = new Rectangle(pad, y, width, rowH); y += rowH;
+
+            _vtTitle.Bounds = new Rectangle(pad, y + Ui.Px(10), width, Ui.Px(22));
+            y += Ui.Px(36);
+            _vtSwitch.Bounds = new Rectangle(pad, y, width, rowH); y += rowH;
+
+            int saveW = Math.Max(TextWidth(S.Protect.VtSave, Theme.BodyStrong), Ui.Px(120));
+            int keyW = Math.Max(Ui.Px(180), width - saveW - Ui.Px(16));
+            _vtKeyBox.Bounds = new Rectangle(pad, y, keyW, Ui.Px(30));
+            _vtKey.Bounds = new Rectangle(Ui.Px(8), Ui.Px(7), keyW - Ui.Px(16), Ui.Px(18));
+            _vtSave.Bounds = new Rectangle(right - saveW, y, saveW, Ui.Px(Theme.ControlHeight));
+
+            _vtState.Bounds = new Rectangle(pad, y + Ui.Px(38), width - Ui.Px(120), Ui.Px(22));
+            _vtClear.Bounds = new Rectangle(right - Ui.Px(110), y + Ui.Px(38), Ui.Px(110), Ui.Px(22));
+            y += Ui.Px(70);
 
             _techLink.Bounds = new Rectangle(pad, y + Ui.Px(14),
                 Ui.Measure(S.Protect.Tech, Theme.Small).Width + Ui.Px(24), Ui.Px(22));

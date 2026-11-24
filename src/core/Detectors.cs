@@ -31,6 +31,9 @@ namespace ShieldGate
         public string Root = "";
         public RulesData Rules;
         public WalkStats Stats;
+        // ADS chi co tren NTFS; tinh mot lan cho ca lan quet de detector bo qua
+        // nhanh tren FAT32/exFAT thay vi goi FindFirstStreamW cho tung tep.
+        public bool IsNtfs;
     }
 
     internal interface IDetector
@@ -210,6 +213,7 @@ namespace ShieldGate
 
         public void Inspect(ScanContext c, TreeItem f, List<Finding> output)
         {
+            if (!c.IsNtfs) return;
             if (f.IsDir || f.Depth > 3) return;
             if (f.Size > 64L * 1024 * 1024) return;
             List<string> streams = Streams.List(f.Path);
@@ -256,16 +260,18 @@ namespace ShieldGate
             output.Add(x);
         }
 
-        // Doc phan cuoi ZIP tim ten "vbaProject.bin" trong central directory.
+        // Doc 1 MB cuoi tep: central directory cua ZIP nam o cuoi nen ten
+        // "vbaProject.bin" o day. Doc duoi re hon doc 8 MB dau va khong con
+        // bo qua tep lon hon 32 MB.
         private static bool HasVbaProject(string path)
         {
             try
             {
-                using (FileStream fs = new FileStream(path, FileMode.Open,
-                                                       FileAccess.Read, FileShare.ReadWrite))
+                using (FileStream fs = WinPath.OpenRead(WinPath.Ext(path)))
                 {
-                    if (fs.Length > 32L * 1024 * 1024) return false;
-                    int take = (int)Math.Min(fs.Length, 8L * 1024 * 1024);
+                    if (fs.Length <= 0) return false;
+                    int take = (int)Math.Min(fs.Length, 1024L * 1024);
+                    fs.Seek(-take, SeekOrigin.End);
                     byte[] buf = new byte[take];
                     int n = fs.Read(buf, 0, take);
                     if (n <= 0) return false;

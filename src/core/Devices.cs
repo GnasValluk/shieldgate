@@ -495,13 +495,67 @@ namespace ShieldGate
             return (d.InstanceId ?? "").ToUpperInvariant();
         }
 
+        // Raw Input tra ve \\?\HID#VID_...#{GUID}; kho luu HID\VID_... . Chuan
+        // hoa ca hai roi so, de ghep burst voi dung thiet bi trong trust store.
+        public static bool MatchesRaw(DeviceInfo d, string rawName)
+        {
+            if (d == null || string.IsNullOrEmpty(rawName)) return false;
+            string raw = NormalizeRaw(rawName);
+            string id = NormalizeRaw(d.InstanceId);
+            if (raw.Length > 0 && id.Length > 0)
+            {
+                if (string.Equals(raw, id, StringComparison.OrdinalIgnoreCase)) return true;
+                if (raw.StartsWith(id + "\\", StringComparison.OrdinalIgnoreCase) ||
+                    id.StartsWith(raw + "\\", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+
+            // Du phong: cung VID/PID. Chi dung khi TrayApp da loc ban phim.
+            string vid, pid;
+            ParseHardwareId(rawName, out vid, out pid);
+            return vid.Length > 0 && pid.Length > 0
+                && string.Equals(vid, d.Vid, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(pid, d.Pid, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeRaw(string value)
+        {
+            string s = (value ?? "").Trim();
+            if (s.StartsWith(@"\\?\", StringComparison.Ordinal)) s = s.Substring(4);
+            s = s.Replace('#', '\\');
+            int brace = s.IndexOf('{');
+            if (brace >= 0) s = s.Substring(0, brace);
+            return s.TrimEnd('\\');
+        }
+
+        // Ban phim ngoai theo bus: USB, Bluetooth hoac HID co VID (USB HID).
+        // Ban phim trong cua laptop thuong la ACPI/PS2, ROOT, SWD, hoac HID
+        // khong co VID (I2C HID nhu MSFT0001/ELAN0001). Day la heuristic: mot
+        // so laptop noi ban phim qua USB noi bo van bi coi la ngoai.
         public static bool IsInternalKeyboard(DeviceInfo d)
         {
             if (d == null) return false;
-            string id = d.InstanceId ?? "";
-            return id.StartsWith("ACPI\\", StringComparison.OrdinalIgnoreCase)
-                || id.StartsWith("HID\\", StringComparison.OrdinalIgnoreCase)
-                || id.StartsWith("ROOT\\", StringComparison.OrdinalIgnoreCase);
+            return IsInternalKeyboard(d.InstanceId);
+        }
+
+        public static bool IsInternalKeyboard(string instanceId)
+        {
+            if (string.IsNullOrEmpty(instanceId)) return true;
+            string id = instanceId.Trim();
+            if (StartsWithBus(id, "ACPI\\")) return true;
+            if (StartsWithBus(id, "ROOT\\")) return true;
+            if (StartsWithBus(id, "SWD\\")) return true;
+            if (StartsWithBus(id, "BTHENUM\\")) return false;
+            if (StartsWithBus(id, "BTHLEDEVICE\\")) return false;
+            if (StartsWithBus(id, "BTH\\")) return false;
+            if (StartsWithBus(id, "USB\\")) return false;
+            if (StartsWithBus(id, "HID\\"))
+                return id.IndexOf("VID_", StringComparison.OrdinalIgnoreCase) < 0;
+            return true;
+        }
+
+        private static bool StartsWithBus(string id, string prefix)
+        {
+            return id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
 
         // Cung VID/PID vua co o nho vua co ban phim: dau hieu composite/BadUSB.
@@ -628,7 +682,7 @@ namespace ShieldGate
             pid = 0;
             string detail = "";
             ManagementObjectCollection col = Query(@"\\.\root\cimv2",
-                "SELECT ProcessId, Name, CreationDate, CommandLine FROM Win32_Process " +
+                "SELECT ProcessId, Name, CreationDate FROM Win32_Process " +
                 "WHERE Name='cmd.exe' OR Name='powershell.exe' OR Name='pwsh.exe' " +
                 "OR Name='wscript.exe' OR Name='cscript.exe' OR Name='mshta.exe'");
             if (col == null) return "";
@@ -649,8 +703,9 @@ namespace ShieldGate
                         if (created < newest) continue;
                         newest = created;
                         pid = Convert.ToInt32(mo["ProcessId"]);
-                        detail = Convert.ToString(mo["Name"]) + " " +
-                                 Convert.ToString(mo["CommandLine"]);
+                        // Chi ten image: khong giu CommandLine vi co the chua
+                        // chuoi nguoi dung vua go (xem docs/design-badusb.md).
+                        detail = Convert.ToString(mo["Name"]);
                     }
                     catch { }
                     finally { try { mo.Dispose(); } catch { } }
@@ -658,20 +713,6 @@ namespace ShieldGate
             }
             finally { try { col.Dispose(); } catch { } }
             return detail.Trim();
-        }
-
-        // Tắt/mở thiết bị theo instance id. Windows 10 1809+ có pnputil /disable-device;
-        // máy cũ sẽ báo lỗi và người dùng phải làm trong Device Manager.
-        public static bool SetEnabled(string instanceId, bool enabled)
-        {
-            if (!Native.IsAdmin() || string.IsNullOrEmpty(instanceId)) return false;
-            string output;
-            string args = (enabled ? "/enable-device " : "/disable-device ") +
-                          "\"" + instanceId + "\"";
-            int code = Native.Run(Native.SysExe("pnputil.exe"), args, 30000, out output);
-            Log.Write("pnputil " + args + " -> " + code + " " + (output ?? "").Trim(),
-                      code == 0 ? "INFO" : "WARN");
-            return code == 0;
         }
     }
 }
