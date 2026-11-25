@@ -1390,13 +1390,16 @@ khi nối GUI.
 - **Host (`Guard.cs`):** `--watch` mở pipe khi `pipe.enabled=1` trong
   `settings.txt` (mặc định tắt), dừng cùng vòng bảo vệ. Client một lần
   (`PipeClient.Send`) và phiên giữ kết nối (`PipeSession`) để plan → apply.
-- **Self-test:** thêm 3 mục (khung tin, pin, roundtrip) và 1 mục plan/apply
-  (ổ hệ thống, đường dẫn, thiếu confirm, hết hạn, sai SID/session/ổ/serial).
-  `test.ps1` thêm kiểm tra tĩnh: server phải có `PipeSecurity`/SID, auth phải có
-  API PID/ảnh/SID, không có `NamedPipeServerStream` ngoài `PipeServer.cs`.
-- **Kết quả:** build 648 KB, SHA256
-  `a88d5e705e13e3e7ba4d84d8a75915cd010737fbb5e4ebc9526c3f4abd61f7e8`;
-  self-test **79/79**. Tài liệu: `README.md`, `PRIVACY.md`, `docs/design-pipe.md`,
+- **Self-test:** thêm 4 mục (khung tin, pin, roundtrip, plan/apply) và 1 mục ACL
+  thật (`PipeSecurity` cho SYSTEM/Administrators/Interactive, từ chối
+  Network/Anonymous, không có Everyone); roundtrip còn kiểm tra nhiều lệnh trên
+  cùng phiên, sống tiếp sau lỗi, PID → ảnh/session/SID; plan/apply kiểm tra thêm
+  `job.start` ổ hệ thống và `job.status` không tồn tại. `test.ps1` thêm kiểm tra
+  tĩnh: server phải có `PipeSecurity`/SID, auth phải có API PID/ảnh/SID, không có
+  `NamedPipeServerStream` ngoài `PipeServer.cs`.
+- **Kết quả:** build 650 KB, SHA256
+  `f4b23858be8472f63a5fcf13e3ed507d885773c96d001fa66cfc928d118fa36b`;
+  self-test **80/80**. Tài liệu: `README.md`, `PRIVACY.md`, `docs/design-pipe.md`,
   `docs/roadmap-2.1.md`.
 - **Còn lại:** W23g nối `UsbPage`/`ProtectPage` với pipe khi GUI không elevated;
   W23i phần tài liệu còn lại. Chưa chạy được checklist máy thật (GUI thường +

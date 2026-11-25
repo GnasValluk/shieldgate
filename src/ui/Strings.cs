@@ -1947,6 +1947,7 @@ namespace ShieldGate
             public static string PipePin { get { return T("pipe: pin client theo đường dẫn + SHA-256, xoá pin thì từ chối", "pipe: pin client by path + SHA-256, clearing the pin denies it"); } }
             public static string PipeRoundtrip { get { return T("pipe: server + client roundtrip trả status.get", "pipe: server + client roundtrip answers status.get"); } }
             public static string PipePlan { get { return T("pipe: plan/apply từ chối ổ hệ thống, đường dẫn, thiếu confirm, plan hết hạn hoặc sai SID/session/ổ/serial", "pipe: plan/apply rejects system drive, paths, missing confirm, expired plan or wrong SID/session/drive/serial"); } }
+            public static string PipeAcl { get { return T("pipe: ACL cho SYSTEM/Administrators/Interactive, từ chối Network/Anonymous, không có Everyone", "pipe: ACL allows SYSTEM/Administrators/Interactive, denies Network/Anonymous, no Everyone"); } }
             public static string MissingIsNotError { get { return T("tệp đã biến mất không bị tính là lỗi cách ly", "a file that already vanished is not counted as a quarantine error"); } }
             public static string CleanLockExclusive { get { return T("chỉ một luồng được dọn một ổ tại một thời điểm", "only one thread may clean a drive at a time"); } }
             public static string EmptyBatchRemoved { get { return T("không để lại vỏ cách ly rỗng khi không di chuyển được tệp nào", "no empty quarantine batch is left when nothing was moved"); } }

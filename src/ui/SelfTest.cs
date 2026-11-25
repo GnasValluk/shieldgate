@@ -4,10 +4,13 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.IO.Pipes;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using Microsoft.Win32;
@@ -33,7 +36,7 @@ namespace ShieldGate
             Policy.PauseAllowed = false;
 
             int passed = 0;
-            int total = 79;
+            int total = 80;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -1041,6 +1044,28 @@ namespace ShieldGate
                     // bị nhận nhầm là remote.
                     && clientSeen != null && clientSeen.Valid && clientSeen.ImagePath.Length > 0
                     && clientSeen.SessionId == (uint)System.Diagnostics.Process.GetCurrentProcess().SessionId;
+
+                // Cùng một phiên phải gửi được nhiều lệnh và sống tiếp sau lỗi:
+                // plan/apply của GUI dựa vào điều này.
+                using (PipeSession session = new PipeSession(pipeName))
+                {
+                    string sessionError;
+                    if (session.Connect(5000, out sessionError))
+                    {
+                        string first = session.Send("status.get",
+                            new Dictionary<string, object>(), 5000, out sessionError);
+                        string second = session.Send("status.get",
+                            new Dictionary<string, object>(), 5000, out sessionError);
+                        Dictionary<string, object> bad = new Dictionary<string, object>();
+                        bad["drive"] = "C";
+                        string refusedPlan = session.Send("clean.plan", bad, 5000, out sessionError);
+                        pipeRoundtripOk = pipeRoundtripOk
+                            && PipeClient.IsOk(first) && PipeClient.IsOk(second)
+                            && refusedPlan != null && !PipeClient.IsOk(refusedPlan)
+                            && refusedPlan.IndexOf("\"error\":\"refused\"") >= 0;
+                    }
+                    else pipeRoundtripOk = false;
+                }
             }
             catch { }
             finally
@@ -1051,6 +1076,36 @@ namespace ShieldGate
                 }
             }
             check(S.Selftest.PipeRoundtrip, pipeRoundtripOk);
+
+            // 35h. ACL thật của pipe: SYSTEM + Administrators + Interactive được
+            //      phép, Network/Anonymous bị từ chối, không có Everyone.
+            bool pipeAclOk = false;
+            try
+            {
+                PipeSecurity security = PipeServer.BuildSecurity();
+                AuthorizationRuleCollection rules = security.GetAccessRules(
+                    true, true, typeof(SecurityIdentifier));
+                bool system = false, admins = false, interactive = false;
+                bool networkDeny = false, anonymousDeny = false, everyoneAllow = false;
+                foreach (AuthorizationRule rule in rules)
+                {
+                    PipeAccessRule pipeRule = rule as PipeAccessRule;
+                    if (pipeRule == null) continue;
+                    string sid = pipeRule.IdentityReference.Value;
+                    bool allow = pipeRule.AccessControlType == AccessControlType.Allow;
+                    if (allow && sid == "S-1-5-18") system = true;
+                    if (allow && sid == "S-1-5-32-544") admins = true;
+                    if (allow && sid == "S-1-5-4") interactive = true;
+                    if (!allow && sid == "S-1-5-2") networkDeny = true;
+                    if (!allow && sid == "S-1-5-7") anonymousDeny = true;
+                    if (allow && (sid == "S-1-1-0" || sid == "S-1-5-2" || sid == "S-1-5-7"))
+                        everyoneAllow = true;
+                }
+                pipeAclOk = system && admins && interactive
+                    && networkDeny && anonymousDeny && !everyoneAllow;
+            }
+            catch { }
+            check(S.Selftest.PipeAcl, pipeAclOk);
 
             // 35g. Plan/apply: chỉ nhận một ký tự ổ, từ chối ổ hệ thống và đường
             //      dẫn; thiếu confirm là bad-args; plan hết hạn/sai SID/session/ổ
@@ -1094,6 +1149,14 @@ namespace ShieldGate
                 a5["plan"] = "nope";
                 string noConfirm = err(PipeCommands.Handle(mk("clean.apply", a5), null));
 
+                Dictionary<string, object> j1 = new Dictionary<string, object>();
+                j1["kind"] = "scan";
+                j1["drive"] = "C";
+                string jobSystem = err(PipeCommands.Handle(mk("job.start", j1), null));
+                Dictionary<string, object> j2 = new Dictionary<string, object>();
+                j2["job"] = "nope";
+                string jobMissing = err(PipeCommands.Handle(mk("job.status", j2), null));
+
                 PipePlan plan = new PipePlan();
                 plan.Id = "p-test";
                 plan.Kind = "clean";
@@ -1133,6 +1196,8 @@ namespace ShieldGate
                     && badSession == "refused"
                     && badRoot == "refused"
                     && missingPlan == "not-found"
+                    && jobSystem == "refused"
+                    && jobMissing == "not-found"
                     && (plan.Serial == 0 || badSerial == "refused");
             }
             catch { }

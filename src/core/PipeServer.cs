@@ -54,7 +54,7 @@ namespace ShieldGate
             }
         }
 
-        private NamedPipeServerStream CreatePipe()
+        internal static PipeSecurity BuildSecurity()
         {
             PipeSecurity security = new PipeSecurity();
             SecurityIdentifier system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
@@ -73,12 +73,16 @@ namespace ShieldGate
                                                       AccessControlType.Deny));
             security.AddAccessRule(new PipeAccessRule(anonymous, PipeAccessRights.FullControl,
                                                       AccessControlType.Deny));
+            return security;
+        }
 
+        private NamedPipeServerStream CreatePipe()
+        {
             // PIPE_REJECT_REMOTE_CLIENTS không có trong PipeOptions của .NET 4.0.
             // ACL ở trên đã chặn Network; server còn kiểm tra tên máy client.
             return new NamedPipeServerStream(_name, PipeDirection.InOut, 1,
                 PipeTransmissionMode.Message, PipeOptions.WriteThrough,
-                PipeProtocol.MaxMessage, PipeProtocol.MaxMessage, security,
+                PipeProtocol.MaxMessage, PipeProtocol.MaxMessage, BuildSecurity(),
                 HandleInheritability.None);
         }
 
