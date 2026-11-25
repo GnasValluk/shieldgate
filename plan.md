@@ -1426,7 +1426,7 @@ khi nối GUI.
 - **Tài liệu:** `README.md` (pipe đã dùng cho gốc ổ), `PRIVACY.md` (phạm vi pipe
   và hoàn tác cần quản trị), `docs/design-pipe.md`, `docs/roadmap-2.1.md`.
 - **Kết quả:** build 654 KB, SHA256
-  `02ae4993732c9fa4cdbf8474ba2ada9e5fffaadcec231a9fd3e9e333250aa3c6`;
+  `4c9a1e0425554004c83e1a1f47efb921df9cbe724257a5697ca6629f8ddd88bc`;
   self-test **80/80**, `--version` in `ShieldGate 2.3`.
 - **Còn lại:** checklist máy thật (GUI thường + engine SYSTEM, client tự viết,
   rút USB giữa job, pipe từ máy khác, Windows 7 x86). W23i đã xong cùng đợt này;

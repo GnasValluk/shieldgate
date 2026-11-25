@@ -717,8 +717,8 @@ namespace ShieldGate
             // Dọn xong mà chỉ lỗi bước gỡ ẩn thì vẫn giữ kết quả dọn.
             if (problem.Length > 0)
             {
-                if (done > 0) Log.Write(S.Log.PipeError(problem), "WARN");
-                else
+                Log.Write(S.Log.PipeError(problem), done > 0 ? "WARN" : "ERROR");
+                if (done == 0)
                 {
                     failed = selected.Count;
                     if (pipeUnavailable) problem = S.Err.PipeUnavailable(problem);
@@ -732,7 +732,8 @@ namespace ShieldGate
                 {
                     FinishApply(drive, done, failed, batch, unhidden);
                     if (problem.Length > 0) _notice.SetMessage(problem, true);
-                    else if (warning.Length > 0 && failed == 0) _notice.SetMessage(warning, true);
+                    else if (warning.Length > 0 && done > 0 && failed == 0)
+                        _notice.SetMessage(warning, true);
                 });
             }
             catch { }
