@@ -91,8 +91,9 @@ Luồng chính:
 
 18. Đường dẫn khôi phục cách ly phải chuẩn hoá và nằm trong thư mục đích hợp
     lệ; không tin `manifest.csv` tuyệt đối.
-19. Không thêm named pipe/service nếu chưa có thiết kế xác thực; hiện tại dùng
-    tệp + ACL.
+19. Không thêm named pipe/service nếu chưa có thiết kế xác thực. Named pipe W23
+    đã có nhưng tắt mặc định (`pipe.enabled=0`); chỉ dùng khi bật, các luồng
+    khác vẫn dùng tệp + ACL.
 20. Mọi tệp cấu hình trong thư mục dữ liệu phải chịu được dữ liệu rác/hỏng:
     parse lỗi → dùng mặc định, ghi log, không crash.
 
@@ -137,7 +138,8 @@ Luồng chính:
 
 ## Việc còn lại (bản sau)
 
-- Named pipe có xác thực giữa GUI và engine SYSTEM.
+- Named pipe W23: còn checklist máy thật (GUI thường + engine SYSTEM, client tự
+  viết, rút USB giữa job, pipe từ máy khác, Windows 7 x86).
 - Raw Input key attribution + ETW cho BadUSB.
 - VirusTotal opt-in (chỉ hash) và YARA.
 - Sửa boot sector/MBR có đối chiếu mẫu sạch.
