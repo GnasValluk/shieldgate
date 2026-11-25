@@ -1431,3 +1431,37 @@ khi nối GUI.
 - **Còn lại:** checklist máy thật (GUI thường + engine SYSTEM, client tự viết,
   rút USB giữa job, pipe từ máy khác, Windows 7 x86). W23i đã xong cùng đợt này;
   pipe vẫn tắt mặc định.
+
+### 2026-11-25 — W23j: công tắc `--pipe` (vẫn tắt mặc định)
+
+- **Vì sao:** W23 xong phần mã nhưng chỉ bật được bằng cách sửa tay
+  `settings.txt`. Thêm lệnh để người dùng bật/tắt có kiểm soát, vẫn không đổi
+  hành vi mặc định và không thêm trang cấu hình mới.
+- **`--pipe` (không tham số) và `--pipe status`:** chỉ đọc; in thiết lập, bảo vệ
+  nền có đang chạy, và `bin\client.pin` có tồn tại. Không cần quyền quản trị nên
+  không bật UAC.
+- **`--pipe on|off`:** cần quyền quản trị, ghi `pipe.enabled` rồi đọc lại để xác
+  nhận; báo cần khởi động lại bảo vệ nền vì pipe host trong `--watch`. Bật mà
+  chưa có pin thì in cảnh báo chạy `--install` trước.
+- **Nâng quyền:** `NeedsAdmin` chỉ yêu cầu quyền cho `on`/`off`. Giá trị gõ sai
+  in cách dùng và trả mã 1 ngay, không mở hộp UAC (trước đó `--pipe maybe` vẫn
+  đòi quyền rồi thoát im lặng).
+- **Chuỗi:** `S.Cli.PipeUsage`, `PipeBadArg`, `PipeStatus`, `PipeOn`, `PipeOff`,
+  `PipeNoPin`, `PipeSetFailed`; `--help` liệt kê `--pipe`.
+- **Kiểm thử:** self-test thêm mục 35i (mặc định tắt, bật/tắt ghi được vào
+  settings) → **81/81**; `test.ps1` thêm kiểm tra tĩnh: `pipe.enabled` mặc định
+  `"0"`, `Program.cs` có `--pipe` và chỉ `on`/`off` mới đòi quyền.
+- **Tài liệu:** `README.md` (lệnh + quyền), `docs/design-pipe.md`,
+  `docs/roadmap-2.1.md`, `AGENTS.md`.
+- **Kết quả:** build 658 KB, SHA256
+  `3819aad5b6199822712c025de4e6bddc0493f4b446ac5671f944d1196102b61e`;
+  `--pipe`, `--pipe status` trả 0, `--pipe maybe` trả 1 kèm cách dùng;
+  self-test **81/81**, `--version` in `ShieldGate 2.3`.
+- **Defender:** nhiều bản build trung gian bị gắn nhầm `Trojan:Win32/Wacatac.B!ml`
+  rồi bị xoá ngay sau khi dựng; dựng lại tới khi qua thì self-test chạy bình
+  thường. Không tắt Defender, không thêm loại trừ. Nếu lặp lại, gửi báo nhầm cho
+  Microsoft và cân nhắc ký số release.
+- **Chưa làm được:** `--pipe on|off` chưa chạy thử vì phiên hiện tại không có
+  quyền quản trị; đường ghi đã được self-test phủ ở thư mục tạm.
+- **Còn lại:** checklist máy thật; cân nhắc bump 3.0 khi người dùng thật bật
+  pipe.

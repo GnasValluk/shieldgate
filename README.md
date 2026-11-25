@@ -150,12 +150,15 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
   system drive, removable media, write access and volume serial, plans expire
   after 120 seconds and are bound to SID, session and drive, and every write
   needs `confirm:true`.
-- **Off by default.** The pipe starts inside `--watch` only when
-  `pipe.enabled=1` is set in `settings.txt`. When it is on, a standard-user GUI
-  uses it only for whole-drive clean/unhide; folder scans and all other pages
-  keep the local file + ACL path. A failed pipe shows a message and never
-  elevates the GUI by itself. Undo of a pipe clean needs administrator rights
-  because the standard user cannot read the quarantine manifest.
+- **Off by default, switched with `--pipe`.** The pipe starts inside `--watch`
+  only when `pipe.enabled=1` is set in `settings.txt`. `--pipe status` shows the
+  setting, whether the engine is running and whether `bin\client.pin` exists;
+  `--pipe on` and `--pipe off` (administrator) change it and ask for a restart of
+  background protection. When it is on, a standard-user GUI uses it only for
+  whole-drive clean/unhide; folder scans and all other pages keep the local file
+  + ACL path. A failed pipe shows a message and never elevates the GUI by itself.
+  Undo of a pipe clean needs administrator rights because the standard user
+  cannot read the quarantine manifest.
 
 ## What is new in 2.0
 
@@ -294,14 +297,15 @@ folder and a language (Vietnamese or English); the choice is stored in
 6. Use **Drive repair** only when a drive misbehaves; preview the backup first.
 
 The GUI and protection request administrator rights through UAC. `--scan`,
-`--status`, `--devices`, `--events`, `--repair`, `--vt`, `--help`, `--version`
-and `--selftest` do not.
+`--status`, `--pipe status`, `--devices`, `--events`, `--repair`, `--vt`,
+`--help`, `--version` and `--selftest` do not.
 
 ## Command line
 
 ```
 ShieldGate.exe                            GUI
 ShieldGate.exe --status                   protection state
+ShieldGate.exe --pipe [on|off|status]     named pipe for a standard-user GUI
 ShieldGate.exe --scan E:\                 read-only scan of a drive
 ShieldGate.exe --scan "D:\folder"         read-only scan of one folder
 ShieldGate.exe --scan E:\ --json          same scan as JSON for scripts
@@ -337,6 +341,11 @@ ShieldGate.exe --help                     list commands and exit codes
 - `--repair` only diagnoses and prints results. It never backs up, runs
   `chkdsk` or writes to a drive; those actions live in the GUI with explicit
   confirmation.
+- `--pipe` defaults to `status`. It reports the setting, whether background
+  protection is running and whether the client pin exists. `--pipe on` and
+  `--pipe off` need administrator rights and ask you to restart background
+  protection; enabling it without `bin\client.pin` (written by `--install`)
+  prints a warning. The pipe stays off unless you turn it on.
 - `--defender` exits `0` when clean, `2` when Defender reports a threat and `1`
   on error.
 - `--vt` exits `0` when no engine flags the file, `2` when at least one engine

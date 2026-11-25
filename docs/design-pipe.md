@@ -317,3 +317,9 @@ chính sách, nên trang này vẫn yêu cầu quyền quản trị và chỉ hi
 elevated. Hoàn tác một lần dọn qua pipe cũng cần quyền quản trị vì GUI thường
 không đọc được vùng cách ly. W23i đã cập nhật `README.md`, `PRIVACY.md` và
 `plan.md`; việc còn lại là checklist máy thật ở §11.2. Pipe vẫn tắt mặc định.
+
+Bật/tắt bằng `--pipe on|off` (cần quyền quản trị, ghi `pipe.enabled` vào
+`settings.txt`); `--pipe status` chỉ đọc và cho biết engine có đang chạy cùng
+`bin\client.pin` có tồn tại hay không. Không có công tắc trong GUI để tránh
+một trang cấu hình mới chỉ cho beta. Đổi thiết lập cần khởi động lại bảo vệ nền
+vì pipe được host trong `--watch`.

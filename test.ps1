@@ -39,6 +39,21 @@ if ($pipeHits.Count -gt 0) {
     throw "NamedPipeServerStream outside PipeServer.cs: $list"
 }
 
+# W23: pipe tắt mặc định và chỉ bật bằng --pipe (cần quyền quản trị).
+$settings = Get-Content 'src\core\Settings.cs' -Raw
+if ($settings.IndexOf('Get("pipe.enabled", "0")', [StringComparison]::Ordinal) -lt 0) {
+    throw "pipe.enabled must default to 0 in Settings.cs"
+}
+$program = Get-Content 'src\ui\Program.cs' -Raw
+foreach ($need in @('case "pipe": return PipeCommand(args);', 'private static bool IsPipeWrite')) {
+    if ($program.IndexOf($need, [StringComparison]::Ordinal) -lt 0) {
+        throw "Program.cs is missing $need"
+    }
+}
+if ($program.IndexOf('return IsPipeWrite(args);', [StringComparison]::Ordinal) -lt 0) {
+    throw "NeedsAdmin must only require elevation for --pipe on|off"
+}
+
 New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
 
 $sources = @(Get-ChildItem 'src\core\*.cs' | ForEach-Object { $_.FullName }) +

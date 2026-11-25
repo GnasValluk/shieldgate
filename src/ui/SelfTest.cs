@@ -36,7 +36,7 @@ namespace ShieldGate
             Policy.PauseAllowed = false;
 
             int passed = 0;
-            int total = 80;
+            int total = 81;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -1203,6 +1203,20 @@ namespace ShieldGate
             catch { }
             check(S.Selftest.PipePlan, pipePlanOk);
 
+            // 35i. Thiết lập pipe: mặc định tắt, bật/tắt ghi được vào settings.
+            bool pipeSettingOk = false;
+            try
+            {
+                bool before = Settings.PipeEnabled;
+                Settings.SetPipeEnabled(true);
+                bool on = Settings.PipeEnabled;
+                Settings.SetPipeEnabled(false);
+                bool off = !Settings.PipeEnabled;
+                pipeSettingOk = !before && on && off;
+            }
+            catch { }
+            check(S.Selftest.PipeSetting, pipeSettingOk);
+
             // 36. Tệp đã biến mất không phải lỗi: phải trả error rỗng để bên gọi
             //     bỏ qua thay vì ghi ERROR và trừ vào bộ đếm (log có 286 lỗi giả).
             bool goneOk = false;
@@ -2076,6 +2090,7 @@ namespace ShieldGate
                 bool helpOk = help.IndexOf("--scan", StringComparison.Ordinal) >= 0
                            && help.IndexOf("--vt", StringComparison.Ordinal) >= 0
                            && help.IndexOf("--json", StringComparison.Ordinal) >= 0
+                           && help.IndexOf("--pipe", StringComparison.Ordinal) >= 0
                            && help.IndexOf("--version", StringComparison.Ordinal) >= 0
                            && help.IndexOf("--help", StringComparison.Ordinal) >= 0;
                 cliJsonOk = parsed && escaped && helpOk;

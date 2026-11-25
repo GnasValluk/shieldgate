@@ -1974,6 +1974,7 @@ namespace ShieldGate
             public static string PipeRoundtrip { get { return T("pipe: server + client roundtrip trả status.get", "pipe: server + client roundtrip answers status.get"); } }
             public static string PipePlan { get { return T("pipe: plan/apply từ chối ổ hệ thống, đường dẫn, thiếu confirm, plan hết hạn hoặc sai SID/session/ổ/serial", "pipe: plan/apply rejects system drive, paths, missing confirm, expired plan or wrong SID/session/drive/serial"); } }
             public static string PipeAcl { get { return T("pipe: ACL cho SYSTEM/Administrators/Interactive, từ chối Network/Anonymous, không có Everyone", "pipe: ACL allows SYSTEM/Administrators/Interactive, denies Network/Anonymous, no Everyone"); } }
+            public static string PipeSetting { get { return T("pipe: pipe.enabled mặc định tắt, bật/tắt ghi được vào settings", "pipe: pipe.enabled defaults to off and the on/off setting persists"); } }
             public static string MissingIsNotError { get { return T("tệp đã biến mất không bị tính là lỗi cách ly", "a file that already vanished is not counted as a quarantine error"); } }
             public static string CleanLockExclusive { get { return T("chỉ một luồng được dọn một ổ tại một thời điểm", "only one thread may clean a drive at a time"); } }
             public static string EmptyBatchRemoved { get { return T("không để lại vỏ cách ly rỗng khi không di chuyển được tệp nào", "no empty quarantine batch is left when nothing was moved"); } }
@@ -2136,8 +2137,8 @@ namespace ShieldGate
             {
                 get
                 {
-                    return T("--scan --json đọc lại được, thoát ký tự đúng; --help liệt kê --scan/--vt/--json/--version",
-                             "--scan --json parses back with correct escaping; --help lists --scan/--vt/--json/--version");
+                    return T("--scan --json đọc lại được, thoát ký tự đúng; --help liệt kê --scan/--vt/--json/--pipe/--version",
+                             "--scan --json parses back with correct escaping; --help lists --scan/--vt/--json/--pipe/--version");
                 }
             }
             public static string InputRate
@@ -2278,6 +2279,49 @@ namespace ShieldGate
             public static string EventsUsage { get { return T("Cách dùng: ShieldGate.exe --events [số dòng]", "Usage: ShieldGate.exe --events [count]"); } }
             public static string RepairUsage { get { return T("Cách dùng: ShieldGate.exe --repair E:\\", "Usage: ShieldGate.exe --repair E:\\"); } }
             public static string DefenderUsage { get { return T("Cách dùng: ShieldGate.exe --defender <tệp hoặc thư mục>", "Usage: ShieldGate.exe --defender <file or folder>"); } }
+            public static string PipeUsage { get { return T("Cách dùng: ShieldGate.exe --pipe [on|off|status]", "Usage: ShieldGate.exe --pipe [on|off|status]"); } }
+            public static string PipeBadArg { get { return T("Giá trị phải là on, off hoặc status.", "The value must be on, off or status."); } }
+            public static string PipeStatus(bool on, bool running, bool pinned)
+            {
+                return T("Named pipe: " + (on ? "bật" : "tắt")
+                         + " · bảo vệ nền: " + (running ? "đang chạy" : "không chạy")
+                         + " · client pin: " + (pinned ? "có" : "không"),
+                         "Named pipe: " + (on ? "on" : "off")
+                         + " · background protection: " + (running ? "running" : "not running")
+                         + " · client pin: " + (pinned ? "present" : "missing"));
+            }
+            public static string PipeOn
+            {
+                get
+                {
+                    return T("Đã bật named pipe. Khởi động lại bảo vệ nền để áp dụng.",
+                             "Named pipe enabled. Restart background protection to apply.");
+                }
+            }
+            public static string PipeOff
+            {
+                get
+                {
+                    return T("Đã tắt named pipe. Khởi động lại bảo vệ nền để đóng pipe.",
+                             "Named pipe disabled. Restart background protection to close the pipe.");
+                }
+            }
+            public static string PipeNoPin
+            {
+                get
+                {
+                    return T("Chưa có bin\\client.pin; chạy --install (quyền quản trị) trước khi bật pipe.",
+                             "bin\\client.pin is missing; run --install (administrator) before enabling the pipe.");
+                }
+            }
+            public static string PipeSetFailed
+            {
+                get
+                {
+                    return T("Không ghi được settings.txt; named pipe không đổi.",
+                             "Could not write settings.txt; the named pipe setting did not change.");
+                }
+            }
             public static string ImportRulesUsage
             {
                 get { return T("Cách dùng: ShieldGate.exe --import-rules <rules.json> --yes",
@@ -2362,6 +2406,7 @@ namespace ShieldGate
                         "  ShieldGate.exe                      mở giao diện\n" +
                         "  --install | --uninstall [--keep-data|--purge-data]\n" +
                         "  --watch | --tray | --status\n" +
+                        "  --pipe [on|off|status]              named pipe cho GUI quyền thường\n" +
                         "  --scan <ổ hoặc thư mục> [--json]    quét, --json cho script\n" +
                         "  --repair <ổ>                        xem và sửa lỗi ổ\n" +
                         "  --defender <tệp hoặc thư mục>       nhờ Windows Defender quét\n" +
@@ -2377,6 +2422,7 @@ namespace ShieldGate
                         "  ShieldGate.exe                      open the window\n" +
                         "  --install | --uninstall [--keep-data|--purge-data]\n" +
                         "  --watch | --tray | --status\n" +
+                        "  --pipe [on|off|status]              named pipe for a standard-user GUI\n" +
                         "  --scan <drive or folder> [--json]   scan; --json for scripts\n" +
                         "  --repair <drive>                    inspect and repair a drive\n" +
                         "  --defender <file or folder>         ask Windows Defender to scan\n" +
@@ -2393,7 +2439,7 @@ namespace ShieldGate
             {
                 get
                 {
-                    return "ShieldGate.exe --watch | --status | --install | --uninstall [--keep-data|--purge-data] | --scan <drive or folder> [--json] | --devices | --events [n] | --repair <drive> | --defender <path> | --vt <file> | --import-rules <rules.json> --yes | --selftest | --version | --help";
+                    return "ShieldGate.exe --watch | --status | --pipe [on|off|status] | --install | --uninstall [--keep-data|--purge-data] | --scan <drive or folder> [--json] | --devices | --events [n] | --repair <drive> | --defender <path> | --vt <file> | --import-rules <rules.json> --yes | --selftest | --version | --help";
                 }
             }
             public static string TempDir(string path) { return T("Thư mục tạm: " + path, "Temporary folder: " + path); }

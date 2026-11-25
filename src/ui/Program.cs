@@ -40,7 +40,7 @@ namespace ShieldGate
             // đặt requireAdministrator trong manifest: nếu manifest bắt buộc, Windows
             // khởi chạy lại qua UAC và làm mất stdout khi người dùng chuyển hướng lệnh
             // `ShieldGate.exe scan` ra tệp.
-            if (!Native.IsAdmin() && NeedsAdmin(command))
+            if (!Native.IsAdmin() && NeedsAdmin(command, args))
             {
                 if (!RelaunchElevated(args))
                 {
@@ -68,6 +68,7 @@ namespace ShieldGate
                     case "install": return Install(args);
                     case "uninstall": return Uninstall(args);
                     case "status": return Status();
+                    case "pipe": return PipeCommand(args);
                     case "scan": return Scan(args);
                     case "devices": return DevicesCommand();
                     case "events": return EventsCommand(args);
@@ -227,16 +228,28 @@ namespace ShieldGate
             catch { return false; }
         }
 
-        private static bool NeedsAdmin(string command)
+        private static bool NeedsAdmin(string command, string[] args)
         {
             switch (command)
             {
                 case "": case "install": case "uninstall": case "watch": case "tray":
                 case "import-rules": case "importrules":
                     return true;
+                case "pipe":
+                    // Đọc trạng thái và giá trị gõ sai không cần quyền: tránh bật
+                    // hộp UAC chỉ vì một lệnh không hợp lệ.
+                    return IsPipeWrite(args);
                 default:
                     return false;
             }
+        }
+
+        private static bool IsPipeWrite(string[] args)
+        {
+            if (args.Length < 2) return false;
+            string value = args[1].Trim().TrimStart('-');
+            return string.Equals(value, "on", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "off", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool RelaunchElevated(string[] args)
@@ -307,6 +320,55 @@ namespace ShieldGate
             Console.WriteLine(S.Cli.StatusAdmin(st.Admin));
             Console.WriteLine(S.Cli.StatusQuarantine(st.QuarantineFiles, st.QuarantineBatches));
             return 0;
+        }
+
+        private static int PipeCommand(string[] args)
+        {
+            string value = args.Length > 1 ? args[1].Trim().TrimStart('-').ToLowerInvariant() : "status";
+            if (value.Length == 0) value = "status";
+            if (value != "on" && value != "off" && value != "status")
+            {
+                Console.WriteLine(S.Cli.PipeBadArg);
+                Console.WriteLine(S.Cli.PipeUsage);
+                return 1;
+            }
+
+            if (value == "status")
+            {
+                StatusInfo st = Guard.GetStatus();
+                Console.WriteLine(S.Cli.PipeStatus(Settings.PipeEnabled, st.Running, PipePinned()));
+                if (Settings.PipeEnabled && !PipePinned()) Console.WriteLine(S.Cli.PipeNoPin);
+                return 0;
+            }
+
+            // NeedsAdmin đã nâng quyền trước khi vào đây; kiểm tra lại để lệnh
+            // không ghi settings.txt nếu bị gọi trực tiếp từ mã khác.
+            if (!Native.IsAdmin())
+            {
+                Console.WriteLine(S.Cli.AdminRequired);
+                return 1;
+            }
+
+            bool on = value == "on";
+            Settings.SetPipeEnabled(on);
+            if (Settings.PipeEnabled != on)
+            {
+                Console.WriteLine(S.Cli.PipeSetFailed);
+                return 1;
+            }
+            Console.WriteLine(on ? S.Cli.PipeOn : S.Cli.PipeOff);
+            if (on && !PipePinned()) Console.WriteLine(S.Cli.PipeNoPin);
+            return 0;
+        }
+
+        private static bool PipePinned()
+        {
+            try
+            {
+                string path, hash;
+                return PipeAuth.ReadPin(out path, out hash);
+            }
+            catch { return false; }
         }
 
         private static int Scan(string[] args)

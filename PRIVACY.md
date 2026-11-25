@@ -154,12 +154,13 @@ PID, PID cha, tên image và thời điểm tạo của 6 shell (`cmd`, `powersh
 `CommandLine`, mã phím, tiêu đề cửa sổ, clipboard hay nội dung tệp. Tên shell và
 cha gần đây chỉ nằm trong bộ nhớ 120 giây.
 
-Named pipe 3.0 mặc định **tắt** (`pipe.enabled=0`). Khi bật, nó chỉ chạy trên máy
-này, từ chối client từ xa và ẩn danh, và chỉ nhận đúng tệp GUI đã ghim bằng đường
-dẫn + SHA-256. Tin nhắn là JSON trong bộ nhớ, có thể chứa ký tự ổ, mã plan/job, số
-lượng mục và đường dẫn tương đối của mục quét; không chứa nội dung tệp. Plan bị
-xoá sau 120 giây hoặc khi client ngắt kết nối. Nhật ký chỉ ghi PID/phiên/tên tệp
-client, mã plan/job, ký tự ổ, số lượng và kết quả.
+Named pipe 3.0 mặc định **tắt** (`pipe.enabled=0`, bật bằng `--pipe on` với quyền
+quản trị). Khi bật, nó chỉ chạy trên máy này, từ chối client từ xa và ẩn danh, và
+chỉ nhận đúng tệp GUI đã ghim bằng đường dẫn + SHA-256. Tin nhắn là JSON trong bộ
+nhớ, có thể chứa ký tự ổ, mã plan/job, số lượng mục và đường dẫn tương đối của mục
+quét; không chứa nội dung tệp. Plan bị xoá sau 120 giây hoặc khi client ngắt kết
+nối. Nhật ký chỉ ghi PID/phiên/tên tệp client, mã plan/job, ký tự ổ, số lượng và
+kết quả.
 
 Khi pipe bật, GUI quyền thường chỉ dùng pipe cho việc dọn/hiện toàn ổ. Thao tác
 trên thư mục và các trang khác vẫn dùng tệp + ACL cục bộ. Lần dọn qua pipe ghi

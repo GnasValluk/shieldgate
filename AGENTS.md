@@ -92,8 +92,8 @@ Luồng chính:
 18. Đường dẫn khôi phục cách ly phải chuẩn hoá và nằm trong thư mục đích hợp
     lệ; không tin `manifest.csv` tuyệt đối.
 19. Không thêm named pipe/service nếu chưa có thiết kế xác thực. Named pipe W23
-    đã có nhưng tắt mặc định (`pipe.enabled=0`); chỉ dùng khi bật, các luồng
-    khác vẫn dùng tệp + ACL.
+    đã có nhưng tắt mặc định (`pipe.enabled=0`); chỉ dùng khi bật bằng
+    `--pipe on` (quyền quản trị), các luồng khác vẫn dùng tệp + ACL.
 20. Mọi tệp cấu hình trong thư mục dữ liệu phải chịu được dữ liệu rác/hỏng:
     parse lỗi → dùng mặc định, ghi log, không crash.
 
