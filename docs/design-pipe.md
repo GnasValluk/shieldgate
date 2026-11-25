@@ -275,7 +275,7 @@ Nếu bất kỳ kiểm tra nào thất bại, trả `refused` kèm lý do đã 
 | W23d | `src/core/PipeAuth.cs` | PID → ảnh → băm, session/SID, pin |
 | W23e | `src/core/PipeCommands.cs` | allow-list, plan/apply, job |
 | W23f | `src/core/Guard.cs` | host pipe trong `--watch` (hoặc `--engine`) |
-| W23g | `src/ui/UsbPage.cs`, `ProtectPage.cs` | dùng client khi không elevated |
+| W23g | `src/ui/UsbPage.cs` | dùng client khi không elevated, chỉ gốc ổ; `ProtectPage` vẫn cần admin |
 | W23h | `src/ui/SelfTest.cs`, `test.ps1` | các ca §11.1, kiểm tra tĩnh |
 | W23i | `README.md`, `PRIVACY.md`, `plan.md` | tài liệu, nhật ký |
 
@@ -303,12 +303,17 @@ trong `--watch`, GUI vẫn có thể chạy elevated (chỉ dùng pipe khi chưa
 pin `bin\client.pin`, giữ allow-list `clean`/`unhide`/`rename`, plan/apply cho
 mọi lệnh ghi, `pipe.enabled=false` trong beta, giữ Windows 7, chưa ký số.
 
-Đã thi hành W23a–W23f và W23h: `PipeProtocol`, `PipeServer`, `PipeClient`,
-`PipeAuth`, `PipeCommands` (plan/apply/job), host trong `--watch`, pin do
-`--install` ghi và `--uninstall` xoá, self-test + kiểm tra tĩnh trong
-`test.ps1`. Cờ native `PIPE_REJECT_REMOTE_CLIENTS` chưa đặt được qua .NET 4.0,
-nên server dùng đường lui đã ghi ở §6.1: ACL từ chối Network/Anonymous và
+Đã thi hành W23a–W23h: `PipeProtocol`, `PipeServer`, `PipeClient`, `PipeAuth`,
+`PipeCommands` (plan/apply/job), host trong `--watch`, pin do `--install` ghi và
+`--uninstall` xoá, self-test + kiểm tra tĩnh trong `test.ps1`. Cờ native
+`PIPE_REJECT_REMOTE_CLIENTS` chưa đặt được qua .NET 4.0, nên server dùng đường
+lui đã ghi ở §6.1: ACL từ chối Network/Anonymous và
 `GetNamedPipeClientComputerName` phải rỗng.
 
-Còn lại: W23g (nối `UsbPage`/`ProtectPage` với client khi không elevated) và
-W23i (mục tài liệu còn lại). GUI hiện vẫn dùng tệp + ACL; pipe tắt mặc định.
+W23g chỉ nối `UsbPage` với pipe, và chỉ khi: gốc là ổ (không phải thư mục),
+GUI không elevated, `pipe.enabled=1`. Thao tác trên thư mục vẫn chạy cục bộ như
+2.3. `ProtectPage` **không** đi qua pipe: allow-list đã duyệt không có lệnh đổi
+chính sách, nên trang này vẫn yêu cầu quyền quản trị và chỉ hiện nút chạy lại
+elevated. Hoàn tác một lần dọn qua pipe cũng cần quyền quản trị vì GUI thường
+không đọc được vùng cách ly. W23i đã cập nhật `README.md`, `PRIVACY.md` và
+`plan.md`; việc còn lại là checklist máy thật ở §11.2. Pipe vẫn tắt mặc định.

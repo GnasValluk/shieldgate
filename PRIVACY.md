@@ -119,6 +119,12 @@ ids, drive letter, counts and results, but not message bodies or file contents.
 The pipe is local only: remote and anonymous clients are denied, and nothing is
 sent over the network.
 
+When the pipe is on, a standard-user GUI uses it only for whole-drive clean and
+unhide. Folder operations and every other page stay on the local file + ACL
+path. A pipe clean writes the quarantine batch as the background process, so the
+standard user cannot read its manifest; undo therefore needs administrator
+rights. The GUI never elevates itself when the pipe is unavailable.
+
 ---
 
 ## Tóm tắt tiếng Việt
@@ -154,6 +160,12 @@ dẫn + SHA-256. Tin nhắn là JSON trong bộ nhớ, có thể chứa ký tự
 lượng mục và đường dẫn tương đối của mục quét; không chứa nội dung tệp. Plan bị
 xoá sau 120 giây hoặc khi client ngắt kết nối. Nhật ký chỉ ghi PID/phiên/tên tệp
 client, mã plan/job, ký tự ổ, số lượng và kết quả.
+
+Khi pipe bật, GUI quyền thường chỉ dùng pipe cho việc dọn/hiện toàn ổ. Thao tác
+trên thư mục và các trang khác vẫn dùng tệp + ACL cục bộ. Lần dọn qua pipe ghi
+vùng cách ly bằng tiến trình nền, nên người dùng thường không đọc được manifest;
+hoàn tác vì vậy cần quyền quản trị. GUI không tự nâng quyền khi pipe không dùng
+được.
 
 Nếu bàn phím mới chưa tin cậy vượt ngưỡng tốc độ và có shell mở từ Explorer
 trong 10 giây, ShieldGate ghi một dòng WARN (tên thiết bị, VID/PID, số sự kiện,

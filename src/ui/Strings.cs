@@ -299,6 +299,27 @@ namespace ShieldGate
                 }
             }
             public static string Undo { get { return T("Hoàn tác", "Undo"); } }
+            public static string UndoNeedsAdmin
+            {
+                get
+                {
+                    return T("Lần dọn này chạy qua bảo vệ nền. Hoàn tác cần quyền quản trị.",
+                             "This clean ran through background protection. Undo needs administrator rights.");
+                }
+            }
+            public static string PipeItemsGone
+            {
+                get
+                {
+                    return T("Danh sách đã thay đổi: không còn mục nào khớp với lần quét mới. Quét lại rồi thử lại.",
+                             "The list changed: none of the selected items match the new scan. Rescan and try again.");
+                }
+            }
+            public static string PipeItemsPartial(int n)
+            {
+                return T("Một số mục đã biến mất; chỉ dọn " + n + " mục còn khớp.",
+                         "Some items disappeared; only " + n + " matching items were cleaned.");
+            }
             public static string OpenLog { get { return T("Xem nhật ký", "View log"); } }
             public static string ScanCancelled { get { return T("Đã huỷ lần kiểm tra.", "Scan cancelled."); } }
             public static string UndoDone(int restored, int kept)
@@ -1645,6 +1666,11 @@ namespace ShieldGate
             {
                 return T("Ổ " + drive + " đang ở chế độ chỉ đọc hoặc không có quyền ghi. Bỏ khoá ghi rồi thử lại.",
                          "Drive " + drive + " is read-only or not writable. Remove the write lock and try again.");
+            }
+            public static string PipeUnavailable(string detail)
+            {
+                return T("Không dùng được named pipe (" + detail + "). Bật bảo vệ nền và pipe.enabled rồi thử lại.",
+                         "Named pipe is unavailable (" + detail + "). Start background protection and enable pipe.enabled, then try again.");
             }
             public static string Space(int files, string need)
             {

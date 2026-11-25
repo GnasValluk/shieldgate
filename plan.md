@@ -1405,3 +1405,29 @@ khi nối GUI.
   W23i phần tài liệu còn lại. Chưa chạy được checklist máy thật (GUI thường +
   engine SYSTEM, client tự viết, rút USB giữa job, pipe từ máy khác, Windows 7
   x86). Pipe vẫn tắt mặc định nên hành vi 2.3 không đổi.
+
+### 2026-11-25 — W23g: GUI dùng pipe cho gốc ổ (không elevated)
+
+- **`UsbPage`:** chỉ chọn đường pipe khi đủ ba điều kiện: `pipe.enabled=1`,
+  GUI không elevated, và gốc thao tác là ổ (không phải thư mục). Thư mục và mọi
+  trang khác vẫn chạy cục bộ như 2.3.
+- **Luồng dọn:** mở một `PipeSession`, gọi `clean.plan`, khớp mục đã chọn theo
+  `rel` (không gửi đường dẫn), rồi `clean.apply` với `confirm:true`; sau đó
+  `unhide.plan`/`unhide.apply` trên cùng phiên. Nếu danh sách đã đổi, báo mục
+  biến mất thay vì gửi apply rỗng; nếu chỉ khớp một phần thì dọn phần khớp và
+  cảnh báo.
+- **Lỗi pipe:** hiện thông báo "bật bảo vệ nền/pipe" và không tự nâng quyền.
+  Hoàn tác một batch do engine ghi cần quyền quản trị vì GUI thường không đọc
+  được manifest; nút Hoàn tác báo đúng như vậy.
+- **`ProtectPage`:** giữ nguyên yêu cầu quyền quản trị. Allow-list đã duyệt không
+  có lệnh đổi chính sách, nên không mở rộng giao thức chỉ để nối trang này.
+- **Chuỗi:** thêm `S.Usb.UndoNeedsAdmin`, `S.Usb.PipeItemsGone`,
+  `S.Usb.PipeItemsPartial`, `S.Err.PipeUnavailable`, `S.Log.PipeError`.
+- **Tài liệu:** `README.md` (pipe đã dùng cho gốc ổ), `PRIVACY.md` (phạm vi pipe
+  và hoàn tác cần quản trị), `docs/design-pipe.md`, `docs/roadmap-2.1.md`.
+- **Kết quả:** build 654 KB, SHA256
+  `02ae4993732c9fa4cdbf8474ba2ada9e5fffaadcec231a9fd3e9e333250aa3c6`;
+  self-test **80/80**, `--version` in `ShieldGate 2.3`.
+- **Còn lại:** checklist máy thật (GUI thường + engine SYSTEM, client tự viết,
+  rút USB giữa job, pipe từ máy khác, Windows 7 x86). W23i đã xong cùng đợt này;
+  pipe vẫn tắt mặc định.

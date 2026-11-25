@@ -151,9 +151,11 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
   after 120 seconds and are bound to SID, session and drive, and every write
   needs `confirm:true`.
 - **Off by default.** The pipe starts inside `--watch` only when
-  `pipe.enabled=1` is set in `settings.txt`. The GUI still uses files plus ACLs,
-  so this release does not change how the app runs; wiring the pages to the pipe
-  is the next step.
+  `pipe.enabled=1` is set in `settings.txt`. When it is on, a standard-user GUI
+  uses it only for whole-drive clean/unhide; folder scans and all other pages
+  keep the local file + ACL path. A failed pipe shows a message and never
+  elevates the GUI by itself. Undo of a pipe clean needs administrator rights
+  because the standard user cannot read the quarantine manifest.
 
 ## What is new in 2.0
 
@@ -437,9 +439,10 @@ counter and the BadUSB decision matrix.
   anything, and it sends only the SHA-256 hash. Nothing is looked up in the
   background, and YARA is not included.
 - The GUI and the SYSTEM watcher exchange files in the data folder with ACLs.
-  An authenticated named pipe exists behind `pipe.enabled=1` (off by default),
-  but the GUI does not use it yet, so do not run the GUI as a standard user with
-  a shared data folder until that wiring is done.
+  An authenticated named pipe exists behind `pipe.enabled=1` (off by default).
+  When enabled, only whole-drive clean/unhide from a standard-user GUI use it;
+  policy changes still need administrator rights, and a portable GUI that is not
+  the pinned `bin\ShieldGate.exe` is rejected.
 - A scan can stop early at 150,000 files or 300 seconds.
 - No network, optical or MTP *scanning*; MTP devices are inventory only.
 - The release is unsigned. SmartScreen may warn; compare the SHA256 before

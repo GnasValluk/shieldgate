@@ -26,6 +26,9 @@ namespace ShieldGate
 
         private UsbScanResult _result;
         private string _batch = "";
+        // Lần dọn này do engine SYSTEM thực hiện qua pipe: hoàn tác cục bộ không
+        // có quyền đọc vùng cách ly, nên phải báo cần quản trị.
+        private bool _batchRemote;
         private string _scanDrive = "";
         private int _doneCount, _failedCount, _unhidden, _cleanFiles;
         private bool _scanning, _applying, _unhiding, _loading;
@@ -249,6 +252,17 @@ namespace ShieldGate
         {
             if (_isFolder && _scanDrive.Length > 0) return _scanDrive;
             return SelectedDrive();
+        }
+
+        // Chỉ gốc ổ mới đi qua pipe: thao tác trên thư mục vẫn chạy cục bộ như 2.3.
+        // GUI quyền thường cần engine SYSTEM để tạm mở khoá ghi và ghi vùng cách ly.
+        private static bool UsePipe(string root)
+        {
+            try
+            {
+                return Settings.PipeEnabled && !Native.IsAdmin() && UsbScan.IsDriveRoot(root);
+            }
+            catch { return false; }
         }
 
         private void SelectDrive(string drive)
@@ -535,6 +549,9 @@ namespace ShieldGate
 
             string drive = _result.Root;
             if (string.IsNullOrEmpty(drive)) return;
+            // Gốc ổ + GUI quyền thường + pipe bật: engine SYSTEM làm thay, vì nó
+            // mới tạm mở được khoá ghi và ghi được vùng cách ly.
+            bool viaPipe = UsePipe(drive);
             // Kiểm tra quyền ghi trước khi hỏi: ổ chỉ đọc thật thì không có gì để
             // xác nhận. Khoá ghi do ShieldGate bật thì được tạm mở sau khi xác nhận.
             if (_result.ReadOnly)
@@ -542,7 +559,7 @@ namespace ShieldGate
                 _notice.SetMessage(S.Err.DriveReadOnly(drive), true);
                 return;
             }
-            if (!Policy.CanPauseWriteProtect && !Native.CanWrite(drive))
+            if (!viaPipe && !Policy.CanPauseWriteProtect && !Native.CanWrite(drive))
             {
                 _notice.SetMessage(S.Err.DriveReadOnly(drive), true);
                 return;
@@ -559,10 +576,19 @@ namespace ShieldGate
                 return;
 
             _applying = true;
+            _batchRemote = viaPipe;
             _notice.ClearMessage();
             ShowState(UsbState.Results);
             _apply.Enabled = false;
             _cancelFlag = false;
+
+            if (viaPipe)
+            {
+                Thread tp = new Thread(delegate() { PipeApply(selected, drive); });
+                tp.IsBackground = true;
+                tp.Start();
+                return;
+            }
 
             UsbScanResult scan = _result;
             Thread t = new Thread(delegate()
@@ -594,6 +620,173 @@ namespace ShieldGate
             t.Start();
         }
 
+        // Dọn gốc ổ qua named pipe khi GUI không elevated. Engine quét lại, nên
+        // chỉ gửi chỉ số mục đã chọn; tên tương đối dùng để khớp với kết quả quét
+        // của GUI, không gửi đường dẫn.
+        private void PipeApply(List<UsbItem> selected, string drive)
+        {
+            int failed = 0, done = 0, unhidden = 0;
+            string batch = "", problem = "", warning = "";
+            bool pipeUnavailable = false;
+            string letter = drive.Length > 0 ? drive.Substring(0, 1).ToUpperInvariant() : "";
+            try
+            {
+                using (PipeSession session = new PipeSession(PipeProtocol.Name))
+                {
+                    string error;
+                    if (!session.Connect(5000, out error))
+                    {
+                        problem = error;
+                        pipeUnavailable = true;
+                    }
+                    else
+                    {
+                        Dictionary<string, object> planArgs = new Dictionary<string, object>();
+                        planArgs["drive"] = letter;
+                        string planText = session.Send("clean.plan", planArgs, 120000, out error);
+                        Dictionary<string, object> plan = PipeResult(planText);
+                        if (plan == null)
+                        {
+                            problem = PipeErrorText(planText, error);
+                            if (planText == null) pipeUnavailable = true;
+                        }
+                        else
+                        {
+                            List<object> ids = MapIds(
+                                Json.AsArray(Json.Get(plan, "items")), selected);
+                            if (ids.Count == 0)
+                            {
+                                // Ổ đã đổi giữa lúc quét và lúc bấm: không gửi
+                                // apply rỗng để tránh báo "không có gì thay đổi".
+                                problem = S.Usb.PipeItemsGone;
+                            }
+                            else
+                            {
+                                if (ids.Count < selected.Count)
+                                    warning = S.Usb.PipeItemsPartial(ids.Count);
+                                Dictionary<string, object> applyArgs = new Dictionary<string, object>();
+                                applyArgs["plan"] = Json.Str(plan, "plan", "");
+                                applyArgs["ids"] = ids;
+                                applyArgs["confirm"] = true;
+                                string applyText = session.Send("clean.apply", applyArgs,
+                                                                600000, out error);
+                                Dictionary<string, object> applied = PipeResult(applyText);
+                                if (applied == null)
+                                {
+                                    problem = PipeErrorText(applyText, error);
+                                    if (applyText == null) pipeUnavailable = true;
+                                }
+                                else
+                                {
+                                    done = Json.Int(applied, "done", 0);
+                                    failed = Json.Int(applied, "failed", 0);
+                                    batch = Json.Str(applied, "batch", "");
+                                }
+                            }
+                        }
+
+                        // Cùng hành vi với đường cục bộ: sau khi cách ly thì gỡ
+                        // thuộc tính ẩn mà virus đặt (chỉ Hidden + System).
+                        if (problem.Length == 0 && done > 0)
+                        {
+                            Dictionary<string, object> uhArgs = new Dictionary<string, object>();
+                            uhArgs["drive"] = letter;
+                            string uhPlanText = session.Send("unhide.plan", uhArgs, 120000, out error);
+                            Dictionary<string, object> uhPlan = PipeResult(uhPlanText);
+                            if (uhPlan != null)
+                            {
+                                Dictionary<string, object> uhApplyArgs = new Dictionary<string, object>();
+                                uhApplyArgs["plan"] = Json.Str(uhPlan, "plan", "");
+                                uhApplyArgs["confirm"] = true;
+                                string uhApplyText = session.Send("unhide.apply", uhApplyArgs,
+                                                                  600000, out error);
+                                Dictionary<string, object> uhApplied = PipeResult(uhApplyText);
+                                if (uhApplied != null)
+                                    unhidden = Json.Int(uhApplied, "done", 0);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                problem = e.Message;
+                pipeUnavailable = true;
+            }
+
+            // Dọn xong mà chỉ lỗi bước gỡ ẩn thì vẫn giữ kết quả dọn.
+            if (problem.Length > 0)
+            {
+                if (done > 0) Log.Write(S.Log.PipeError(problem), "WARN");
+                else
+                {
+                    failed = selected.Count;
+                    if (pipeUnavailable) problem = S.Err.PipeUnavailable(problem);
+                }
+            }
+
+            if (IsDisposed || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    FinishApply(drive, done, failed, batch, unhidden);
+                    if (problem.Length > 0) _notice.SetMessage(problem, true);
+                    else if (warning.Length > 0 && failed == 0) _notice.SetMessage(warning, true);
+                });
+            }
+            catch { }
+        }
+
+        private static Dictionary<string, object> PipeResult(string text)
+        {
+            try
+            {
+                Dictionary<string, object> root = Json.AsObject(Json.Parse(text ?? "null"));
+                if (root == null || !Json.Bool(root, "ok", false)) return null;
+                return Json.AsObject(Json.Get(root, "result"));
+            }
+            catch { return null; }
+        }
+
+        private static string PipeErrorText(string text, string fallback)
+        {
+            try
+            {
+                Dictionary<string, object> root = Json.AsObject(Json.Parse(text ?? "null"));
+                string code = Json.Str(root, "error", "");
+                string message = Json.Str(root, "message", "");
+                if (code.Length == 0)
+                    return string.IsNullOrEmpty(fallback) ? "no response" : fallback;
+                return message.Length > 0 ? code + ": " + message : code;
+            }
+            catch
+            {
+                return string.IsNullOrEmpty(fallback) ? "bad response" : fallback;
+            }
+        }
+
+        private static List<object> MapIds(List<object> items, List<UsbItem> selected)
+        {
+            List<object> ids = new List<object>();
+            if (items == null) return ids;
+            for (int s = 0; s < selected.Count; s++)
+            {
+                string rel = selected[s].Rel ?? "";
+                for (int i = 0; i < items.Count; i++)
+                {
+                    Dictionary<string, object> item = Json.AsObject(items[i]);
+                    if (item == null) continue;
+                    if (!string.Equals(Json.Str(item, "rel", ""), rel,
+                                       StringComparison.OrdinalIgnoreCase)) continue;
+                    int id = Json.Int(item, "id", 0);
+                    if (id > 0 && !ids.Contains(id)) ids.Add(id);
+                    break;
+                }
+            }
+            return ids;
+        }
+
         private void FinishApply(string drive, int done, int failed, string batch, int unhidden)
         {
             _applying = false;
@@ -617,6 +810,7 @@ namespace ShieldGate
             if (done == 0)
             {
                 _batch = "";
+                _batchRemote = false;
                 if (batch.Length > 0) Quarantine.RemoveBatch(batch);
             }
             if (failed > 0)
@@ -637,6 +831,13 @@ namespace ShieldGate
         private void DoUndo()
         {
             if (_batch.Length == 0) return;
+            // Vùng cách ly do engine SYSTEM ghi; GUI quyền thường không đọc được
+            // manifest. Không thử khôi phục nửa vời rồi báo lỗi khó hiểu.
+            if (_batchRemote)
+            {
+                _notice.SetMessage(S.Usb.UndoNeedsAdmin, true);
+                return;
+            }
             if (!ConfirmDialog.Ask(FindForm(), S.Dlg.UndoTitle(_doneCount), S.Dlg.UndoBody(_doneCount),
                                    S.Dlg.UndoOk, S.Dlg.Close, ButtonKind.Secondary, false))
                 return;
@@ -656,6 +857,7 @@ namespace ShieldGate
             finally { ResumeWriteProtect(paused); }
 
             _batch = "";
+            _batchRemote = false;
             _list.Clear();
             _notice.SetMessage(S.Usb.UndoDone(restored, skipped), false);
             if (missing > 0) _notice.SetMessage(S.Restore.Missing(missing), true);
