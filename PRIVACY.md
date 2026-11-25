@@ -105,6 +105,20 @@ stored. ShieldGate does not contact VirusTotal in the background.
 Bugs and privacy questions: open an issue at
 <https://github.com/GnasValluk/shieldgate-usb-guard/issues>.
 
+## Named pipe (3.0, off by default)
+
+When `pipe.enabled=1` in `settings.txt`, the background process opens the local
+pipe `\\.\pipe\ShieldGate.Engine.v1` for the GUI. Messages are length-prefixed
+JSON and stay in memory. They can contain a drive letter, plan/job ids, item
+counts, relative paths of scan findings and the device/event metadata that the
+GUI displays. They never contain file contents or quarantined samples.
+
+Plans live in memory for at most 120 seconds and are discarded when the client
+disconnects. The log records the client PID, session and image name, plan/job
+ids, drive letter, counts and results, but not message bodies or file contents.
+The pipe is local only: remote and anonymous clients are denied, and nothing is
+sent over the network.
+
 ---
 
 ## Tóm tắt tiếng Việt
@@ -133,6 +147,13 @@ PID, PID cha, tên image và thời điểm tạo của 6 shell (`cmd`, `powersh
 `wscript`, `cscript`, `mshta`) cùng danh sách Toolhelp để lấy tên cha. Không đọc
 `CommandLine`, mã phím, tiêu đề cửa sổ, clipboard hay nội dung tệp. Tên shell và
 cha gần đây chỉ nằm trong bộ nhớ 120 giây.
+
+Named pipe 3.0 mặc định **tắt** (`pipe.enabled=0`). Khi bật, nó chỉ chạy trên máy
+này, từ chối client từ xa và ẩn danh, và chỉ nhận đúng tệp GUI đã ghim bằng đường
+dẫn + SHA-256. Tin nhắn là JSON trong bộ nhớ, có thể chứa ký tự ổ, mã plan/job, số
+lượng mục và đường dẫn tương đối của mục quét; không chứa nội dung tệp. Plan bị
+xoá sau 120 giây hoặc khi client ngắt kết nối. Nhật ký chỉ ghi PID/phiên/tên tệp
+client, mã plan/job, ký tự ổ, số lượng và kết quả.
 
 Nếu bàn phím mới chưa tin cậy vượt ngưỡng tốc độ và có shell mở từ Explorer
 trong 10 giây, ShieldGate ghi một dòng WARN (tên thiết bị, VID/PID, số sự kiện,

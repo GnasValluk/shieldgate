@@ -417,6 +417,40 @@ namespace ShieldGate
             return text;
         }
 
+        // Thư mục người dùng chọn: quét chính nó. Gốc ổ: chỉ các thư mục giả
+        // và không tên, tránh đổi tên tài liệu hợp lệ nằm rải rác trên ổ.
+        private static List<string> Base64Dirs(string root)
+        {
+            string rootExt = WinPath.Ext(root);
+            List<string> dirs = new List<string>();
+            if (!UsbScan.IsDriveRoot(root)) dirs.Add(rootExt);
+            else
+            {
+                foreach (string fk in FindFakeDirs(root)) dirs.Add(WinPath.Join(rootExt, fk));
+                foreach (string nm in FindNameless(root)) dirs.Add(WinPath.Join(rootExt, nm));
+            }
+            return dirs;
+        }
+
+        // Xem trước cho pipe: đếm tên Base64 sẽ đổi, không ghi gì.
+        public static int CountBase64(string root, Func<bool> cancelled)
+        {
+            int count = 0;
+            foreach (string dir in Base64Dirs(root))
+            {
+                foreach (TreeItem t in Tree.Walk(dir))
+                {
+                    if (cancelled != null && cancelled()) return count;
+                    if (t.IsDir) continue;
+                    string name = System.IO.Path.GetFileName(t.Path);
+                    if (IsPayloadFile(name)) continue;
+                    if (DecodeName(name) == null) continue;
+                    count++;
+                }
+            }
+            return count;
+        }
+
         // Đổi tên tài liệu Base64 trong thư mục giả/không tên về tên gốc.
         // Không ghi đè: tên đích đã có thì bỏ qua và đếm vào skipped.
         public static int RenameBase64(string root, Action<int, string> progress,
@@ -424,18 +458,7 @@ namespace ShieldGate
         {
             skipped = 0;
             int renamed = 0;
-            string rootExt = WinPath.Ext(root);
-            List<string> dirs = new List<string>();
-            // Thư mục người dùng chọn: quét chính nó. Gốc ổ: chỉ các thư mục giả
-            // và không tên, tránh đổi tên tài liệu hợp lệ nằm rải rác trên ổ.
-            if (!UsbScan.IsDriveRoot(root)) dirs.Add(rootExt);
-            else
-            {
-                foreach (string fk in FindFakeDirs(root)) dirs.Add(WinPath.Join(rootExt, fk));
-                foreach (string nm in FindNameless(root)) dirs.Add(WinPath.Join(rootExt, nm));
-            }
-
-            foreach (string dir in dirs)
+            foreach (string dir in Base64Dirs(root))
             {
                 foreach (TreeItem t in Tree.Walk(dir))
                 {

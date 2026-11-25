@@ -134,6 +134,27 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
   driver/rootkit — run Microsoft Defender Offline" instead of asking you to clean
   the same items again.
 
+## Prepared for 3.0: authenticated named pipe
+
+- **A local pipe with a pinned client.** `\\.\pipe\ShieldGate.Engine.v1` speaks
+  versioned JSON frames (4-byte length, 64 KiB limit, one client at a time). The
+  pipe ACL allows SYSTEM, Administrators and interactive users, and denies
+  Network and Anonymous; a client from another machine is also rejected by name.
+- **Only the installed GUI is accepted.** `--install` writes `bin\client.pin`
+  with the installed exe path and its SHA-256. The server resolves the client
+  PID, image path, session and user SID, then compares path and hash. A client
+  that fails is closed with one WARN line.
+- **Read commands and a scan job.** `status.get`, `devices.list`, `events.since`,
+  `job.start`/`status`/`cancel` are wired. `clean`, `unhide` and `rename` have
+  two-step `plan`/`apply` commands: the drive is one letter, the engine re-checks
+  system drive, removable media, write access and volume serial, plans expire
+  after 120 seconds and are bound to SID, session and drive, and every write
+  needs `confirm:true`.
+- **Off by default.** The pipe starts inside `--watch` only when
+  `pipe.enabled=1` is set in `settings.txt`. The GUI still uses files plus ACLs,
+  so this release does not change how the app runs; wiring the pages to the pipe
+  is the next step.
+
 ## What is new in 2.0
 
 - **Rules live in `rules.json`.** File names, extensions and score weights can be
@@ -416,8 +437,9 @@ counter and the BadUSB decision matrix.
   anything, and it sends only the SHA-256 hash. Nothing is looked up in the
   background, and YARA is not included.
 - The GUI and the SYSTEM watcher exchange files in the data folder with ACLs.
-  There is no authenticated named pipe, so do not run the GUI as a standard
-  user with a shared data folder.
+  An authenticated named pipe exists behind `pipe.enabled=1` (off by default),
+  but the GUI does not use it yet, so do not run the GUI as a standard user with
+  a shared data folder until that wiring is done.
 - A scan can stop early at 150,000 files or 300 seconds.
 - No network, optical or MTP *scanning*; MTP devices are inventory only.
 - The release is unsigned. SmartScreen may warn; compare the SHA256 before

@@ -191,6 +191,9 @@ chỉ vì client đã qua xác thực.
   danh sách mục trong bộ nhớ, không nhận lại đường dẫn từ client.
 - `*.apply` yêu cầu `confirm:true`; thiếu thì `bad-args`. Plan hết hạn sau 120
   giây, bị huỷ khi client ngắt kết nối, khi ổ rút, hoặc khi có plan mới.
+- `plan` và `apply` phải đi trên cùng một kết nối (`PipeSession`); engine xoá
+  plan khi client ngắt nên lệnh một lần `PipeClient.Send` không dùng được cho
+  cặp plan/apply.
 - Plan gắn với SID + session + serial ổ. Áp plan từ client/ổ khác → `refused`.
 
 ## 8. An toàn dữ liệu
@@ -295,5 +298,17 @@ Nếu bất kỳ kiểm tra nào thất bại, trả `refused` kèm lý do đã 
 8. **Ký số:** W23 chỉ ghim băm; có cần chờ ký Authenticode rồi mới bật pipe
    mặc định không?
 
-**Trạng thái:** chưa duyệt. Khi được duyệt, W23 bắt đầu bằng W23a–W23d (giao
-thức + pipe + xác thực) trước khi nối GUI.
+**Trạng thái:** đã duyệt ngày 2026-11-24 với các mặc định ở §13: host pipe
+trong `--watch`, GUI vẫn có thể chạy elevated (chỉ dùng pipe khi chưa elevated),
+pin `bin\client.pin`, giữ allow-list `clean`/`unhide`/`rename`, plan/apply cho
+mọi lệnh ghi, `pipe.enabled=false` trong beta, giữ Windows 7, chưa ký số.
+
+Đã thi hành W23a–W23f và W23h: `PipeProtocol`, `PipeServer`, `PipeClient`,
+`PipeAuth`, `PipeCommands` (plan/apply/job), host trong `--watch`, pin do
+`--install` ghi và `--uninstall` xoá, self-test + kiểm tra tĩnh trong
+`test.ps1`. Cờ native `PIPE_REJECT_REMOTE_CLIENTS` chưa đặt được qua .NET 4.0,
+nên server dùng đường lui đã ghi ở §6.1: ACL từ chối Network/Anonymous và
+`GetNamedPipeClientComputerName` phải rỗng.
+
+Còn lại: W23g (nối `UsbPage`/`ProtectPage` với client khi không elevated) và
+W23i (mục tài liệu còn lại). GUI hiện vẫn dùng tệp + ACL; pipe tắt mặc định.

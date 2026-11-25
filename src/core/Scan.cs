@@ -698,6 +698,28 @@ namespace ShieldGate
             return count;
         }
 
+        // Xem trước cho pipe: đếm đúng những mục Unhide sẽ chạm, không đổi gì.
+        public static int CountHidden(string root, UnhideScope scope, Func<bool> cancelled)
+        {
+            int count = 0;
+            foreach (TreeItem t in Tree.Walk(root))
+            {
+                if (cancelled != null && cancelled()) break;
+                try
+                {
+                    if (!File.Exists(t.Path) && !Directory.Exists(t.Path)) continue;
+                    if (KeepSystemAttributes(t.Name)) continue;
+                    FileAttributes a = File.GetAttributes(t.Path);
+                    if ((a & FileAttributes.Hidden) == 0) continue;
+                    if (scope == UnhideScope.VirusOnly
+                        && (a & FileAttributes.System) == 0) continue;
+                    count++;
+                }
+                catch { }
+            }
+            return count;
+        }
+
         public static string DriveLabel(string root)
         {
             try

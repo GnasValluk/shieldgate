@@ -119,9 +119,9 @@ bị và thêm kiểm tra tĩnh chặn API đọc phím. W22 thêm `BadUsb` (ng�
 cooldown), `ProcessWatch` (poll 1 giây, Toolhelp cho cha), mục `badusb` trong
 `rules.json` phiên bản 6, công tắc trong trang Bảo vệ và cảnh báo WARN kèm
 balloon; chỉ cảnh báo, không tắt thiết bị, không đọc mã phím/command line.
-Việc tiếp theo: W23 (named pipe) nếu được duyệt; còn thiếu đo trên thiết bị
-BadUSB thật. Bản 2.3 đã thêm quét thư mục, khôi phục tên Base64 và sửa công tắc
-Protect (xem `plan.md` 24/11).
+Việc tiếp theo: W23g nối GUI với named pipe (W23a–W23f + W23h đã xong, pipe
+tắt mặc định); còn thiếu đo trên thiết bị BadUSB thật. Bản 2.3 đã thêm quét thư
+mục, khôi phục tên Base64 và sửa công tắc Protect (xem `plan.md` 24–25/11).
 
 ### W1 — chi tiết
 
@@ -556,7 +556,7 @@ Chỉ bắt đầu sau W9 và sau khi `docs/design-badusb.md` được duyệt.
 
 | # | Việc |
 | --- | --- |
-| W23 | Thiết kế + thi hành pipe: `PipeSecurity` chỉ SID người dùng tương tác + Administrators, `PIPE_REJECT_REMOTE_CLIENTS`, một instance; xác thực client bằng `GetNamedPipeClientProcessId` + đường dẫn exe đã ghim + băm; allow-list lệnh JSON có phiên bản, giới hạn kích thước, không nhận đường dẫn tự do. Thiết kế chi tiết: [`docs/design-pipe.md`](design-pipe.md) (chờ duyệt §13) |
+| W23 | Thiết kế + thi hành pipe: `PipeSecurity` chỉ SID người dùng tương tác + Administrators, `PIPE_REJECT_REMOTE_CLIENTS`, một instance; xác thực client bằng `GetNamedPipeClientProcessId` + đường dẫn exe đã ghim + băm; allow-list lệnh JSON có phiên bản, giới hạn kích thước, không nhận đường dẫn tự do. Thiết kế chi tiết: [`docs/design-pipe.md`](design-pipe.md). Đã có W23a–W23f + W23h (giao thức, pipe, xác thực, plan/apply, host trong `--watch`, self-test); còn W23g nối GUI và W23i tài liệu. Pipe tắt mặc định (`pipe.enabled=0`) |
 
 Nếu chưa duyệt: giữ mô hình tệp + ACL, chỉ thêm W16.
 

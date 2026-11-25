@@ -216,6 +216,17 @@ namespace ShieldGate
             Set("badusb.enabled", on ? "1" : "0");
         }
 
+        // Named pipe tắt mặc định trong 3.0 beta; bật bằng pipe.enabled=1.
+        public static bool PipeEnabled
+        {
+            get { return string.Equals(Get("pipe.enabled", "0"), "1", StringComparison.Ordinal); }
+        }
+
+        public static void SetPipeEnabled(bool on)
+        {
+            Set("pipe.enabled", on ? "1" : "0");
+        }
+
         // Lần sửa máy gần nhất, để phân biệt "chưa sửa" với "sửa rồi vẫn nhiễm lại".
         public static void SetPcFixEvent(int ok, int fail)
         {

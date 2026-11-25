@@ -1003,6 +1003,45 @@ namespace ShieldGate
                 return T("Bảo vệ nền bắt đầu (v" + version + ")",
                          "Background protection started (v" + version + ")");
             }
+            public static string PipeStarted
+            {
+                get { return T("Named pipe đang lắng nghe client đã ghim.", "Named pipe is listening for the pinned client."); }
+            }
+            public static string PipeStopped
+            {
+                get { return T("Named pipe đã dừng.", "Named pipe stopped."); }
+            }
+            public static string PipeError(string detail)
+            {
+                return T("Lỗi named pipe: " + detail, "Named pipe error: " + detail);
+            }
+            public static string PipeClientDenied(string reason)
+            {
+                return T("Từ chối client named pipe: " + reason,
+                         "Named pipe client denied: " + reason);
+            }
+            public static string PipeClientAccepted(uint pid, uint session, string image)
+            {
+                return T("Pipe client " + pid + " (phiên " + session + "): " + image,
+                         "Pipe client " + pid + " (session " + session + "): " + image);
+            }
+            public static string PipePlan(string plan, string kind, string drive, int count)
+            {
+                return T("Pipe plan " + plan + " (" + kind + ", " + drive + "): " + count + " mục",
+                         "Pipe plan " + plan + " (" + kind + ", " + drive + "): " + count + " items");
+            }
+            public static string PipeApplied(string plan, string kind, string drive, int done, int failed)
+            {
+                return T("Pipe áp " + plan + " (" + kind + ", " + drive + "): " + done
+                         + " xong, " + failed + " lỗi",
+                         "Pipe applied " + plan + " (" + kind + ", " + drive + "): " + done
+                         + " done, " + failed + " failed");
+            }
+            public static string PipeJob(string job, string kind, string drive, string state)
+            {
+                return T("Pipe job " + job + " (" + kind + ", " + drive + "): " + state,
+                         "Pipe job " + job + " (" + kind + ", " + drive + "): " + state);
+            }
             public static string VolumeError(string volume, string detail)
             {
                 return T("Lỗi khi xử lý " + volume + ": " + detail,
@@ -1904,6 +1943,10 @@ namespace ShieldGate
             public static string FakeFolderKeepsDocs { get { return T("thư mục giả: chỉ cách ly tệp chạy được, giữ tài liệu người dùng", "fake folder: quarantine only executable payloads and keep user documents"); } }
             public static string Base64Name { get { return T("khôi phục tên Base64: chỉ nhận tài liệu hợp lệ, không ghi đè, không chạm payload", "Base64 names: only valid documents, no overwrite, payload untouched"); } }
             public static string FolderScan { get { return T("quét một thư mục con: nhận diện tệp và đếm tài liệu giữ lại", "scan a subfolder: detects files and counts kept documents"); } }
+            public static string PipeProtocol { get { return T("pipe: khung tin 4 byte + JSON, từ chối phiên bản/lệnh/khóa/args sai và tin quá lớn", "pipe: 4-byte frame + JSON, rejects bad version/command/key/args and oversized messages"); } }
+            public static string PipePin { get { return T("pipe: pin client theo đường dẫn + SHA-256, xoá pin thì từ chối", "pipe: pin client by path + SHA-256, clearing the pin denies it"); } }
+            public static string PipeRoundtrip { get { return T("pipe: server + client roundtrip trả status.get", "pipe: server + client roundtrip answers status.get"); } }
+            public static string PipePlan { get { return T("pipe: plan/apply từ chối ổ hệ thống, đường dẫn, thiếu confirm, plan hết hạn hoặc sai SID/session/ổ/serial", "pipe: plan/apply rejects system drive, paths, missing confirm, expired plan or wrong SID/session/drive/serial"); } }
             public static string MissingIsNotError { get { return T("tệp đã biến mất không bị tính là lỗi cách ly", "a file that already vanished is not counted as a quarantine error"); } }
             public static string CleanLockExclusive { get { return T("chỉ một luồng được dọn một ổ tại một thời điểm", "only one thread may clean a drive at a time"); } }
             public static string EmptyBatchRemoved { get { return T("không để lại vỏ cách ly rỗng khi không di chuyển được tệp nào", "no empty quarantine batch is left when nothing was moved"); } }

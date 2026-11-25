@@ -17,6 +17,28 @@ if ($hits.Count -gt 0) {
     throw "Forbidden key-reading API in source: $list"
 }
 
+# W23: pipe server phải có ACL và xác thực client; không được tạo server ở nơi khác.
+$pipeServer = Get-Content 'src\core\PipeServer.cs' -Raw
+foreach ($need in @('PipeSecurity', 'BuiltinAdministratorsSid', 'InteractiveSid',
+                    'NetworkSid', 'AnonymousSid', 'PipeAccessRule')) {
+    if ($pipeServer -notmatch [regex]::Escape($need)) {
+        throw "Pipe server is missing $need"
+    }
+}
+$auth = Get-Content 'src\core\PipeAuth.cs' -Raw
+foreach ($need in @('GetNamedPipeClientProcessId', 'GetNamedPipeClientSessionId',
+                    'QueryFullProcessImageNameW', 'ConvertSidToStringSidW')) {
+    if ($auth -notmatch [regex]::Escape($need)) {
+        throw "Pipe auth is missing $need"
+    }
+}
+$pipeHits = @(Select-String -Path $sourceFiles -Pattern 'NamedPipeServerStream' -SimpleMatch |
+              Where-Object { $_.Path -notlike '*\PipeServer.cs' })
+if ($pipeHits.Count -gt 0) {
+    $list = ($pipeHits | ForEach-Object { $_.Path + ':' + $_.LineNumber }) -join ', '
+    throw "NamedPipeServerStream outside PipeServer.cs: $list"
+}
+
 New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
 
 $sources = @(Get-ChildItem 'src\core\*.cs' | ForEach-Object { $_.FullName }) +

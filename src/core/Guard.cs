@@ -763,6 +763,9 @@ namespace ShieldGate
             catch { }
             if (taskOk)
             {
+                // Pin bản GUI đã cài để named pipe chỉ nhận đúng tệp này.
+                if (!PipeAuth.PinClient(Paths.GuardExe))
+                    Log.Write(S.Log.PipeError("cannot pin client"), "WARN");
                 Native.Run(Native.SysExe("schtasks.exe"), "/Run /TN \"" + AppInfo.TaskName + "\"", 20000, out output);
                 bool alive = false;
                 for (int i = 0; i < 16; i++)
@@ -810,6 +813,7 @@ namespace ShieldGate
             try { File.Delete(Paths.StopFlag); } catch { }
             try { File.Delete(Paths.Heartbeat); } catch { }
             try { File.Delete(Paths.GuardConfig); } catch { }
+            PipeAuth.ClearPin();
             if (!IsSamePath(SelfPath(), Paths.GuardExe))
             {
                 try { File.Delete(Paths.GuardExe); } catch { }
@@ -940,6 +944,22 @@ namespace ShieldGate
                 BehaviorMonitor behavior = new BehaviorMonitor();
                 behavior.Suspicious += delegate(string drive) { StartVolumeScan(scanning, drive); };
 
+                PipeServer pipe = null;
+                if (Settings.PipeEnabled)
+                {
+                    try
+                    {
+                        pipe = new PipeServer(PipeProtocol.Name, null);
+                        pipe.Start();
+                        Log.Write(S.Log.PipeStarted);
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Write(S.Log.PipeError(e.Message), "WARN");
+                        pipe = null;
+                    }
+                }
+
                 try
                 {
                 // Neu lan chay truoc bi kill khi dang tam mo khoa de cach ly,
@@ -1008,7 +1028,15 @@ namespace ShieldGate
                     Thread.Sleep(2000);
                 }
                 }
-                finally { behavior.Stop(); }
+                finally
+                {
+                    if (pipe != null)
+                    {
+                        try { pipe.Stop(); } catch { }
+                        Log.Write(S.Log.PipeStopped);
+                    }
+                    behavior.Stop();
+                }
 
                 Log.Write(S.Log.WatchStopped);
                 try { File.Delete(Paths.StopFlag); } catch { }

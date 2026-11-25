@@ -42,6 +42,7 @@ namespace ShieldGate
         public static string LastScan;
         public static string GuardConfig;
         public static string GuardLast;
+        public static string ClientPin;
         public static string SystemDrive;
         public static string RulesFile;
         public static string DevicesFile;
@@ -99,6 +100,8 @@ namespace ShieldGate
             // phải nói đúng trạng thái hiện tại (toàn 0) để công tắc không tự
             // bật lại, còn tệp này giữ ý định cũ cho lần "Bật bảo vệ" sau.
             GuardLast = Path.Combine(Root, "guard.last");
+            // Pin client cho named pipe: đường dẫn exe + SHA-256 do --install ghi.
+            ClientPin = Path.Combine(BinDir, "client.pin");
             RulesFile = Path.Combine(Root, "rules.json");
             DevicesFile = Path.Combine(Root, "devices.json");
             EventsFile = Path.Combine(Root, "events.tsv");

@@ -33,7 +33,7 @@ namespace ShieldGate
             Policy.PauseAllowed = false;
 
             int passed = 0;
-            int total = 75;
+            int total = 79;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -952,6 +952,191 @@ namespace ShieldGate
             }
             catch { }
             check(S.Selftest.FolderScan, folderScanOk);
+
+            // 35d. Khung tin pipe: đọc/ghi đúng, từ chối phiên bản, lệnh lạ,
+            //      khóa lạ, args sai kiểu và khung quá lớn.
+            bool pipeProtocolOk = false;
+            try
+            {
+                string frame;
+                string frameError;
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    PipeProtocol.Write(ms, "{\"v\":1,\"id\":\"a1\",\"cmd\":\"status.get\",\"args\":{}}");
+                    ms.Position = 0;
+                    pipeProtocolOk = PipeProtocol.TryRead(ms, out frame, out frameError)
+                        && frameError == null && frame.IndexOf("status.get") >= 0;
+                }
+
+                PipeRequest good = PipeProtocol.Parse(
+                    "{\"v\":1,\"id\":\"a1\",\"cmd\":\"status.get\",\"args\":{}}");
+                PipeRequest badVersion = PipeProtocol.Parse(
+                    "{\"v\":2,\"id\":\"a1\",\"cmd\":\"status.get\",\"args\":{}}");
+                PipeRequest unknown = PipeProtocol.Parse(
+                    "{\"v\":1,\"id\":\"a1\",\"cmd\":\"nope\",\"args\":{}}");
+                PipeRequest extra = PipeProtocol.Parse(
+                    "{\"v\":1,\"id\":\"a1\",\"cmd\":\"status.get\",\"args\":{},\"x\":1}");
+                PipeRequest badArgs = PipeProtocol.Parse(
+                    "{\"v\":1,\"id\":\"a1\",\"cmd\":\"status.get\",\"args\":[]}");
+
+                byte[] big = BitConverter.GetBytes(PipeProtocol.MaxMessage + 1);
+                using (MemoryStream ms = new MemoryStream(big))
+                {
+                    PipeProtocol.TryRead(ms, out frame, out frameError);
+                }
+
+                pipeProtocolOk = pipeProtocolOk
+                    && good.Error.Length == 0
+                    && badVersion.Error == "bad-version"
+                    && unknown.Error == "unknown-command"
+                    && extra.Error == "bad-args"
+                    && badArgs.Error == "bad-args"
+                    && frameError == "too-large";
+            }
+            catch { }
+            check(S.Selftest.PipeProtocol, pipeProtocolOk);
+
+            // 35e. Pin client: đường dẫn + SHA-256 phải khớp; xoá pin thì từ chối.
+            bool pipePinOk = false;
+            try
+            {
+                Paths.EnsureDirs();
+                string pinExe = Path.Combine(root, "pipe-client-test.exe");
+                File.WriteAllText(pinExe, "pin", new UTF8Encoding(false));
+                string hash = Native.Sha256(pinExe);
+                string wantPath, wantHash;
+                bool written = PipeAuth.PinClient(pinExe);
+                bool read = PipeAuth.ReadPin(out wantPath, out wantHash);
+                bool match = PipeAuth.IsPinnedImage(pinExe, hash);
+                bool wrongPath = PipeAuth.IsPinnedImage(pinExe + ".other", hash);
+                bool wrongHash = PipeAuth.IsPinnedImage(pinExe, new string('0', 64));
+                PipeAuth.ClearPin();
+                pipePinOk = written && read && match && !wrongPath && !wrongHash
+                    && !File.Exists(Paths.ClientPin);
+            }
+            catch { }
+            check(S.Selftest.PipePin, pipePinOk);
+
+            // 35f. Roundtrip thật qua named pipe: server + client trong tiến trình
+            //      test, validator cho qua vì đây không phải tiến trình GUI.
+            bool pipeRoundtripOk = false;
+            string pipeName = "ShieldGate.SelfTest." + System.Diagnostics.Process.GetCurrentProcess().Id
+                            + "." + Guid.NewGuid().ToString("N");
+            PipeServer pipeServer = null;
+            PipeClientInfo clientSeen = null;
+            try
+            {
+                pipeServer = new PipeServer(pipeName, delegate(PipeClientInfo info)
+                {
+                    clientSeen = info;
+                    return true;
+                });
+                pipeServer.Start();
+                string error;
+                string response = PipeClient.Send(pipeName, "status.get",
+                    new Dictionary<string, object>(), 5000, out error);
+                pipeRoundtripOk = response != null && PipeClient.IsOk(response)
+                    && response.IndexOf("\"version\":\"" + AppInfo.Version + "\"") >= 0
+                    // Xác thực thật: PID → ảnh, session, SID; client nội bộ không
+                    // bị nhận nhầm là remote.
+                    && clientSeen != null && clientSeen.Valid && clientSeen.ImagePath.Length > 0
+                    && clientSeen.SessionId == (uint)System.Diagnostics.Process.GetCurrentProcess().SessionId;
+            }
+            catch { }
+            finally
+            {
+                if (pipeServer != null)
+                {
+                    try { pipeServer.Stop(); } catch { }
+                }
+            }
+            check(S.Selftest.PipeRoundtrip, pipeRoundtripOk);
+
+            // 35g. Plan/apply: chỉ nhận một ký tự ổ, từ chối ổ hệ thống và đường
+            //      dẫn; thiếu confirm là bad-args; plan hết hạn/sai SID/session/ổ
+            //      hoặc serial bị từ chối. Không ghi gì lên ổ thật.
+            bool pipePlanOk = false;
+            try
+            {
+                Func<string, string> err = delegate(string text)
+                {
+                    try { return Json.Str(Json.AsObject(Json.Parse(text)), "error", ""); }
+                    catch { return "parse"; }
+                };
+                Func<string, Dictionary<string, object>, PipeRequest> mk =
+                    delegate(string cmd, Dictionary<string, object> a)
+                {
+                    PipeRequest r = new PipeRequest();
+                    r.Version = 1;
+                    r.Id = "t1";
+                    r.Cmd = cmd;
+                    r.Args = a;
+                    return r;
+                };
+
+                Dictionary<string, object> a1 = new Dictionary<string, object>();
+                a1["drive"] = "C";
+                string systemDrive = err(PipeCommands.Handle(mk("clean.plan", a1), null));
+
+                Dictionary<string, object> a2 = new Dictionary<string, object>();
+                a2["drive"] = "E:\\sub";
+                string subPath = err(PipeCommands.Handle(mk("clean.plan", a2), null));
+
+                Dictionary<string, object> a3 = new Dictionary<string, object>();
+                a3["drive"] = "\\\\server\\share";
+                string uncPath = err(PipeCommands.Handle(mk("clean.plan", a3), null));
+
+                Dictionary<string, object> a4 = new Dictionary<string, object>();
+                a4["drive"] = "";
+                string emptyDrive = err(PipeCommands.Handle(mk("clean.plan", a4), null));
+
+                Dictionary<string, object> a5 = new Dictionary<string, object>();
+                a5["plan"] = "nope";
+                string noConfirm = err(PipeCommands.Handle(mk("clean.apply", a5), null));
+
+                PipePlan plan = new PipePlan();
+                plan.Id = "p-test";
+                plan.Kind = "clean";
+                plan.Drive = "Q";
+                plan.Root = root;
+                plan.Serial = Native.VolumeSerial(root);
+                plan.Sid = "S-1-5-21-1";
+                plan.Session = 7;
+                plan.CreatedUtc = DateTime.UtcNow;
+
+                DateTime now = DateTime.UtcNow;
+                string okPlan = PipeCommands.PlanProblem(plan, plan.Sid, 7, root, now);
+                plan.CreatedUtc = now.AddSeconds(-(PipeCommands.PlanTtlSeconds + 5));
+                string expired = PipeCommands.PlanProblem(plan, plan.Sid, 7, root, now);
+                plan.CreatedUtc = now;
+                string badSid = PipeCommands.PlanProblem(plan, "S-1-5-21-2", 7, root, now);
+                string badSession = PipeCommands.PlanProblem(plan, plan.Sid, 8, root, now);
+                string badRoot = PipeCommands.PlanProblem(plan, plan.Sid, 7,
+                    Path.Combine(root, "other"), now);
+                string missingPlan = PipeCommands.PlanProblem(null, plan.Sid, 7, root, now);
+                string badSerial = "";
+                if (plan.Serial != 0)
+                {
+                    plan.Serial = plan.Serial + 1;
+                    badSerial = PipeCommands.PlanProblem(plan, plan.Sid, 7, root, now);
+                    plan.Serial = plan.Serial - 1;
+                }
+
+                pipePlanOk = systemDrive == "refused"
+                    && subPath == "bad-args"
+                    && uncPath == "bad-args"
+                    && emptyDrive == "bad-args"
+                    && noConfirm == "bad-args"
+                    && okPlan.Length == 0
+                    && expired == "expired"
+                    && badSid == "refused"
+                    && badSession == "refused"
+                    && badRoot == "refused"
+                    && missingPlan == "not-found"
+                    && (plan.Serial == 0 || badSerial == "refused");
+            }
+            catch { }
+            check(S.Selftest.PipePlan, pipePlanOk);
 
             // 36. Tệp đã biến mất không phải lỗi: phải trả error rỗng để bên gọi
             //     bỏ qua thay vì ghi ERROR và trừ vào bộ đếm (log có 286 lỗi giả).

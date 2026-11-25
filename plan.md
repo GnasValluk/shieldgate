@@ -1364,3 +1364,41 @@ không admin). W23 (named pipe) vẫn chờ thiết kế được duyệt.
 
 Việc tiếp theo: duyệt §13 rồi làm W23a–W23d (giao thức + pipe + xác thực) trước
 khi nối GUI.
+
+### 2026-11-25 — W23a–W23f, W23h: named pipe có xác thực (chưa nối GUI)
+
+- **Giao thức (`PipeProtocol.cs`):** khung 4 byte little-endian + UTF-8 JSON,
+  tối đa 64 KiB; bắt buộc đúng `v`/`id`/`cmd`/`args`, `id` 1–32 ký tự, khóa lạ
+  hoặc `args` không phải object bị từ chối; mã lỗi `bad-json`, `bad-frame`,
+  `too-large`, `bad-version`, `unknown-command`, `bad-args`, `denied`, `busy`,
+  `not-found`, `expired`, `refused`, `failed`, `cancelled`.
+- **Server (`PipeServer.cs`):** một instance, `PipeSecurity` cho SYSTEM +
+  Administrators + Interactive, từ chối Network/Anonymous. .NET 4.0 không đặt
+  được `PIPE_REJECT_REMOTE_CLIENTS`, nên dùng đường lui: `PipeAuth` từ chối
+  client có `GetNamedPipeClientComputerName` khác rỗng.
+- **Xác thực (`PipeAuth.cs`):** PID client → `OpenProcess` →
+  `QueryFullProcessImageName` → session (khác 0) → SID người dùng (từ chối
+  SYSTEM/LocalService/NetworkService/Anonymous) → so đường dẫn + SHA-256 với
+  `bin\client.pin`. `--install` ghim `Paths.GuardExe` sau khi chép bản nền;
+  `--uninstall` xoá pin.
+- **Lệnh (`PipeCommands.cs`):** `status.get`, `devices.list`, `events.since`,
+  `job.start`/`status`/`cancel` (quét ổ chạy nền), và `clean`/`unhide`/`rename`
+  theo hai bước plan/apply. Chỉ nhận một ký tự ổ; engine tự dựng `E:\` và lặp
+  lại `Repair.RefuseReason`, kiểm tra ổ rời, quyền ghi và serial. Plan hết hạn
+  sau 120 giây, gắn SID + session + ổ + serial; `apply` bắt buộc
+  `confirm:true`; `clean.apply` chỉ nhận chỉ số mục, không nhận đường dẫn.
+- **Host (`Guard.cs`):** `--watch` mở pipe khi `pipe.enabled=1` trong
+  `settings.txt` (mặc định tắt), dừng cùng vòng bảo vệ. Client một lần
+  (`PipeClient.Send`) và phiên giữ kết nối (`PipeSession`) để plan → apply.
+- **Self-test:** thêm 3 mục (khung tin, pin, roundtrip) và 1 mục plan/apply
+  (ổ hệ thống, đường dẫn, thiếu confirm, hết hạn, sai SID/session/ổ/serial).
+  `test.ps1` thêm kiểm tra tĩnh: server phải có `PipeSecurity`/SID, auth phải có
+  API PID/ảnh/SID, không có `NamedPipeServerStream` ngoài `PipeServer.cs`.
+- **Kết quả:** build 648 KB, SHA256
+  `a88d5e705e13e3e7ba4d84d8a75915cd010737fbb5e4ebc9526c3f4abd61f7e8`;
+  self-test **79/79**. Tài liệu: `README.md`, `PRIVACY.md`, `docs/design-pipe.md`,
+  `docs/roadmap-2.1.md`.
+- **Còn lại:** W23g nối `UsbPage`/`ProtectPage` với pipe khi GUI không elevated;
+  W23i phần tài liệu còn lại. Chưa chạy được checklist máy thật (GUI thường +
+  engine SYSTEM, client tự viết, rút USB giữa job, pipe từ máy khác, Windows 7
+  x86). Pipe vẫn tắt mặc định nên hành vi 2.3 không đổi.
