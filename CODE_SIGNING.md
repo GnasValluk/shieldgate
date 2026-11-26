@@ -7,12 +7,13 @@ and from the SignPath Foundation application.
 
 ## Status
 
-Code signing is **prepared but not active yet**. The project has applied to the
-[SignPath Foundation](https://signpath.org/) free open-source signing programme.
-Until that application is accepted and the repository variables and secret below
-are configured, the `sign` job in `.github/workflows/build.yml` is skipped and
-release files remain unsigned. The build itself, the self-test and the release
-process do not depend on signing.
+Code signing is **prepared but not active yet**. The repository is ready for the
+[SignPath Foundation](https://signpath.org/) free open-source signing programme,
+but the application still has to be submitted by the maintainer. Until that
+application is accepted and the repository variables and secret below are
+configured, the `sign` job in `.github/workflows/build.yml` is skipped and release
+files remain unsigned. The build itself, the self-test and the release process do
+not depend on signing.
 
 ## What is signed
 
@@ -110,6 +111,21 @@ escalation tool, or a way to bypass Windows security. It does not disable
 Defender, does not add Defender exclusions, does not write to the system drive,
 and has no network access unless the user opts in to the VirusTotal hash lookup.
 The source is public under the MIT licence.
+
+## Application answers
+
+These values can be pasted into the form at <https://signpath.org/apply.html>:
+
+| Field | Value |
+|---|---|
+| Project name | ShieldGate |
+| Repository | <https://github.com/GnasValluk/shieldgate> |
+| Licence | MIT |
+| Releases | <https://github.com/GnasValluk/shieldgate/releases> |
+| Build system | GitHub Actions, `.github/workflows/build.yml`, `windows-latest` |
+| Signed file | `ShieldGate.exe` from a `v*` tag only |
+| Project summary | ShieldGate is a portable Windows guard for USB drives and peripherals. It scans removable media, quarantines suspicious files with user confirmation, removes shortcut-virus traces, repairs drive metadata and inventories devices. It is offline by default and has no installer, driver or telemetry. |
+| Why code signing | The executable is distributed directly from GitHub Releases. A valid Authenticode signature lets users verify the publisher and reduces SmartScreen and antivirus false positives without asking anyone to disable protection. |
 
 ## Applying to SignPath Foundation
 
