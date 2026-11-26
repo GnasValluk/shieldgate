@@ -57,6 +57,8 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
   two-step plan/apply with `confirm:true` and expires after 120 seconds.
 - **Nothing else changes.** Version 3.0 keeps the 2.3 scan, repair and BadUSB
   behaviour; the pipe is an opt-in extra path.
+- **3.0.1** closes the folder picker with a single click on X; before, the shell
+  dialog could reopen once after it was closed.
 
 ## What is new in 2.1–2.3
 

@@ -1494,9 +1494,11 @@ khi nối GUI.
   thúc trước; thêm mốc `_folderClosedUtc` bỏ qua lần gọi trong 400 ms; kiểm tra
   `IsDisposed`/`Disposing` trước khi mở. Không đổi hành vi chọn thư mục hợp lệ.
 - **Kiểm tra:** build 658 KB, SHA256
-  `714c9c7b0bccf2d2605c525dec5a8551b092be7f9d55dd1d74e52d076fb232aa`;
-  `test.ps1` **81/81**, `--selftest` **81/81**, `--version` in `ShieldGate 3.0`.
+  `23c8d0fbd09bf7aba898c8734c4b750c2d67f86dac0c581c851a30e7c12a7f5c`;
+  `test.ps1` **81/81**, `--selftest` **81/81**, `--version` in `ShieldGate 3.0.1`.
   Chưa bấm thử bằng tay trong phiên này; cần người dùng xác nhận một lần bấm X.
+- **Phát hành 3.0.1:** tăng `AppInfo.Version`/`AssemblyInfo` lên 3.0.1, tag
+  `v3.0.1`, GitHub release kèm exe và ghi chú "cần xác nhận trên máy thật".
 - **Mẫu issue:** `.github/ISSUE_TEMPLATE/bug_report.yml`,
   `feature_request.yml`, `config.yml`; hỏi phiên bản, Windows, quyền, khu vực,
   bước tái hiện và nhắc không đính mẫu virus/dữ liệu cá nhân; nêu rõ việc ngoài
