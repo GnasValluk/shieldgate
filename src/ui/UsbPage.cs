@@ -35,6 +35,9 @@ namespace ShieldGate
         // Quét một thư mục người dùng chọn thay vì cả ổ. _scanDrive giữ gốc quét
         // hiện tại (ổ hoặc thư mục) để quét lại sau khi cách ly.
         private bool _isFolder;
+        // Thời điểm hộp thoại chọn thư mục vừa đóng, để bỏ qua cú nhả chuột bị
+        // phát lại và không mở hộp thoại lần hai.
+        private DateTime _folderClosedUtc = DateTime.MinValue;
         private volatile bool _cancelFlag;
         private volatile int _progressFiles;
         private volatile string _progressPath = "";
@@ -70,7 +73,16 @@ namespace ShieldGate
             Controls.Add(_scan);
 
             _scanFolder = MakeLink(S.Usb.ScanFolder, "");
-            _scanFolder.Click += delegate { ChooseFolder(); };
+            // Mở hộp thoại sau khi sự kiện chuột kết thúc. Nếu mở ngay trong cú
+            // nhả chuột, hộp thoại shell chạy vòng lặp lồng và cú nhả đó có thể
+            // được phát lại lúc hộp thoại đóng, làm nó mở lần thứ hai.
+            _scanFolder.Click += delegate
+            {
+                if (IsHandleCreated)
+                    BeginInvoke((MethodInvoker)delegate { ChooseFolder(); });
+                else
+                    ChooseFolder();
+            };
             Controls.Add(_scanFolder);
 
             _vaccine = MakeLink(S.Usb.Vaccine, "shield");
@@ -944,27 +956,34 @@ namespace ShieldGate
         // ghi của dự án không được chạm vào đó.
         private void ChooseFolder()
         {
-            if (_scanning || _applying || _unhiding) return;
+            if (IsDisposed || Disposing || _scanning || _applying || _unhiding) return;
+            // Chặn lần gọi thứ hai đến sát ngay sau khi hộp thoại vừa đóng: người
+            // dùng chỉ bấm X một lần mà hộp thoại không được mở lại.
+            if ((DateTime.UtcNow - _folderClosedUtc).TotalMilliseconds < 400) return;
+
+            string root;
             using (FolderBrowserDialog dlg = new FolderBrowserDialog())
             {
                 dlg.Description = S.Usb.ChooseFolderHint;
                 dlg.ShowNewFolderButton = false;
-                if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
-                string root = dlg.SelectedPath;
-                if (string.IsNullOrEmpty(root) || root.Length < 3) return;
-                string sys = Path.GetPathRoot(Environment.SystemDirectory) ?? "";
-                if (sys.Length > 0 && root.StartsWith(sys, StringComparison.OrdinalIgnoreCase))
-                {
-                    _notice.SetMessage(S.Usb.FolderSystemRefused, true);
-                    return;
-                }
-                _isFolder = true;
-                _scanDrive = root.TrimEnd('\\') + "\\";
-                _result = null;
-                _list.Clear();
-                _notice.ClearMessage();
-                StartScan();
+                DialogResult picked = dlg.ShowDialog(FindForm());
+                _folderClosedUtc = DateTime.UtcNow;
+                if (picked != DialogResult.OK) return;
+                root = dlg.SelectedPath;
             }
+            if (string.IsNullOrEmpty(root) || root.Length < 3) return;
+            string sys = Path.GetPathRoot(Environment.SystemDirectory) ?? "";
+            if (sys.Length > 0 && root.StartsWith(sys, StringComparison.OrdinalIgnoreCase))
+            {
+                _notice.SetMessage(S.Usb.FolderSystemRefused, true);
+                return;
+            }
+            _isFolder = true;
+            _scanDrive = root.TrimEnd('\\') + "\\";
+            _result = null;
+            _list.Clear();
+            _notice.ClearMessage();
+            StartScan();
         }
 
         // Khôi phục tên gốc cho tài liệu bị virus đổi sang Base64. Chỉ chạm tệp

@@ -1,0 +1,88 @@
+name: Bug report
+description: Something in ShieldGate does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. ShieldGate never sends data anywhere and never
+        touches the system drive. Please do not attach malware samples,
+        quarantine content or personal files; describe them instead.
+  - type: input
+    id: version
+    attributes:
+      label: ShieldGate version
+      description: Output of `ShieldGate.exe --version`, for example `ShieldGate 3.0`.
+      placeholder: ShieldGate 3.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Edition, release and architecture.
+      placeholder: Windows 11 23H2 x64
+    validations:
+      required: true
+  - type: dropdown
+    id: admin
+    attributes:
+      label: Was the GUI started as administrator?
+      options:
+        - No (standard user)
+        - Yes
+        - Command line only
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - USB page (scan, clean, unhide, rename)
+        - Folder scan
+        - Devices
+        - Protect / background protection
+        - Drive repair
+        - Quarantine and restore
+        - Log and export
+        - Command line
+        - Install / uninstall
+        - Named pipe (`--pipe`)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Plug in a FAT32 USB drive ...
+        2. Open the USB page ...
+        3. Press ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant log lines (optional)
+      description: From `%ProgramData%\ShieldGate\log`. Remove user names and drive labels if needed.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I did not attach malware samples, quarantine files or personal data.
+          required: true

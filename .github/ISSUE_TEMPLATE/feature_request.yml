@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest a detector, a device type or a workflow
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ShieldGate is a user-mode guard for removable drives and peripherals, not
+        a full antivirus. Out of scope by design: automatic boot sector/MBR
+        repair, formatting or "wiping" a drive, automatically disabling devices,
+        and any network access that is not the optional VirusTotal hash lookup.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+      description: Describe the situation on a real machine, not only the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should ShieldGate do, and what should it never do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you tried
+      description: Other tools, manual steps, or why the current behaviour is not enough.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Detection (names, extensions, signatures, macros)
+        - Quarantine and restore
+        - Drive repair
+        - Devices and trust
+        - BadUSB
+        - UI and strings
+        - Command line and scripting
+        - Named pipe
+        - Documentation
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: This can work without a new library, driver or network access.
+          required: true

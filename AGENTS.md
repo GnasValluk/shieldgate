@@ -144,4 +144,4 @@ Luồng chính:
 - YARA (VirusTotal opt-in đã có từ 2.2).
 - Sửa boot sector/MBR có đối chiếu mẫu sạch.
 - TestDisk/PhotoRec, file carving, format ổ.
-- Ký số release, đổi tên repo `shieldgate`, issue template.
+- Ký số release, đổi tên repo `shieldgate`.

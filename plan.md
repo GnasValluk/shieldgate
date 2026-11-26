@@ -1484,3 +1484,23 @@ khi nối GUI.
 - **Còn lại:** checklist máy thật (GUI thường + engine SYSTEM, client tự viết,
   rút USB giữa job, pipe từ máy khác, Windows 7 x86), ký số Authenticode, và chỉ
   bật pipe mặc định sau khi hai việc đó xong.
+
+### 2026-11-26 — Sửa hộp thoại chọn thư mục mở lại, thêm mẫu issue
+
+- **Lỗi:** trong "Quét thư mục…", bấm X trên hộp thoại Browse For Folder phải
+  bấm hai lần vì hộp thoại tự mở lại. Hộp thoại shell chạy vòng lặp modal ngay
+  trong cú nhả chuột của liên kết, nên sự kiện đó bị xử lý lại khi hộp thoại đóng.
+- **Sửa trong `UsbPage`:** mở hộp thoại qua `BeginInvoke` để cú nhả chuột kết
+  thúc trước; thêm mốc `_folderClosedUtc` bỏ qua lần gọi trong 400 ms; kiểm tra
+  `IsDisposed`/`Disposing` trước khi mở. Không đổi hành vi chọn thư mục hợp lệ.
+- **Kiểm tra:** build 658 KB, SHA256
+  `714c9c7b0bccf2d2605c525dec5a8551b092be7f9d55dd1d74e52d076fb232aa`;
+  `test.ps1` **81/81**, `--selftest` **81/81**, `--version` in `ShieldGate 3.0`.
+  Chưa bấm thử bằng tay trong phiên này; cần người dùng xác nhận một lần bấm X.
+- **Mẫu issue:** `.github/ISSUE_TEMPLATE/bug_report.yml`,
+  `feature_request.yml`, `config.yml`; hỏi phiên bản, Windows, quyền, khu vực,
+  bước tái hiện và nhắc không đính mẫu virus/dữ liệu cá nhân; nêu rõ việc ngoài
+  phạm vi (MBR, format, tự tắt thiết bị, mạng).
+- **Còn lại:** checklist máy thật, ký số release, đổi tên repo `shieldgate`,
+  Raw Input + ETW cho BadUSB, YARA. Các mục MBR/TestDisk/format vẫn cố ý không
+  làm.
