@@ -141,7 +141,7 @@ Luồng chính:
 - Named pipe W23: còn checklist máy thật (GUI thường + engine SYSTEM, client tự
   viết, rút USB giữa job, pipe từ máy khác, Windows 7 x86).
 - Raw Input key attribution + ETW cho BadUSB.
-- VirusTotal opt-in (chỉ hash) và YARA.
+- YARA (VirusTotal opt-in đã có từ 2.2).
 - Sửa boot sector/MBR có đối chiếu mẫu sạch.
 - TestDisk/PhotoRec, file carving, format ổ.
 - Ký số release, đổi tên repo `shieldgate`, issue template.

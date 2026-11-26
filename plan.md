@@ -121,7 +121,7 @@ chữ ký/tên tệp/ngưỡng mà không build lại.
 - [x] DLL sideloading theo danh sách tên DLL bị lạm dụng + không có chữ ký.
 - [x] Office macro: chỉ gắn cờ, không cách ly.
 - [x] Gọi Windows Defender thủ công (`MpCmdRun -Scan -ScanType 3 -File`).
-- [ ] VirusTotal (opt-in) — chưa làm; cần khoá API và cam kết mạng rõ ràng.
+- [x] VirusTotal (opt-in, chỉ gửi hash) — có từ 2.2 qua `--vt` và trang Bảo vệ.
 - [ ] YARA — chưa làm; cần thư viện native, trái mục tiêu single-exe.
 
 ### Giai đoạn 4 — Repair
