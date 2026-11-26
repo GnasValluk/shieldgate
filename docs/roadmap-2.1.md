@@ -550,7 +550,7 @@ Chỉ bắt đầu sau W9 và sau khi `docs/design-badusb.md` được duyệt.
 - **Chưa đo trên thiết bị BadUSB thật** (môi trường không có); kịch bản §9.2 của
   `docs/design-badusb.md` vẫn là việc của bản phát hành.
 
-## 6. Phát hành 3.0 — Named pipe (chỉ sau khi được duyệt)
+## 6. Phát hành 3.0 - Named pipe (đã phát hành 26/11, tắt mặc định)
 
 Điều kiện tiên quyết: W4 xong, GUI không còn chạy admin toàn thời gian (hoặc có
 `--tray` chạy quyền thường), và W16 đã giải quyết mất thông báo.
@@ -572,7 +572,8 @@ Nếu chưa duyệt: giữ mô hình tệp + ACL, chỉ thêm W16.
 | 3.0 | W23 | W4, W16, quyết định kiến trúc | 15–20 ngày |
 
 Mốc phát hành: `v2.1.0` (nền tảng) → `v2.1.1` (tính năng) → `v2.2` (VT) → `v2.3`
-(BadUSB) → `v3.0` (pipe). Mỗi mốc tăng `AppInfo.Version` và tag tương ứng.
+(BadUSB) → `v3.0` (pipe, phát hành 26/11 với pipe tắt mặc định). Mỗi mốc tăng
+`AppInfo.Version` và tag tương ứng.
 
 ## 8. Checklist kiểm chứng trên máy thật (trước mỗi mốc)
 

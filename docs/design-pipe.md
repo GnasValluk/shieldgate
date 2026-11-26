@@ -301,7 +301,7 @@ Nếu bất kỳ kiểm tra nào thất bại, trả `refused` kèm lý do đã 
 **Trạng thái:** đã duyệt ngày 2026-11-24 với các mặc định ở §13: host pipe
 trong `--watch`, GUI vẫn có thể chạy elevated (chỉ dùng pipe khi chưa elevated),
 pin `bin\client.pin`, giữ allow-list `clean`/`unhide`/`rename`, plan/apply cho
-mọi lệnh ghi, `pipe.enabled=false` trong beta, giữ Windows 7, chưa ký số.
+mọi lệnh ghi, `pipe.enabled=false` khi phát hành 3.0, giữ Windows 7, chưa ký số.
 
 Đã thi hành W23a–W23h: `PipeProtocol`, `PipeServer`, `PipeClient`, `PipeAuth`,
 `PipeCommands` (plan/apply/job), host trong `--watch`, pin do `--install` ghi và
@@ -323,3 +323,7 @@ Bật/tắt bằng `--pipe on|off` (cần quyền quản trị, ghi `pipe.enable
 `bin\client.pin` có tồn tại hay không. Không có công tắc trong GUI để tránh
 một trang cấu hình mới chỉ cho beta. Đổi thiết lập cần khởi động lại bảo vệ nền
 vì pipe được host trong `--watch`.
+
+**Phát hành:** 3.0 (26/11/2026) gồm W23a–W23j; pipe tắt mặc định nên hành vi
+quét/sửa của 2.3 không đổi. Trước khi bật mặc định ở bản sau cần xong checklist
+máy thật ở §11.2 và ký số release.

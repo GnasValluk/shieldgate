@@ -16,10 +16,11 @@ namespace ShieldGate
     internal static class AppInfo
     {
         public const string Name = "ShieldGate";
-        public const string Version = "2.3";
+        public const string Version = "3.0";
         public const string TaskName = "ShieldGate USB Guard";
         public const string TrayTaskName = "ShieldGate Tray";
-        // Tên mutex nội bộ đổi theo phiên bản lớn để bản 1.0 và 2.x không tranh nhau.
+        // Giữ hậu tố _2 khi lên 3.0: bản 2.3 và 3.0 dùng chung một mutex để lúc
+        // nâng cấp không có hai tiến trình nền cùng chạy.
         public const string MutexName = "Global\\ShieldGate_USBGuard_2";
         public const string UiMutexName = "Local\\ShieldGate_UI_2";
         public const string TrayMutexName = "Local\\ShieldGate_Tray_2";

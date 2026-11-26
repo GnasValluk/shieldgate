@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/license-MIT-1f5e3d?style=flat-square" alt="MIT license">
   <img src="https://img.shields.io/badge/platform-Windows%207%2B-0078d4?style=flat-square" alt="Windows 7 or later">
   <img src="https://img.shields.io/badge/.NET%20Framework-4.0-5b6472?style=flat-square" alt=".NET Framework 4.0">
-  <img src="https://img.shields.io/badge/download-618%20KB-5b6472?style=flat-square" alt="About 618 KB">
+  <img src="https://img.shields.io/badge/download-658%20KB-5b6472?style=flat-square" alt="About 658 KB">
 </p>
 
 <p align="center">
@@ -42,6 +42,21 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
 |---|---|
 | <img src="docs/screenshots/devices.png" alt="Peripheral devices and event timeline"> | <img src="docs/screenshots/drive-repair.png" alt="Drive repair with icon toolbar"> |
 | Inventory with VID/PID/serial, trust marks, event timeline | Diagnose, preview, back up, check the file system; icons name themselves on hover |
+
+## What is new in 3.0
+
+- **A standard-user GUI can still clean a whole drive.** When background
+  protection runs as SYSTEM, the local pipe lets the unelevated GUI run the
+  whole-drive clean and unhide on removable media. Folder work and every other
+  page keep the file + ACL path.
+- **Only the installed GUI may connect.** The pipe accepts one local client at a
+  time and checks PID, image path, session, user SID and a SHA-256 pin written by
+  `--install`; clients from another machine or an anonymous account are closed.
+- **Off by default.** `--pipe` shows the state, `--pipe on`/`off` (administrator)
+  changes it and asks for a restart of background protection. Every write uses a
+  two-step plan/apply with `confirm:true` and expires after 120 seconds.
+- **Nothing else changes.** Version 3.0 keeps the 2.3 scan, repair and BadUSB
+  behaviour; the pipe is an opt-in extra path.
 
 ## What is new in 2.1–2.3
 
@@ -134,7 +149,7 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
   driver/rootkit — run Microsoft Defender Offline" instead of asking you to clean
   the same items again.
 
-## Prepared for 3.0: authenticated named pipe
+## Named pipe (off by default)
 
 - **A local pipe with a pinned client.** `\\.\pipe\ShieldGate.Engine.v1` speaks
   versioned JSON frames (4-byte length, 64 KiB limit, one client at a time). The

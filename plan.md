@@ -1465,3 +1465,22 @@ khi nối GUI.
   quyền quản trị; đường ghi đã được self-test phủ ở thư mục tạm.
 - **Còn lại:** checklist máy thật; cân nhắc bump 3.0 khi người dùng thật bật
   pipe.
+
+### 2026-11-26 — Phát hành 3.0 (named pipe, tắt mặc định)
+
+- **Phiên bản:** `AppInfo.Version` 2.3 → 3.0; `AssemblyInfo` 3.0.0.0. Giữ hậu tố
+  mutex `_2` để bản 2.3 và 3.0 dùng chung một instance khi nâng cấp.
+- **README:** thêm mục "What is new in 3.0" (pipe cho GUI quyền thường, chỉ nhận
+  client đã ghim, tắt mặc định, không đổi hành vi quét/sửa); đổi tiêu đề mục pipe
+  thành "Named pipe (off by default)"; huy hiệu dung lượng 658 KB.
+- **Tài liệu:** `docs/design-pipe.md` ghi mốc phát hành và điều kiện bật mặc định
+  sau này; `docs/roadmap-2.1.md` đánh dấu 3.0 đã phát hành.
+- **Kiểm tra:** build 658 KB, SHA256
+  `c9c9f66c25d59f36eaeca10aba0d0241685e68eae9c4a2127d5e293f28a1909a`;
+  `test.ps1` **81/81**, `--selftest` **81/81**; `--version` in `ShieldGate 3.0`;
+  `--status` và `--pipe status` trả 0.
+- **Phát hành:** tag `v3.0`, GitHub release kèm `ShieldGate.exe` và ghi chú về
+  false positive của Defender, chưa ký số.
+- **Còn lại:** checklist máy thật (GUI thường + engine SYSTEM, client tự viết,
+  rút USB giữa job, pipe từ máy khác, Windows 7 x86), ký số Authenticode, và chỉ
+  bật pipe mặc định sau khi hai việc đó xong.
