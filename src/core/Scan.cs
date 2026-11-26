@@ -57,6 +57,19 @@ namespace ShieldGate
         public int KeptFiles;
         // Số tệp có tên là Base64 của một tên tài liệu: có thể khôi phục tên gốc.
         public int Base64Names;
+        // Số thư mục giả còn lại trên ổ (kể cả thư mục chỉ còn tài liệu).
+        public int FakeFolders;
+    }
+
+    // Kết quả xử lý thư mục giả: cách ly payload còn sót, đổi tên Base64,
+    // chuyển cả cây sang Recovered và xoá tên thư mục giả.
+    internal sealed class FakeRecoverResult
+    {
+        public int Folders;
+        public int FilesMoved;
+        public int Quarantined;
+        public int Failed;
+        public List<string> Destinations = new List<string>();
     }
 
     // Phạm vi gỡ thuộc tính ẩn. Chế độ tự động chỉ chạm mục mang dấu hiệu virus
@@ -373,6 +386,7 @@ namespace ShieldGate
                 fd.High = fc != null && fc.Strong;
                 result.Items.Add(fd);
                 result.Folders++;
+                result.FakeFolders++;
             }
 
             // Tep .exe gia thu muc ("Documents" co bieu tuong thu muc nhung la chuong trinh).
@@ -610,6 +624,90 @@ namespace ShieldGate
                 return n > 0 ? n : (removed ? 1 : 0);
             }
             finally { CleanLock.Exit(); }
+        }
+
+        // Xử lý thư mục giả còn tài liệu: cách ly payload còn sót, đổi tên Base64,
+        // rồi chuyển cả cây sang Recovered\<tên> và xoá tên giả. Chỉ chạy khi người
+        // dùng bấm; bảo vệ nền vẫn chỉ cách ly payload và giữ tài liệu tại chỗ.
+        public static FakeRecoverResult RecoverFakeFolders(UsbScanResult scan,
+                                                           IList<UsbItem> items,
+                                                           Action<int, string> progress)
+        {
+            FakeRecoverResult r = new FakeRecoverResult();
+            if (scan == null || items == null || items.Count == 0) return r;
+            if (!Native.CanWrite(scan.Root))
+            {
+                Log.Write(S.Log.DriveNotWritable(scan.Root), "WARN");
+                r.Failed = items.Count;
+                return r;
+            }
+            if (!CleanLock.Enter(60000))
+            {
+                Log.Write(S.Log.CleanBusy(scan.Root), "WARN");
+                return r;
+            }
+            bool paused = Policy.BeginCleanPause();
+            try
+            {
+                // Dừng tiến trình đang chạy từ ổ để không bị khoá tệp khi chuyển.
+                StopProcesses(scan.Root);
+                string batch = Quarantine.NewBatch(
+                    "usb_" + (scan.Drive.Length > 0 ? scan.Drive.Substring(0, 1) : "x"), "");
+                int seen = 0;
+                foreach (UsbItem it in items)
+                {
+                    if (it == null || it.Kind != UsbKind.FakeFolder) continue;
+                    seen++;
+                    string dir = System.IO.Path.Combine(scan.Root, it.FolderName);
+                    int failedHere = 0, kept = 0;
+                    int q = QuarantineTree(dir, scan.Root, batch, ref failedHere, ref kept);
+                    r.Quarantined += q;
+                    if (failedHere > 0)
+                    {
+                        r.Failed++;
+                        Log.Write(S.Log.FakeFolderQuarantineFailed(it.FolderName), "WARN");
+                        if (progress != null) progress(seen, dir);
+                        continue;
+                    }
+                    // Không còn tài liệu: QuarantineTree đã xoá thư mục rỗng.
+                    if (kept == 0)
+                    {
+                        if (progress != null) progress(seen, dir);
+                        continue;
+                    }
+                    int files, moveFailed;
+                    string dest, reason;
+                    if (UsbRestore.RecoverFakeFolder(scan.Root, it.FolderName,
+                            out files, out moveFailed, out dest, out reason))
+                    {
+                        r.Folders++;
+                        r.FilesMoved += files;
+                        if (dest.Length > 0) r.Destinations.Add(dest);
+                        // Thư mục bọc ngoài (vd DATA_XXXX) chỉ bị xoá khi đã rỗng.
+                        UsbRestore.RemoveWrapper(scan.Root, it.FolderName);
+                    }
+                    else
+                    {
+                        r.Failed++;
+                        Log.Write(S.Log.FakeFolderRecoverFailed(it.FolderName, reason), "WARN");
+                    }
+                    if (progress != null) progress(seen, dir);
+                }
+                if (batch.Length > 0 && !HasQuarantinedFile(batch))
+                {
+                    Quarantine.RemoveBatch(batch);
+                    batch = "";
+                }
+                if (seen > 0)
+                    Log.Write(S.Log.FakeFolderRecoverSummary(r.Folders, r.FilesMoved,
+                        r.Quarantined, r.Failed, scan.Root), r.Failed > 0 ? "WARN" : "INFO");
+                return r;
+            }
+            finally
+            {
+                if (paused) Policy.EndCleanPause();
+                CleanLock.Exit();
+            }
         }
 
         // Sau khi du lieu ra ngoai, quet lai va cach ly nhung dau hieu manh (shortcut /

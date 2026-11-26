@@ -198,6 +198,51 @@ Ba quyết định đã chốt và đang được thi hành (chi tiết ở mụ
 2. `chkdsk /f` chỉ cho ổ `Removable`; ổ cố định phụ chỉ chẩn đoán đọc — đã làm ở W2.
 3. `rules.json` chỉ đọc từ thư mục dữ liệu; tệp cạnh exe bị bỏ qua — đã làm ở W6.
 
+### 6.1 Trạng thái chốt — bản tạm hoàn thiện (2026-11-26)
+
+Dự án **tạm chốt ở 3.1.0**. Không còn mã dở dang; mọi mục trong tệp này đã xong
+hoặc được ghi rõ là "bản sau". Kiểm tra cuối: `build.ps1` ra
+`dist\ShieldGate.exe` 670 KB, `test.ps1` đạt **83/83**, exit 0.
+
+Đã có trong 2.0 → 3.1:
+
+- **2.0** — lõi JSON/luật, pipeline detector, kiểm kê thiết bị + trust store,
+  chặn ghi/chặn thực thi, sửa ổ an toàn (chẩn đoán, sao lưu, `chkdsk` có xác
+  nhận), 7 trang giao diện, self-test.
+- **2.1** — đường dẫn công cụ tuyệt đối, marker sao lưu theo serial, gỡ cài đặt
+  giữ dữ liệu, manifest cách ly không tin tuyệt đối, `reg export` bắt buộc,
+  CSV injection, phạm vi Unhide, merge `rules.json`, đường dẫn > 260 ký tự,
+  hiệu năng quét, tạm mở khoá ghi khi dọn, `chkdsk /f` trả lời dismount, ID sự
+  kiện, VirusTotal opt-in (chỉ hash), BadUSB chỉ cảnh báo, xác minh chữ ký, đọc
+  đường dẫn tiến trình 64-bit.
+- **2.3** — quét một thư mục, khôi phục tên Base64, đếm tài liệu còn trong thư
+  mục giả.
+- **3.0** — named pipe có xác thực, tắt mặc định, `--pipe on|off|status`.
+- **3.1** — `Handle fake folder(s)`: cách ly nốt payload, đổi tên Base64, chuyển
+  sang `Recovered\<tên> (recovered)`, quét lại sạch.
+
+Cố ý **không** làm (giữ nguyên quan điểm 2.0): sửa boot sector/MBR, format ổ,
+TestDisk/PhotoRec/carving, YARA dùng DLL native, tự tắt thiết bị, mọi gửi dữ
+liệu ra mạng ngoài `--vt` khi người dùng đã bật.
+
+Chưa kiểm chứng trên máy thật (không chặn bản tạm chốt, nhưng phải xong trước khi
+coi là phát hành ổn định): checklist mục 8 của `docs/roadmap-2.1.md` (USB
+FAT32/exFAT/NTFS, công tắc khoá ghi, bàn phím ngoài/Bluetooth/composite, Windows 7
+x86, `chkdsk /f`, UAC không admin); checklist pipe (GUI thường + engine SYSTEM,
+client tự viết, rút USB giữa job, pipe từ máy khác); xác nhận `Handle fake
+folder(s)` trên chính ổ `E:\DATA_VAZG4SVR`; ký số SignPath.
+
+**Việc tiếp theo (bản làm giàu luật):** chờ kế hoạch của chủ dự án. Điểm vào đã
+chuẩn bị sẵn: `Rules.DefaultJson`/`Rules.Weight` cho tên–đuôi–ký tự–trọng số,
+detector mới là một lớp `IDetector`/`IDirectoryDetector` trong `Detectors.cs`,
+câu lý do trong `S.Reason.Text`, mẫu giả + mục self-test (tăng `total`). Giữ
+nguyên: ngưỡng lấy từ `Rules.ScoreThreshold`, `Strong` chỉ khi gần chắc chắn,
+`FlagOnly` không tự cách ly, `rules.json` tăng phiên bản và merge chứ không ghi
+đè. Cần chốt trước khi viết mã: phạm vi (ổ rời hay cả thư mục), ngưỡng báo nhầm
+chấp nhận được, và có thêm khoá mới vào `rules.json` hay không.
+
+Trong lúc chờ: chỉ sửa lỗi và tài liệu; không thêm tính năng lớn.
+
 ## 7. Nhật ký tiến độ
 
 > Quy ước: mỗi mục ghi ngày, việc đã làm, bằng chứng (lệnh + kết quả), và
@@ -1539,3 +1584,52 @@ khi nối GUI.
 - **Chưa làm được:** nộp đơn SignPath thay người dùng (cần tài khoản và email),
   tạo organization/project trên dashboard, thêm secret; các bước này ghi trong
   `CODE_SIGNING.md`.
+
+### 2026-11-26 — Xử lý dứt điểm thư mục giả còn tài liệu (3.1.0)
+
+- **Vấn đề thực tế:** sau khi cách ly payload, `Docusment` vẫn còn 406 tài liệu
+  người dùng bị đổi tên Base64; lần quét sau vẫn báo "phát hiện 1 mục" và giao
+  diện chỉ có "Khôi phục tên gốc", không có cách kết thúc thư mục giả.
+- **Lõi:** thêm `UsbRestore.RecoverFakeFolder` — từ chối nếu còn tệp chạy, đổi
+  tên Base64 bằng `RenameBase64In`, chuyển cả cây sang `Recovered\<tên>
+  (recovered)` trên cùng ổ, rồi trả số tệp/lỗi/đích. Hỗ trợ cả Base64 URL-safe
+  (`-`/`_` thay cho `+`/`/`) vì mẫu thật dùng kiểu này; hậu tố `(recovered)` để
+  lần quét sau không nhận lại tên gõ sai; `UniqueName` giờ giữ nguyên tên khi
+  chưa trùng, chỉ thêm `(1)` khi thật sự có xung đột.
+- **Quét:** `UsbScanResult.FakeFolders`, `FakeRecoverResult` và
+  `UsbScan.RecoverFakeFolders` dừng tiến trình đang chạy từ ổ, cách ly nốt
+  payload còn sót, gọi `RecoverFakeFolder`, xoá vỏ ngoài nếu đã rỗng
+  (`RemoveWrapper`) và ghi log tổng kết. Vẫn dùng `CleanLock` + tạm mở khoá ghi;
+  không xoá tài liệu.
+- **Giao diện:** nút `Xử lý thư mục giả (n)` ở thanh dưới trang USB, chỉ hiện
+  khi kết quả có thư mục giả; hộp thoại xác nhận nêu rõ chuyển sang `Recovered`,
+  không ghi đè, không xoá; sau khi xong tự quét lại và báo số tệp đã chuyển.
+  Mọi chuỗi mới nằm trong `Strings.cs` (Việt + Anh).
+- **An toàn:** chỉ cách ly đuôi payload/`desktop.ini`/`autorun.inf`; tài liệu
+  được giữ và chuyển, không ghi đè; nếu còn payload thì không chuyển gì; nếu
+  cách ly lỗi thì giữ nguyên thư mục để tránh mất dữ liệu.
+- **Kiểm tra:** thêm mục 35d (từ chối khi còn payload, đổi tên Base64, chuyển
+  sang `Recovered`, tên đích không còn bị nhận là thư mục giả) và 35e (luồng
+  đầy đủ: quét thấy thư mục giả, cách ly payload, chuyển sang `Recovered`, quét
+  lại sạch). `test.ps1` **83/83**, exit 0. Build 670 KB, SHA256
+  `8f762b65fbc594b62b6ba1958309a71624005be9c9902aa203f7337ab869d522`;
+  `AppInfo.Version`/`AssemblyInfo` lên **3.1.0**. Kiểm tra thật trên
+  `E:\DATA_VAZG4SVR\Docusment`: 406 tệp, cả 406 giải mã được bằng Base64
+  URL-safe (186 `.docx`, 108 `.doc`, 99 `.pdf`, 8 `.xls`, 5 `.xlsx`).
+- **Còn lại:** xác nhận trên chính ổ `E:\DATA_VAZG4SVR` của người dùng; chưa
+  thêm lệnh pipe cho thao tác này, nên khi engine SYSTEM bật, GUI quyền thường
+  được nhắc mở bằng quyền quản trị thay vì thử ghi vùng cách ly rồi lỗi.
+
+### 2026-11-26 — Chốt tạm hoàn thiện 3.1.0
+
+- Ghi trạng thái chốt vào **mục 6.1**: phạm vi đã có 2.0 → 3.1, phần cố ý không
+  làm, phần chưa kiểm chứng trên máy thật, và khung cho bản làm giàu luật.
+- Chạy lại kiểm tra cuối trên cây làm việc hiện tại (gồm toàn bộ thay đổi 3.1.0):
+  `build.ps1` → `dist\ShieldGate.exe` 670 KB, SHA256 `792cff0f…2597a1`;
+  `test.ps1` → `Đạt 83/83 phép kiểm tra.`, exit 0.
+- Commit thay đổi 3.1.0 còn treo (10 tệp: `README.md`, `docs/roadmap-2.1.md`,
+  `plan.md`, `Restore.cs`, `Scan.cs`, `UsbPage.cs`, `Strings.cs`, `SelfTest.cs`,
+  `Core.cs`, `AssemblyInfo.cs`) và đẩy `main`. Không tạo tag/release 3.1.0 vì
+  còn chờ xác nhận trên ổ thật và ký số.
+- Không đổi mã nguồn trong lượt này; số self-test, phiên bản và hành vi giữ
+  nguyên như mục 3.1.0 ở trên.

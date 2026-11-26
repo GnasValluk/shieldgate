@@ -15,7 +15,7 @@ namespace ShieldGate
         private readonly SelectBox _drive;
         private readonly List<string> _driveRoots = new List<string>();
         private readonly LinkText _refresh, _vaccine, _unhide, _scanFolder, _rename, _selectAll, _selectNone, _flagToggle, _undo, _log;
-        private readonly FlatButton _scan, _apply, _cancel;
+        private readonly FlatButton _scan, _apply, _cancel, _recoverFake;
         private readonly Notice _notice;
         private readonly Spinner _spinner;
         private readonly Glyph _stateIcon;
@@ -104,6 +104,7 @@ namespace ShieldGate
             _tips.SetToolTip(_refresh, S.Usb.Refresh);
             _tips.SetToolTip(_scanFolder, S.Usb.ChooseFolderHint);
             _tips.SetToolTip(_rename, S.Usb.RenameBase64Hint);
+            _tips.SetToolTip(_recoverFake, S.Usb.RecoverFakeHint);
 
             _notice = new Notice();
             Controls.Add(_notice);
@@ -161,6 +162,10 @@ namespace ShieldGate
             _apply = MakeButton(S.Usb.Apply(0), ButtonKind.Primary);
             _apply.Click += delegate { DoApply(); };
             Controls.Add(_apply);
+
+            _recoverFake = MakeButton(S.Usb.RecoverFake(0), ButtonKind.Secondary);
+            _recoverFake.Click += delegate { DoRecoverFake(); };
+            Controls.Add(_recoverFake);
 
             _undo = MakeLink(S.Usb.Undo, "undo");
             _undo.IconSize = 13;
@@ -341,6 +346,12 @@ namespace ShieldGate
             _selectAll.Visible = results;
             _selectNone.Visible = results;
             _apply.Visible = results;
+            bool canRecover = results && _result != null && _result.FakeFolders > 0
+                              && !ReadOnlyResult() && !_applying && !_unhiding;
+            _recoverFake.Visible = canRecover;
+            _recoverFake.Enabled = canRecover;
+            _recoverFake.Text = S.Usb.RecoverFake(_result == null ? 0 : _result.FakeFolders);
+            _recoverFake.AccessibleName = _recoverFake.Text;
             UpdateFlagToggle();
 
             _undo.Visible = state == UsbState.Done;
@@ -1032,7 +1043,76 @@ namespace ShieldGate
             t.Start();
         }
 
+        // Xử lý thư mục giả còn tài liệu: cách ly payload, đổi tên Base64 rồi
+        // chuyển cả cây sang Recovered. Chỉ chạy khi người dùng bấm và xác nhận.
+        private void DoRecoverFake()
+        {
+            if (_result == null || _scanning || _applying || _unhiding) return;
+            UsbScanResult scan = _result;
+            List<UsbItem> fakes = new List<UsbItem>();
+            foreach (UsbItem it in scan.Items)
+                if (it.Kind == UsbKind.FakeFolder) fakes.Add(it);
+            if (fakes.Count == 0) return;
+            // Khi engine SYSTEM đang chạy, GUI quyền thường không ghi được vùng
+            // cách ly; chưa có lệnh pipe cho thao tác này nên phải chạy quyền cao.
+            if (UsePipe(scan.Root))
+            {
+                _notice.SetMessage(S.Usb.RecoverNeedsAdmin, true);
+                return;
+            }
+            if (scan.ReadOnly || !Native.CanWrite(scan.Root))
+            {
+                _notice.SetMessage(S.Err.DriveReadOnly(scan.Root), true);
+                return;
+            }
+            if (!ConfirmDialog.Ask(FindForm(), S.Dlg.RecoverFakeTitle(fakes.Count),
+                                   S.Dlg.RecoverFakeBody, S.Dlg.RecoverFakeOk(fakes.Count),
+                                   S.Dlg.Cancel, ButtonKind.Primary, false))
+                return;
+
+            _applying = true;
+            _cancelFlag = false;
+            _notice.ClearMessage();
+            ShowState(UsbState.Results);
+
+            Thread t = new Thread(delegate()
+            {
+                FakeRecoverResult rr = new FakeRecoverResult();
+                try { rr = UsbScan.RecoverFakeFolders(scan, fakes, null); }
+                catch (Exception e)
+                {
+                    Log.Write(S.Log.UnhideError(e.Message), "ERROR");
+                    rr.Failed = fakes.Count;
+                }
+                if (IsDisposed || !IsHandleCreated) return;
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        _applying = false;
+                        bool warn = rr.Failed > 0;
+                        string msg;
+                        if (rr.Folders == 0 && rr.FilesMoved == 0
+                            && rr.Quarantined == 0 && rr.Failed == 0)
+                        {
+                            msg = S.Usb.RecoverFailed;
+                            warn = true;
+                        }
+                        else msg = S.Usb.RecoverDone(rr.Folders, rr.FilesMoved,
+                                                     rr.Quarantined, rr.Failed);
+                        // StartScan xoá thông báo, nên đặt thông báo sau khi gọi.
+                        StartScan();
+                        _notice.SetMessage(msg, warn);
+                    });
+                }
+                catch { }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
         // ----------------------------------------------------------------- bố cục
+
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
@@ -1100,6 +1180,10 @@ namespace ShieldGate
 
             int applyW = Math.Max(TextWidth(S.Usb.Apply(9), Theme.BodyStrong), Ui.Px(150));
             _apply.Bounds = new Rectangle(right - applyW, barY - Ui.Px(8), applyW, Ui.Px(Theme.ControlHeight));
+
+            int recW = Math.Max(TextWidth(S.Usb.RecoverFake(9), Theme.BodyStrong), Ui.Px(170));
+            _recoverFake.Bounds = new Rectangle(_apply.Left - Ui.Px(12) - recW,
+                barY - Ui.Px(8), recW, Ui.Px(Theme.ControlHeight));
 
             int undoW = Ui.Measure(S.Usb.Undo, Theme.Small).Width + Ui.Px(24);
             _undo.Bounds = new Rectangle(pad, contentTop + Ui.Px(84), undoW, Ui.Px(22));

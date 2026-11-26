@@ -36,7 +36,7 @@ namespace ShieldGate
             Policy.PauseAllowed = false;
 
             int passed = 0;
-            int total = 81;
+            int total = 83;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -916,6 +916,11 @@ namespace ShieldGate
                     && UsbRestore.DecodeName(Convert.ToBase64String(
                            Encoding.UTF8.GetBytes("..\\x.docx"))) == null;
 
+                // Tên URL-safe: '-' và '_' thay cho '+' và '/'.
+                string urlSafe = Convert.ToBase64String(Encoding.UTF8.GetBytes("kế hoạch.xlsx"))
+                    .Replace('+', '-').Replace('/', '_');
+                bool urlSafeOk = UsbRestore.DecodeName(urlSafe) == "kế hoạch.xlsx";
+
                 int b64Skipped;
                 int renamed = UsbRestore.RenameBase64(b64Root, null, null, out b64Skipped);
                 bool b64Moved = renamed == 1 && b64Skipped == 0
@@ -928,7 +933,7 @@ namespace ShieldGate
                 int skipped2;
                 int renamed2 = UsbRestore.RenameBase64(b64Root, null, null, out skipped2);
 
-                base64Ok = decodeOk && b64Moved && renamed2 == 0 && skipped2 == 1
+                base64Ok = decodeOk && urlSafeOk && b64Moved && renamed2 == 0 && skipped2 == 1
                     && File.Exists(Path.Combine(b64Root, "trung ten.pdf"));
             }
             catch { }
@@ -956,7 +961,80 @@ namespace ShieldGate
             catch { }
             check(S.Selftest.FolderScan, folderScanOk);
 
-            // 35d. Khung tin pipe: đọc/ghi đúng, từ chối phiên bản, lệnh lạ,
+            // 35d. Xử lý thư mục giả: còn payload thì từ chối và không đổi gì;
+            //      sau khi payload được cách ly thì đổi tên Base64 rồi chuyển cả
+            //      cây sang Recovered, không xoá tài liệu.
+            bool fakeRecoverOk = false;
+            string recoverRoot = Path.Combine(usb, "Docusment");
+            string recoveredDir = Path.Combine(usb, "Recovered");
+            try
+            {
+                string recSub = Path.Combine(recoverRoot, "1");
+                Directory.CreateDirectory(recSub);
+                string b64Doc = Convert.ToBase64String(Encoding.UTF8.GetBytes("bao cao.docx"));
+                File.WriteAllText(Path.Combine(recSub, b64Doc), "tai lieu", new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(recSub, "1.exe"), "MZ", new UTF8Encoding(false));
+
+                int recFiles, recFailed;
+                string recDest, recReason;
+                bool recRefused = !UsbRestore.RecoverFakeFolder(usb, "Docusment",
+                    out recFiles, out recFailed, out recDest, out recReason)
+                    && Directory.Exists(recoverRoot)
+                    && File.Exists(Path.Combine(recSub, b64Doc));
+
+                File.Delete(Path.Combine(recSub, "1.exe"));
+                bool recMoved = UsbRestore.RecoverFakeFolder(usb, "Docusment",
+                    out recFiles, out recFailed, out recDest, out recReason)
+                    && recFiles == 1 && recFailed == 0
+                    && WinPath.IsDir(recDest)
+                    && WinPath.Exists(recDest + "\\1\\bao cao.docx")
+                    && !UsbRestore.IsMisspelledFolder(Path.GetFileName(recDest))
+                    && !Directory.Exists(recoverRoot);
+
+                fakeRecoverOk = recRefused && recMoved;
+            }
+            catch { }
+            finally
+            {
+                try { if (Directory.Exists(recoveredDir)) Directory.Delete(recoveredDir, true); }
+                catch { }
+                try { if (Directory.Exists(recoverRoot)) Directory.Delete(recoverRoot, true); }
+                catch { }
+            }
+            check(S.Selftest.FakeFolderRecover, fakeRecoverOk);
+
+            // 35e. Luồng đầy đủ: quét thấy thư mục giả, xử lý cách ly payload,
+            //      đổi tên Base64, chuyển sang Recovered; quét lại không còn thư
+            //      mục giả.
+            bool fakeFlowOk = false;
+            string flowRoot = Path.Combine(root, "recover-usb");
+            try
+            {
+                string flowFake = Path.Combine(flowRoot, "Docusment", "1");
+                Directory.CreateDirectory(flowFake);
+                string flowDoc = Convert.ToBase64String(Encoding.UTF8.GetBytes("bien ban.docx"));
+                File.WriteAllText(Path.Combine(flowFake, flowDoc), "data", new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(flowFake, "1.exe"), "MZ", new UTF8Encoding(false));
+
+                UsbScanResult flowScan = UsbScan.Detect(flowRoot, null, null);
+                bool flowDetected = flowScan.FakeFolders == 1;
+                FakeRecoverResult fr = UsbScan.RecoverFakeFolders(flowScan, flowScan.Items, null);
+                fakeFlowOk = flowDetected && fr.Folders == 1 && fr.FilesMoved == 1
+                    && fr.Quarantined >= 1
+                    && !Directory.Exists(Path.Combine(flowRoot, "Docusment"))
+                    && WinPath.Exists(WinPath.Ext(flowRoot)
+                         + "\\Recovered\\Docusment (recovered)\\1\\bien ban.docx")
+                    && UsbScan.Detect(flowRoot, null, null).FakeFolders == 0;
+            }
+            catch { }
+            finally
+            {
+                try { if (Directory.Exists(flowRoot)) Directory.Delete(flowRoot, true); }
+                catch { }
+            }
+            check(S.Selftest.FakeFolderFlow, fakeFlowOk);
+
+            // 35f. Khung tin pipe: đọc/ghi đúng, từ chối phiên bản, lệnh lạ,
             //      khóa lạ, args sai kiểu và khung quá lớn.
             bool pipeProtocolOk = false;
             try

@@ -276,8 +276,10 @@ cả thư mục nên 600+ tài liệu bị thu gom, khôi phục lại mang tên
 `.exe/.dll/.dat/.lnk/...` (`Rules.PayloadExts`) bị cách ly; tài liệu giữ nguyên và
 thư mục giả không bị xoá (còn dữ liệu), có ghi INFO "giữ lại N tệp".
 
-Còn lại (chưa làm, đưa vào 2.2): khôi phục **tên gốc** cho tài liệu Base64 khi
-người dùng yêu cầu, và báo rõ thư mục giả còn dữ liệu trên trang Ổ USB.
+Đã làm tiếp: 2.3 khôi phục **tên gốc** cho tài liệu Base64 khi người dùng yêu cầu
+(`Restore original names`); 3.1 thêm `Handle fake folder(s)` để cách ly nốt
+payload, đổi tên Base64, chuyển cả thư mục sang `Recovered\<tên> (recovered)` và
+quét lại sạch. Trang Ổ USB báo rõ số tài liệu còn trong thư mục giả.
 
 ## 3. Phát hành 2.1 — Sửa tính năng đang sai (ước 12–15 ngày)
 

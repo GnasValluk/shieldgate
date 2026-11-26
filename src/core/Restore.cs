@@ -373,6 +373,15 @@ namespace ShieldGate
         // ký tự điều khiển, và đuôi nằm trong danh sách tài liệu (không phải payload).
         public static string DecodeName(string fileName)
         {
+            string text = DecodeBase64Name(fileName, false);
+            if (text != null) return text;
+            // Virus có thể dùng Base64 URL-safe ('-' và '_' thay cho '+' và '/')
+            // để tên tệp hợp lệ trên Windows; thử lại trước khi bỏ qua.
+            return DecodeBase64Name(fileName, true);
+        }
+
+        private static string DecodeBase64Name(string fileName, bool urlSafe)
+        {
             if (string.IsNullOrEmpty(fileName)) return null;
             string n = fileName.Trim();
             if (n.Length < 8 || n.Length > 400) return null;
@@ -391,11 +400,13 @@ namespace ShieldGate
                 if (sawPad) return null;   // '=' chỉ được nằm ở cuối
                 bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
                        || (c >= '0' && c <= '9') || c == '+' || c == '/';
+                if (urlSafe && (c == '-' || c == '_')) ok = true;
                 if (!ok) return null;
             }
             if (n.Length % 4 == 1) return null;
 
             string b64 = n;
+            if (urlSafe) b64 = b64.Replace('-', '+').Replace('_', '/');
             while (b64.Length % 4 != 0) b64 += "=";
             string text;
             try
@@ -460,27 +471,41 @@ namespace ShieldGate
             int renamed = 0;
             foreach (string dir in Base64Dirs(root))
             {
-                foreach (TreeItem t in Tree.Walk(dir))
+                int dirSkipped;
+                renamed += RenameBase64In(dir, progress, cancelled, out dirSkipped);
+                skipped += dirSkipped;
+                if (cancelled != null && cancelled()) return renamed;
+            }
+            return renamed;
+        }
+
+        // Cùng quy tắc với RenameBase64 nhưng chỉ trong một thư mục đã xác định.
+        // Dùng trước khi chuyển cả thư mục giả ra khỏi tên giả.
+        public static int RenameBase64In(string dir, Action<int, string> progress,
+                                         Func<bool> cancelled, out int skipped)
+        {
+            skipped = 0;
+            int renamed = 0;
+            foreach (TreeItem t in Tree.Walk(dir))
+            {
+                if (t.IsDir) continue;
+                if (cancelled != null && cancelled()) return renamed;
+                string name = System.IO.Path.GetFileName(t.Path);
+                // Tệp đang mang đuôi chạy được thì không đổi tên: chỉ tài liệu.
+                if (IsPayloadFile(name)) continue;
+                string decoded = DecodeName(name);
+                if (decoded == null) continue;
+                string parent = WinPath.Parent(t.Path);
+                if (parent.Length == 0) continue;
+                string dest = WinPath.Join(parent, decoded);
+                if (WinPath.Exists(dest)) { skipped++; continue; }
+                if (WinPath.Move(t.Path, dest))
                 {
-                    if (t.IsDir) continue;
-                    if (cancelled != null && cancelled()) return renamed;
-                    string name = System.IO.Path.GetFileName(t.Path);
-                    // Tệp đang mang đuôi chạy được thì không đổi tên: chỉ tài liệu.
-                    if (IsPayloadFile(name)) continue;
-                    string decoded = DecodeName(name);
-                    if (decoded == null) continue;
-                    string parent = WinPath.Parent(t.Path);
-                    if (parent.Length == 0) continue;
-                    string dest = WinPath.Join(parent, decoded);
-                    if (WinPath.Exists(dest)) { skipped++; continue; }
-                    if (WinPath.Move(t.Path, dest))
-                    {
-                        renamed++;
-                        Log.Write(S.Log.Base64Renamed(name, decoded), "INFO");
-                        if (progress != null) progress(renamed, dest);
-                    }
-                    else skipped++;
+                    renamed++;
+                    Log.Write(S.Log.Base64Renamed(name, decoded), "INFO");
+                    if (progress != null) progress(renamed, dest);
                 }
+                else skipped++;
             }
             return renamed;
         }
@@ -552,6 +577,112 @@ namespace ShieldGate
             if (WinPath.List(wrap).Count > 0) return;
             WinPath.SetNormal(wrap);
             WinPath.RemoveDir(wrap);
+        }
+
+        // Chuyen ca cay thu muc gia (vd "Docusment") sang "Recovered\<ten>" o goc o.
+        // Chi goi sau khi payload da duoc cach ly: neu con tep chay thi tu choi,
+        // de khong mang ma doc sang noi khac. Khong ghi de: ten trung thi them (1).
+        public static bool RecoverFakeFolder(string root, string rel, out int files,
+                                             out int failed, out string dest, out string reason)
+        {
+            files = 0;
+            failed = 0;
+            dest = "";
+            reason = "";
+            if (!SafeRel(rel))
+            {
+                reason = S.Log.FakeFolderBadPath;
+                return false;
+            }
+
+            string rootExt = WinPath.Ext(root);
+            string dir = WinPath.Join(rootExt, rel);
+            if (!WinPath.IsDir(dir))
+            {
+                reason = S.Log.FakeFolderGone;
+                return false;
+            }
+
+            // Tuyệt đối không chuyển payload còn sót. Người gọi phải cách ly trước.
+            // Kiểm tra trước khi đổi tên để lần từ chối không để lại thay đổi nào.
+            foreach (TreeItem t in Tree.Walk(dir))
+            {
+                if (t.IsDir) continue;
+                if (IsPayloadFile(t.Name))
+                {
+                    reason = S.Log.FakeFolderPayloadLeft(t.Name);
+                    return false;
+                }
+            }
+
+            // Đổi tên tài liệu Base64 trước khi chuyển, để người dùng nhận lại
+            // tên gốc ngay trong thư mục Recovered.
+            int skipped;
+            RenameBase64In(dir, null, null, out skipped);
+
+            foreach (TreeItem t in Tree.Walk(dir))
+            {
+                if (t.IsDir) continue;
+                files++;
+            }
+
+            string rec = WinPath.Join(rootExt, "Recovered");
+            if (!WinPath.IsDir(rec) && !WinPath.CreateDirTree(rec))
+            {
+                reason = S.Log.FakeFolderNoDest;
+                failed = files;
+                return false;
+            }
+
+            string name = System.IO.Path.GetFileName(rel);
+            if (string.IsNullOrEmpty(name)) name = "fake-folder";
+            // Hậu tố để lần quét sau không nhận lại thư mục đã phục hồi là thư mục
+            // giả (tên gốc "Docusment" vẫn bị coi là gõ sai của "Documents").
+            if (!name.EndsWith(" (recovered)", StringComparison.OrdinalIgnoreCase))
+                name += " (recovered)";
+            dest = WinPath.Join(rec, UniqueName(rec, name, true));
+
+            WinPath.SetNormal(dir);
+            if (!WinPath.Move(dir, dest))
+            {
+                int err = WinPath.LastError;
+                WinPath.SetNormal(dir);
+                if (!WinPath.Move(dir, dest))
+                {
+                    reason = WinPath.ErrorText(err);
+                    failed = files;
+                    dest = "";
+                    return false;
+                }
+            }
+            SetNormalTree(dest, 0);
+            Log.Write(S.Log.FakeFolderRecovered(rel, dest, files), "INFO");
+            return true;
+        }
+
+        private static bool SafeRel(string rel)
+        {
+            if (string.IsNullOrEmpty(rel) || Path.IsPathRooted(rel)) return false;
+            if (rel.IndexOf(':') >= 0) return false;
+            string[] parts = rel.Split('\\');
+            foreach (string p in parts)
+                if (p.Length == 0 || p == "." || p == "..") return false;
+            return true;
+        }
+
+        // Tra ve thuoc tinh thong thuong cho ca cay vua chuyen, de tep khong
+        // con an/he thong sau khi ra khoi thu muc gia.
+        private static void SetNormalTree(string pathExt, int depth)
+        {
+            if (depth > 16) return;
+            WinPath.SetNormal(pathExt);
+            foreach (DirEntry e in WinPath.List(pathExt))
+            {
+                string p = WinPath.Join(pathExt, e.Name);
+                WinPath.SetNormal(p);
+                if (e.IsDir && (e.Attr & WinPath.AttrReparse) == 0)
+                    SetNormalTree(p, depth + 1);
+            }
         }
 
         private static readonly string[] FolderWords =
@@ -694,6 +825,7 @@ namespace ShieldGate
 
         private static string UniqueName(string dirExt, string name, bool isDir)
         {
+            if (!WinPath.Exists(WinPath.Join(dirExt, name))) return name;
             string stem = name, ext = "";
             int dot = name.LastIndexOf('.');
             if (!isDir && dot > 0)

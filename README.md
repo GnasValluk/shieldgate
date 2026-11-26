@@ -46,6 +46,17 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
 | <img src="docs/screenshots/devices.png" alt="Peripheral devices and event timeline"> | <img src="docs/screenshots/drive-repair.png" alt="Drive repair with icon toolbar"> |
 | Inventory with VID/PID/serial, trust marks, event timeline | Diagnose, preview, back up, check the file system; icons name themselves on hover |
 
+## What is new in 3.1
+
+- **A fake folder can be finished, not just reported.** When the worm's
+  `Docusment` folder still holds hundreds of renamed documents, the USB results
+  now offer `Handle fake folder(s)`. After confirmation it quarantines any
+  remaining payload, restores Base64 document names, moves the whole folder to
+  `Recovered\<name> (recovered)` on the same drive and drops the fake folder
+  name. It refuses
+  while an executable is still inside, never overwrites and never deletes a
+  document; the rescan then shows the fake folder is gone.
+
 ## What is new in 3.0
 
 - **A standard-user GUI can still clean a whole drive.** When background
@@ -248,8 +259,11 @@ wrong path, and Explorer registry keys.
 - Inside a fake folder only executable payloads (`.exe`, `.dll`, `.dat`, `.lnk`,
   scripts, `desktop.ini`) are quarantined. Documents the worm renamed to Base64
   (`.doc`, `.docx`, `.pdf`, …) stay where they are, and such a folder is not
-  deleted. One ShieldGate process cleans a drive at a time, so the GUI and the
-  background watch never fight over the same files.
+  deleted. `Handle fake folder(s)` finishes the job: it restores the document
+  names and moves the folder to `Recovered\<name> (recovered)` on the same
+  drive, refusing while any payload remains. One ShieldGate process cleans a
+  drive at a time, so the GUI and the background watch never fight over the same
+  files.
 - Fix removes malicious Run/Winlogon/MountPoints/`.lnk` values, disables tasks,
   deletes WMI consumers and bindings and stops related processes. Registry
   repair runs `reg export` first and refuses to change a key if that backup
@@ -311,7 +325,9 @@ folder and a language (Vietnamese or English); the choice is stored in
    instead, click **Scan a folder…**.
 2. Clear the items you want to keep, then click **Quarantine**.
 3. If data is still hidden, use **Unhide files**. If documents inside a fake
-   folder have Base64 names, use **Restore original names**.
+   folder have Base64 names, use **Restore original names** or, to finish the
+   folder as well, **Handle fake folder(s)** (it restores names and moves the
+   folder to `Recovered` on the same drive).
 4. Restore quarantined files from **Overview**.
 5. Check **Devices** to see what is connected and mark familiar hardware.
 6. Use **Drive repair** only when a drive misbehaves; preview the backup first.
@@ -415,7 +431,7 @@ not required.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File build.ps1   # dist\ShieldGate.exe
-powershell -ExecutionPolicy Bypass -File test.ps1    # self-test, 81/81
+powershell -ExecutionPolicy Bypass -File test.ps1    # self-test, 83/83
 ```
 
 Every push and pull request runs the same build and self-test in GitHub Actions

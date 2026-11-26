@@ -24,7 +24,7 @@ namespace ShieldGate
         public static class App
         {
             public static string Name { get { return AppInfo.Name; } }
-            public static string Tagline { get { return T("Bảo vệ các cổng kết nối", "Protect your connection ports"); } }
+            public static string Tagline { get { return T("Bảo vệ kết nối an toàn", "Protect connections safely"); } }
             public static string WindowTitle { get { return AppInfo.Name; } }
         }
 
@@ -174,8 +174,8 @@ namespace ShieldGate
             }
             public static string FakeFolderKeptWarning(int n)
             {
-                return T("Còn " + n + " tệp dữ liệu trong thư mục giả (đã giữ lại, không cách ly).",
-                         n + " user files remain in the fake folder (kept, not quarantined).");
+                return T("Còn " + n + " tệp dữ liệu trong thư mục giả (đã giữ lại, không cách ly). Bấm “Xử lý thư mục giả” để chuyển chúng sang thư mục Recovered.",
+                         n + " user files remain in the fake folder (kept, not quarantined). Choose \"Handle fake folder\" to move them into the Recovered folder.");
             }
             public static string RenameBase64(int n)
             {
@@ -195,6 +195,40 @@ namespace ShieldGate
                          + (skipped > 0 ? " Bỏ qua " + skipped + " tệp vì tên đích đã tồn tại." : ""),
                          "Restored names for " + done + " files."
                          + (skipped > 0 ? " Skipped " + skipped + " because the target name already exists." : ""));
+            }
+            public static string RecoverFake(int n)
+            {
+                return T("Xử lý thư mục giả (" + n + ")", "Handle fake folder(s) (" + n + ")");
+            }
+            public static string RecoverFakeHint
+            {
+                get
+                {
+                    return T("Cách ly tệp chạy còn sót, khôi phục tên Base64, rồi chuyển tài liệu sang thư mục Recovered trên ổ và xoá tên thư mục giả. Không ghi đè, không xoá dữ liệu.",
+                             "Quarantine any remaining payload, restore Base64 names, then move the documents into a Recovered folder on the drive and remove the fake folder name. Nothing is overwritten or deleted.");
+                }
+            }
+            public static string RecoverDone(int folders, int files, int quarantined, int failed)
+            {
+                return T("Đã xử lý " + folders + " thư mục giả: chuyển " + files
+                         + " tệp dữ liệu sang thư mục Recovered, cách ly " + quarantined + " mục"
+                         + (failed > 0 ? ", " + failed + " lỗi" : "") + ".",
+                         "Handled " + folders + " fake folder(s): moved " + files
+                         + " user files into the Recovered folder, quarantined " + quarantined + " item(s)"
+                         + (failed > 0 ? ", " + failed + " failed" : "") + ".");
+            }
+            public static string RecoverFailed
+            {
+                get { return T("Không xử lý được thư mục giả. Xem nhật ký để biết lý do.",
+                               "The fake folder could not be handled. See the log for details."); }
+            }
+            public static string RecoverNeedsAdmin
+            {
+                get
+                {
+                    return T("Khi bảo vệ nền đang chạy, hãy mở ShieldGate bằng quyền quản trị để xử lý thư mục giả.",
+                             "With background protection running, open ShieldGate as administrator to handle the fake folder.");
+                }
             }
             public static string Scanning(string drive) { return T("Đang kiểm tra " + drive, "Scanning " + drive); }
             public static string ScanningSub(int files, string path)
@@ -1189,6 +1223,55 @@ namespace ShieldGate
                          "Kept " + kept + " user files in the fake folder on " + root
                          + " (only executable payloads were quarantined).");
             }
+            public static string FakeFolderBadPath
+            {
+                get { return T("Đường dẫn thư mục giả không hợp lệ.", "Invalid fake folder path."); }
+            }
+            public static string FakeFolderGone
+            {
+                get { return T("Thư mục giả không còn tồn tại.", "The fake folder no longer exists."); }
+            }
+            public static string FakeFolderPayloadLeft(string name)
+            {
+                return T("Còn tệp chạy trong thư mục giả (" + name + "); chưa chuyển dữ liệu.",
+                         "Executable payload is still inside the fake folder (" + name
+                         + "); nothing was moved.");
+            }
+            public static string FakeFolderNoDest
+            {
+                get
+                {
+                    return T("Không tạo được thư mục Recovered trên ổ.",
+                             "Could not create the Recovered folder on the drive.");
+                }
+            }
+            public static string FakeFolderRecovered(string rel, string dest, int files)
+            {
+                return T("Đã chuyển thư mục giả " + rel + " sang " + dest + " (" + files + " tệp).",
+                         "Moved fake folder " + rel + " to " + dest + " (" + files + " files).");
+            }
+            public static string FakeFolderRecoverFailed(string rel, string reason)
+            {
+                return T("Không xử lý được thư mục giả " + rel + ": " + reason,
+                         "Could not handle fake folder " + rel + ": " + reason);
+            }
+            public static string FakeFolderQuarantineFailed(string rel)
+            {
+                return T("Không cách ly hết tệp chạy trong thư mục giả " + rel
+                         + "; giữ nguyên để tránh mất dữ liệu.",
+                         "Not every executable inside fake folder " + rel
+                         + " could be quarantined; it was left in place to avoid data loss.");
+            }
+            public static string FakeFolderRecoverSummary(int folders, int files, int quarantined,
+                                                          int failed, string root)
+            {
+                return T("Xử lý thư mục giả trên " + root + ": " + folders + " thư mục, "
+                         + files + " tệp dữ liệu sang Recovered, cách ly " + quarantined
+                         + " mục, lỗi " + failed + ".",
+                         "Fake folder recovery on " + root + ": " + folders + " folder(s), "
+                         + files + " user files moved to Recovered, " + quarantined
+                         + " item(s) quarantined, " + failed + " error(s).");
+            }
             public static string Base64Renamed(string from, string to)
             {
                 return T("Khôi phục tên Base64: " + from + " → " + to,
@@ -1828,6 +1911,22 @@ namespace ShieldGate
                 }
             }
             public static string RenameOk(int n) { return T("Đổi tên " + n + " tệp", "Rename " + n + " files"); }
+            public static string RecoverFakeTitle(int n)
+            {
+                return T("Xử lý " + n + " thư mục giả?", "Handle " + n + " fake folder(s)?");
+            }
+            public static string RecoverFakeBody
+            {
+                get
+                {
+                    return T("ShieldGate sẽ cách ly nốt tệp chạy còn sót, khôi phục tên gốc cho tài liệu bị mã hoá Base64, rồi chuyển cả thư mục sang thư mục Recovered trên ổ và bỏ tên thư mục giả.\n\nKhông xoá tài liệu và không ghi đè: nếu tên đã tồn tại thì thư mục nhận thêm (1).",
+                             "ShieldGate will quarantine any remaining executable payload, restore original names for Base64 documents, then move the whole folder into a Recovered folder on the drive and drop the fake folder name.\n\nNo document is deleted and nothing is overwritten: name clashes get (1).");
+                }
+            }
+            public static string RecoverFakeOk(int n)
+            {
+                return T("Xử lý " + n + " thư mục", "Handle " + n + " folder(s)");
+            }
             public static string BackupTitle { get { return T("Sao lưu toàn bộ ổ?", "Back up the entire drive?"); } }
             public static string BackupBody(string drive, long files, long bytes)
             {
@@ -1969,6 +2068,8 @@ namespace ShieldGate
             public static string FakeFolderKeepsDocs { get { return T("thư mục giả: chỉ cách ly tệp chạy được, giữ tài liệu người dùng", "fake folder: quarantine only executable payloads and keep user documents"); } }
             public static string Base64Name { get { return T("khôi phục tên Base64: chỉ nhận tài liệu hợp lệ, không ghi đè, không chạm payload", "Base64 names: only valid documents, no overwrite, payload untouched"); } }
             public static string FolderScan { get { return T("quét một thư mục con: nhận diện tệp và đếm tài liệu giữ lại", "scan a subfolder: detects files and counts kept documents"); } }
+            public static string FakeFolderRecover { get { return T("xử lý thư mục giả: từ chối khi còn payload, đổi tên Base64 và chuyển sang Recovered", "handle a fake folder: refuse while payload remains, restore Base64 names and move it into Recovered"); } }
+            public static string FakeFolderFlow { get { return T("luồng đầy đủ: quét thấy thư mục giả, cách ly payload, chuyển sang Recovered, quét lại sạch", "full flow: detect the fake folder, quarantine payload, move it to Recovered and rescan clean"); } }
             public static string PipeProtocol { get { return T("pipe: khung tin 4 byte + JSON, từ chối phiên bản/lệnh/khóa/args sai và tin quá lớn", "pipe: 4-byte frame + JSON, rejects bad version/command/key/args and oversized messages"); } }
             public static string PipePin { get { return T("pipe: pin client theo đường dẫn + SHA-256, xoá pin thì từ chối", "pipe: pin client by path + SHA-256, clearing the pin denies it"); } }
             public static string PipeRoundtrip { get { return T("pipe: server + client roundtrip trả status.get", "pipe: server + client roundtrip answers status.get"); } }
