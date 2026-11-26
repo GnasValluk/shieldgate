@@ -1533,6 +1533,9 @@ khi nối GUI.
   `a2968b183e95a45fbdde06d79c5281af212c784e369b9452b04f1dd42fa90c42`;
   `test.ps1` **81/81**, `--selftest` **81/81**, `--version` in `ShieldGate 3.0.1`.
   Không đổi mã nên không phát hành bản mới; release 3.0.1 giữ nguyên.
+- **CI:** run `45735330479` trên `main` thành công; job `windows` success, job
+  `Sign release build` skipped đúng thiết kế vì chưa có biến SignPath.
+- **README:** thêm dòng Download / Build from source / Code signing policy ở đầu.
 - **Chưa làm được:** nộp đơn SignPath thay người dùng (cần tài khoản và email),
   tạo organization/project trên dashboard, thêm secret; các bước này ghi trong
   `CODE_SIGNING.md`.
