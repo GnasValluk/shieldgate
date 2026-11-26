@@ -5,7 +5,7 @@
 <h1 align="center">ShieldGate</h1>
 
 <p align="center">
-  <b>Malware guard for USB drives and peripherals on Windows.</b><br>
+  <b>Defensive malware guard for USB drives and peripherals on Windows.</b><br>
   Scans removable drives, removes shortcut-virus traces, repairs the damage those viruses leave behind.
 </p>
 
@@ -25,6 +25,9 @@
 One portable `.exe`. No installer, no drivers, no telemetry, and no network access
 unless you turn on the optional VirusTotal lookup and run `--vt` yourself.
 Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
+
+**Download:** [latest release](https://github.com/GnasValluk/shieldgate/releases/latest) ·
+[build from source](#build) · [code signing policy](CODE_SIGNING.md)
 
 ## Why
 
