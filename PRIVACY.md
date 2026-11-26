@@ -103,7 +103,7 @@ stored. ShieldGate does not contact VirusTotal in the background.
 ## Contact
 
 Bugs and privacy questions: open an issue at
-<https://github.com/GnasValluk/shieldgate-usb-guard/issues>.
+<https://github.com/GnasValluk/shieldgate/issues>.
 
 ## Named pipe (3.0, off by default)
 

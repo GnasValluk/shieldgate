@@ -1499,6 +1499,9 @@ khi nối GUI.
   Chưa bấm thử bằng tay trong phiên này; cần người dùng xác nhận một lần bấm X.
 - **Phát hành 3.0.1:** tăng `AppInfo.Version`/`AssemblyInfo` lên 3.0.1, tag
   `v3.0.1`, GitHub release kèm exe và ghi chú "cần xác nhận trên máy thật".
+- **Đổi tên repo:** `shieldgate-usb-guard` → `shieldgate` (người dùng đồng ý);
+  GitHub chuyển hướng URL cũ, tag/release giữ nguyên; cập nhật badge README,
+  link `PRIVACY.md` và mẫu issue.
 - **Mẫu issue:** `.github/ISSUE_TEMPLATE/bug_report.yml`,
   `feature_request.yml`, `config.yml`; hỏi phiên bản, Windows, quyền, khu vực,
   bước tái hiện và nhắc không đính mẫu virus/dữ liệu cá nhân; nêu rõ việc ngoài

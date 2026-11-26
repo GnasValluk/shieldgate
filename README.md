@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/GnasValluk/shieldgate-usb-guard/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/GnasValluk/shieldgate-usb-guard/build.yml?branch=main&label=build&style=flat-square" alt="Build status"></a>
-  <a href="https://github.com/GnasValluk/shieldgate-usb-guard/releases/latest"><img src="https://img.shields.io/github/v/release/GnasValluk/shieldgate-usb-guard?style=flat-square&color=1f5e3d" alt="Latest release"></a>
+  <a href="https://github.com/GnasValluk/shieldgate/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/GnasValluk/shieldgate/build.yml?branch=main&label=build&style=flat-square" alt="Build status"></a>
+  <a href="https://github.com/GnasValluk/shieldgate/releases/latest"><img src="https://img.shields.io/github/v/release/GnasValluk/shieldgate?style=flat-square&color=1f5e3d" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/license-MIT-1f5e3d?style=flat-square" alt="MIT license">
   <img src="https://img.shields.io/badge/platform-Windows%207%2B-0078d4?style=flat-square" alt="Windows 7 or later">
   <img src="https://img.shields.io/badge/.NET%20Framework-4.0-5b6472?style=flat-square" alt=".NET Framework 4.0">

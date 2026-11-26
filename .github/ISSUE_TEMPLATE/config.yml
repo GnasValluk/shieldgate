@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Privacy and data handling
-    url: https://github.com/GnasValluk/shieldgate-usb-guard/blob/main/PRIVACY.md
+    url: https://github.com/GnasValluk/shieldgate/blob/main/PRIVACY.md
     about: What ShieldGate writes to disk, what it logs and when it uses the network.
   - name: Usage, limits and command line
-    url: https://github.com/GnasValluk/shieldgate-usb-guard#readme
+    url: https://github.com/GnasValluk/shieldgate#readme
     about: Read this before reporting that a drive or a device was not cleaned.
