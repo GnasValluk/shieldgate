@@ -359,7 +359,7 @@ Phát hành: commit + push `main`, tag `v2.0`, GitHub release kèm
 
 Đã làm:
 
-- Đọc `ShieldGate 2.0 — Phân tích mã nguồn và lộ trình hoàn thiện.md` và kiểm chứng
+- Đọc `docs/analysis-2.0.md` (bản phân tích 2.0) và kiểm chứng
   lại từng kết luận bằng mã hiện tại. Xác nhận đúng A1–A9, B1–B12, phần nợ kỹ thuật
   và phần còn thiếu; không phát hiện kết luận nào sai hướng.
 - Đính chính ba chi tiết nhỏ: `AdsDetector` dùng `TreeItem.Size` (không phải
@@ -1506,6 +1506,33 @@ khi nối GUI.
   `feature_request.yml`, `config.yml`; hỏi phiên bản, Windows, quyền, khu vực,
   bước tái hiện và nhắc không đính mẫu virus/dữ liệu cá nhân; nêu rõ việc ngoài
   phạm vi (MBR, format, tự tắt thiết bị, mạng).
-- **Còn lại:** checklist máy thật, ký số release, đổi tên repo `shieldgate`,
-  Raw Input + ETW cho BadUSB, YARA. Các mục MBR/TestDisk/format vẫn cố ý không
-  làm.
+- **Còn lại:** checklist máy thật, ký số release, Raw Input + ETW cho BadUSB,
+  YARA. Các mục MBR/TestDisk/format vẫn cố ý không làm.
+
+### 2026-11-26 — Dọn tài liệu, chuẩn bị ký số SignPath, cập nhật metadata
+
+- **Dọn tệp:** chuyển bản phân tích 2.0 từ gốc repo vào
+  `docs/analysis-2.0.md`, cập nhật lời dẫn trong `plan.md` và
+  `docs/roadmap-2.1.md`; gốc repo chỉ còn `README.md`, `PRIVACY.md`, `LICENSE`,
+  `AGENTS.md`, `plan.md` và `CODE_SIGNING.md`. Không xoá lịch sử hay tài liệu
+  thiết kế đang được tham chiếu.
+- **Ký số:** thêm `CODE_SIGNING.md` nêu phạm vi ký (chỉ `ShieldGate.exe` phát
+  hành từ tag `v*`), quy trình build trên GitHub Actions, mẫu artifact
+  configuration ZIP + PE, tên biến/secret, cách kiểm tra `Get-AuthenticodeSignature`
+  và mục đích phòng thủ để nộp SignPath Foundation.
+- **Workflow:** `.github/workflows/build.yml` thêm job `sign` chỉ chạy với tag
+  `v*` khi biến `SIGNPATH_PROJECT_SLUG` đã đặt; tải artifact ID từ job build,
+  gửi SignPath, tải bản đã ký, đăng artifact `ShieldGate-signed` và gắn vào
+  release nếu release đã tồn tại. Chưa cấu hình biến/secret nên job bị bỏ qua,
+  CI hiện tại không đổi.
+- **README:** sửa số self-test 72/72 → 81/81; thêm đoạn build CI + ký số; mục
+  Limits ghi rõ bản phát hành còn chưa ký cho tới khi SignPath duyệt.
+- **GitHub metadata:** cập nhật mô tả, homepage và topic (USB security, removable
+  media, shortcut virus, BadUSB, WinForms, offline, portable, privacy...).
+- **Kiểm tra:** build 658 KB, SHA256
+  `a2968b183e95a45fbdde06d79c5281af212c784e369b9452b04f1dd42fa90c42`;
+  `test.ps1` **81/81**, `--selftest` **81/81**, `--version` in `ShieldGate 3.0.1`.
+  Không đổi mã nên không phát hành bản mới; release 3.0.1 giữ nguyên.
+- **Chưa làm được:** nộp đơn SignPath thay người dùng (cần tài khoản và email),
+  tạo organization/project trên dashboard, thêm secret; các bước này ghi trong
+  `CODE_SIGNING.md`.

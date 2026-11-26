@@ -11,6 +11,8 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -24,7 +26,52 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File ./test.ps1
 
       - name: Upload executable
+        id: upload
         uses: actions/upload-artifact@v4
         with:
           name: ShieldGate
           path: dist/ShieldGate.exe
+          if-no-files-found: error
+
+  sign:
+    name: Sign release build
+    needs: windows
+    # SignPath is only used for release tags and only after the project has been
+    # accepted and the repository variables exist. Until then this job is skipped
+    # and the build still produces an unsigned artifact.
+    if: startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_PROJECT_SLUG != ''
+    runs-on: windows-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Submit to SignPath
+        id: sign
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ needs.windows.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Upload signed executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShieldGate-signed
+          path: signed/ShieldGate.exe
+          if-no-files-found: error
+
+      - name: Attach signed executable to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "${{ github.ref_name }}" "signed/ShieldGate.exe" --clobber --repo "${{ github.repository }}"
+          } else {
+            Write-Host "Release ${{ github.ref_name }} does not exist yet; download the signed artifact from this run."
+          }

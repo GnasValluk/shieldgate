@@ -412,8 +412,14 @@ not required.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File build.ps1   # dist\ShieldGate.exe
-powershell -ExecutionPolicy Bypass -File test.ps1    # self-test, 72/72
+powershell -ExecutionPolicy Bypass -File test.ps1    # self-test, 81/81
 ```
+
+Every push and pull request runs the same build and self-test in GitHub Actions
+(`.github/workflows/build.yml`). Release tags can additionally be signed through
+the SignPath Foundation; the policy, the exact files covered and the verification
+steps are in [CODE_SIGNING.md](CODE_SIGNING.md). Until that programme is active,
+release files are unsigned and the SHA-256 in the release notes is the check.
 
 The source is C# 5 and WinForms. `src\core` holds the logic, `src\ui` the
 interface. Every user-facing string is in `src\ui\Strings.cs` in both languages,
@@ -471,8 +477,9 @@ counter and the BadUSB decision matrix.
   the pinned `bin\ShieldGate.exe` is rejected.
 - A scan can stop early at 150,000 files or 300 seconds.
 - No network, optical or MTP *scanning*; MTP devices are inventory only.
-- The release is unsigned. SmartScreen may warn; compare the SHA256 before
-  running.
+- The release is unsigned until the SignPath Foundation application is accepted.
+  SmartScreen may warn; compare the SHA-256 in the release notes before running.
+  The signing policy is in [CODE_SIGNING.md](CODE_SIGNING.md).
 
 ## License
 

@@ -33,9 +33,13 @@ src/core/     lõi, không phụ thuộc WinForms
 src/ui/       giao diện, Strings.cs, self-test entry
 tests/        TestMain.cs (gọi SelfTest.Run)
 assets/       icon
+docs/         thiết kế, lộ trình, phân tích 2.0, ảnh chụp
 legacy/       bản PowerShell cũ, không sửa
 viruts/       mẫu thật, KHÔNG commit (đã gitignore)
 ```
+
+`CODE_SIGNING.md` là chính sách ký số và phạm vi file được ký; không đưa khoá
+bí mật vào repo, chỉ dùng biến/secret của GitHub Actions.
 
 Luồng chính:
 
@@ -144,4 +148,6 @@ Luồng chính:
 - YARA (VirusTotal opt-in đã có từ 2.2).
 - Sửa boot sector/MBR có đối chiếu mẫu sạch.
 - TestDisk/PhotoRec, file carving, format ổ.
-- Ký số release.
+- Ký số release: đã có `CODE_SIGNING.md` và job `sign` trong workflow; còn chờ
+  SignPath Foundation duyệt, tạo project/artifact configuration và thêm biến +
+  secret.

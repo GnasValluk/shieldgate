@@ -1,6 +1,6 @@
 # ShieldGate — Lộ trình hoàn thiện 2.1 → 3.0
 
-> Nguồn: `ShieldGate 2.0 — Phân tích mã nguồn và lộ trình hoàn thiện.md` (17/11/2026).
+> Nguồn: [`docs/analysis-2.0.md`](analysis-2.0.md) (17/11/2026).
 > Tệp này biến bản phân tích thành việc làm cụ thể: mỗi mục có điểm sửa trong mã,
 > cách làm, kiểm thử và tiêu chí xong. `plan.md` vẫn là nơi ghi nhật ký tiến độ.
 
