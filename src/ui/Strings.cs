@@ -418,6 +418,14 @@ namespace ShieldGate
                 if (code.StartsWith("hidden-ads=", StringComparison.Ordinal)) return HiddenAds(code.Substring(11));
                 if (code.StartsWith("sideload-dll=", StringComparison.Ordinal)) return SideloadDll(code.Substring(13));
                 if (code.StartsWith("office-macro=", StringComparison.Ordinal)) return OfficeMacro(code.Substring(13));
+                if (code.StartsWith("shadows-hidden-document=", StringComparison.Ordinal)) return ShadowsHiddenDocument(code.Substring(24));
+                if (code == "padded-args") return PaddedArgs;
+                if (code == "drive-shortcut-name") return DriveShortcutName;
+                if (code == "autorun-hardened") return AutorunHardened;
+                if (code == "autorun-icon") return AutorunIcon;
+                if (code.StartsWith("pe-as-data=", StringComparison.Ordinal)) return PeAsData(code.Substring(11));
+                if (code.StartsWith("fake-recycle-bin=", StringComparison.Ordinal)) return FakeRecycleBin(code.Substring(17));
+                if (code == "root-decoy-exe") return RootDecoyExe;
                 return "";
             }
 
@@ -479,6 +487,48 @@ namespace ShieldGate
             {
                 return T("Tài liệu Office có macro (" + name + "). Chỉ gắn cờ, không cách ly; chỉ mở nếu bạn tin nguồn.",
                          "Office document contains macros (" + name + "). Flagged only, not quarantined; open it only if you trust the source.");
+            }
+
+            // ---------------------------------------------------------- 3.2
+            public static string ShadowsHiddenDocument(string name)
+            {
+                return T("Có tài liệu bị ẩn cùng tên (" + name + ") nhưng shortcut không mở tài liệu đó — chiêu giấu tài liệu thật để bạn bấm nhầm.",
+                         "A hidden document with the same name (" + name + ") exists, but the shortcut does not open it — a trick that hides the real document so you click the wrong file.");
+            }
+            public static string PaddedArgs
+            {
+                get { return T("Tham số shortcut dài bất thường hoặc bị đệm khoảng trắng/ký tự vô hình để che lệnh thật.",
+                               "Shortcut arguments are unusually long or padded with spaces/invisible characters to hide the real command."); }
+            }
+            public static string DriveShortcutName
+            {
+                get { return T("Tên shortcut giả làm ổ đĩa (\"Removable Disk (F:)\", \"Copy of 2\"…) để bạn tưởng là biểu tượng ổ.",
+                               "Shortcut name imitates a drive (\"Removable Disk (F:)\", \"Copy of 2\"…) so it looks like the drive icon."); }
+            }
+            public static string AutorunHardened
+            {
+                get { return T("autorun.inf dùng shellexecute / shell\\...\\command / USEAUTOPLAY=1 — cấu trúc virus dùng để tự chạy.",
+                               "autorun.inf uses shellexecute / shell\\...\\command / USEAUTOPLAY=1 — the structure malware uses to auto-run."); }
+            }
+            public static string AutorunIcon
+            {
+                get { return T("autorun.inf đặt action=Open và icon=shell32.dll,4 — dấu hiệu họ virus Gamarue hay dùng.",
+                               "autorun.inf sets action=Open and icon=shell32.dll,4 — a sign used by the Gamarue family."); }
+            }
+            public static string PeAsData(string name)
+            {
+                return T("Tệp \"" + name + "\" mang đuôi dữ liệu nhưng bên trong là chương trình Windows (PE) — thường là payload bị đổi tên.",
+                         "File \"" + name + "\" has a data extension but contains a Windows program (PE) — usually a renamed payload.");
+            }
+            public static string FakeRecycleBin(string name)
+            {
+                return T("Thư mục \"" + name + "\" giả làm thùng rác của Windows và chứa tệp chạy (PlugX hay dùng). Nội dung sẽ được cách ly.",
+                         "Folder \"" + name + "\" pretends to be the Windows Recycle Bin and contains executables (used by PlugX). Its contents will be quarantined.");
+            }
+            public static string RootDecoyExe
+            {
+                get { return T("Tệp chạy tên chung chung ở gốc ổ (usb.exe, update.exe) — kiểm tra kỹ trước khi mở.",
+                               "Executable with a generic name at the drive root (usb.exe, update.exe) — check carefully before opening."); }
             }
         }
 
@@ -2026,6 +2076,9 @@ namespace ShieldGate
             public static string FakeFolderDetected { get { return T("nhận ra cấu trúc virus: shortcut cmd + thư mục Docusment + payload", "recognise the virus structure: cmd shortcut + Docusment folder + payload"); } }
             public static string CommandVerdict { get { return T("bắt lệnh cmd bọc payload, không báo nhầm shortcut hợp lệ", "flag a cmd command wrapping a payload without false-positive shortcuts"); } }
             public static string PcFixWorks { get { return T("cách ly thư mục giả và shortcut khi sửa máy", "quarantine the fake folder and shortcut during machine fix"); } }
+            public static string NewRuleShadowDoc { get { return T("bắt tài liệu ẩn cùng tên và tên shortcut giả ổ đĩa", "catch a hidden same-name document and a drive-named shortcut"); } }
+            public static string NewRulePeData { get { return T("bắt payload PE đổi đuôi .dat và autorun shellexecute", "catch a PE payload renamed to .dat and an autorun shellexecute"); } }
+            public static string NewRuleFakeRecycle { get { return T("bắt thư mục giả thùng rác có payload", "catch a fake Recycle Bin folder holding a payload"); } }
             public static string FakeUsb { get { return T("tạo được USB giả và shortcut thử", "create a fake USB drive and test shortcuts"); } }
             public static string Detected { get { return T("phát hiện đúng 3 mục độc hại", "detect exactly 3 malicious items"); } }
             public static string NoFalsePositive { get { return T("shortcut sạch không bị báo nhầm", "clean shortcut is not reported"); } }

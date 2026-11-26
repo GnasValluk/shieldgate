@@ -243,6 +243,43 @@ chấp nhận được, và có thêm khoá mới vào `rules.json` hay không.
 
 Trong lúc chờ: chỉ sửa lỗi và tài liệu; không thêm tính năng lớn.
 
+### 6.2 Bản làm giàu luật 3.2 (đang làm, 2026-11-26)
+
+Bắt đầu từ hai tài liệu nháp của chủ dự án (bộ rule ngoại vi và bảo vệ
+Registry). Hai tài liệu chưa đầy đủ và chưa đối chiếu mã, nên chỉ triển khai
+nhóm có tín hiệu mạnh, ít báo nhầm; mọi mục còn lại giữ ở dạng ghi chú.
+
+Đã làm trong đợt 1 (ổ rời):
+
+- **A1** — shortcut cùng tên với một tài liệu đang bị ẩn nhưng không mở chính
+  tài liệu đó: `shadows-hidden-document`, `Strong`.
+- **A2** — tên shortcut giả ổ đĩa (`Removable Disk (F:)`, `Copy of 2`,
+  `<nhãn> (16 GB)`): `drive-shortcut-name`, mẫu trong `rules.json`.
+- **B3** — tham số shortcut dài bất thường hoặc bị đệm khoảng trắng/ký tự vô
+  hình: `padded-args`, chỉ cộng điểm.
+- **C2** — tệp đuôi dữ liệu (`.dat`, `.ini`, `.db`…) nhưng có header PE:
+  `pe-as-data`, `Strong`, chỉ xét gốc ổ/thư mục ẩn/thư mục giả; thư mục giả
+  `RECYCLER.BIN`/`RECYCLE.BIN` có payload: `fake-recycle-bin`, `Strong`; chỉ
+  payload bị cách ly, tài liệu người dùng giữ tại chỗ.
+- **D1** — `autorun.inf` có `shellexecute`, `shell\…\command`, `USEAUTOPLAY=1`
+  hoặc cặp `action=Open` + `icon=shell32.dll,4`: `autorun-hardened` /
+  `autorun-icon`; chỉ payload thật mới `Strong` và tự cách ly.
+- **A5 (một phần)** — `usb.exe`, `update.exe` ở gốc ổ: `root-decoy-exe`, chỉ
+  cảnh báo.
+
+Kỹ thuật: `rules.json` lên **phiên bản 7** (tệp cũ được merge, không ghi đè);
+`peDataExts`, `fakeRecycleNames`, `rootDecoyExes`, `driveNamePatterns`,
+`autorunPatterns` là khoá mới. Detector mới nằm trong `Detectors.cs`
+(`PeAsDataDetector`, `FakeRecycleDirectoryDetector`, `FileMagic`); luật LNK và
+autorun nằm ở `Detect.cs`; câu lý do Việt/Anh ở `Strings.cs`; self-test **86**
+mục.
+
+Cố ý **không** làm trong đợt này: tự sửa khoá ẩn/hiện của Explorer (xung đột
+với tài liệu Registry: chỉ báo thay đổi so với ảnh chụp, không ép mặc định);
+hàng đợi Defender exclusion; cờ file-infector; YARA; mọi thay đổi cần quyền
+quản trị. Các mục B1/B2 (LOLBin trong LNK) và F1 để đợt sau vì dễ báo nhầm
+shortcut hợp lệ.
+
 ## 7. Nhật ký tiến độ
 
 > Quy ước: mỗi mục ghi ngày, việc đã làm, bằng chứng (lệnh + kết quả), và
@@ -1633,3 +1670,35 @@ khi nối GUI.
   còn chờ xác nhận trên ổ thật và ký số.
 - Không đổi mã nguồn trong lượt này; số self-test, phiên bản và hành vi giữ
   nguyên như mục 3.1.0 ở trên.
+
+### 2026-11-26 — Làm giàu luật ngoại vi, đợt 1 (3.2.0)
+
+- Đối chiếu hai tài liệu nháp với mã hiện có; chốt đợt 1 gồm A1, A2, B3, C2,
+  D1 và một phần A5 (xem **mục 6.2**). Không làm F9 tự sửa khoá Explorer vì
+  trái với tài liệu Registry (chỉ báo thay đổi so với ảnh chụp).
+- `src/core/Rules.cs`: `CurrentVersion` 6 → 7; thêm `peDataExts`,
+  `fakeRecycleNames`, `rootDecoyExes`, `driveNamePatterns`,
+  `autorunPatterns`, trọng số mới và bản `DefaultJson` tương ứng. Tệp cũ được
+  merge, không ghi đè; `IsFakeRecycleName` chỉ coi `$RECYCLE.BIN.` (dấu chấm
+  cuối) là giả, không coi `$RECYCLE.BIN` thật.
+- `src/core/Detect.cs`: `HiddenDocumentShadow`, `PaddedArgs`, mẫu tên ổ đĩa và
+  `AutorunVerdict(path, out reasons)`; giữ ngưỡng nội bộ để shortcut hợp lệ
+  không bị bắt.
+- `src/core/Detectors.cs`: `PeAsDataDetector`, `FakeRecycleDirectoryDetector`,
+  `FileMagic.LooksPe`; kiểm tra PE chỉ đọc 64 byte đầu + `e_lfanew`, giới hạn
+  phạm vi gốc ổ/ẩn/thư mục giả.
+- `src/core/Scan.cs`: autorun dùng danh sách lý do; directory finding có
+  `High` theo `Strong`; `ApplyLocked` cách ly cây payload cho mục là thư mục
+  (không gọi `Quarantine.Add` lên thư mục); thêm `root-decoy-exe`.
+- `src/ui/Strings.cs`: câu lý do Việt/Anh cho 8 mã mới và 3 tên self-test.
+- `src/ui/SelfTest.cs`: thêm 3 mục (86 tổng): tài liệu ẩn cùng tên + tên ổ đĩa,
+  PE đổi đuôi + autorun shellexecute, thùng rác giả có payload; mục badusb đọc
+  tệp phiên bản 6 nay so với `CurrentVersion`.
+- `README.md`: mục "What is new in 3.2" và danh sách phát hiện; `AppInfo.Version`
+  và `AssemblyInfo` lên **3.2.0**.
+- Kiểm tra: `build.ps1` → `dist\ShieldGate.exe` 686 KB, SHA256
+  `fc219dd48f253a05e006a368c9b4c2591905dcdf66c0f78bf9c609d25bc56a1f`;
+  `test.ps1` → `Đạt 86/86 phép kiểm tra.`, exit 0.
+- Còn lại: kiểm chứng trên ổ thật `E:\DATA_VAZG4SVR`; đợt sau B1/B2 (LOLBin
+  trong LNK), F1 (Defender exclusion), E1 (cờ file-infector) và phần Registry
+  khi tài liệu đầy đủ.

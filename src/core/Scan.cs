@@ -259,11 +259,14 @@ namespace ShieldGate
                 }
                 else if (isAutorun)
                 {
-                    if (ShieldGate.Detect.AutorunVerdict(f.Path))
+                    List<string> why;
+                    if (ShieldGate.Detect.AutorunVerdict(f.Path, out why))
                     {
                         item = MakeItem(f, UsbKind.Autorun);
-                        item.Codes.Add("autorun-payload");
-                        item.High = true;
+                        item.Codes.AddRange(why);
+                        // Chi co payload that su moi du de bao ve nen tu cach ly;
+                        // cau truc shellexecute/USEAUTOPLAY chi cong diem.
+                        item.High = why.Contains("autorun-payload");
                     }
                 }
                 else if (isRootExe)
@@ -274,8 +277,18 @@ namespace ShieldGate
                 }
                 else if (f.Depth == 0 && (ext == ".exe" || ext == ".com" || ext == ".pif" || ext == ".scr"))
                 {
-                    result.Warnings.Add(f.Name);
-                    rootExes.Add(f);
+                    if (rules.IsRootDecoyExe(f.Name))
+                    {
+                        // Ten chung chung o goc o (usb.exe, update.exe): mot dau
+                        // hieu, chua du de tu cach ly.
+                        item = MakeItem(f, UsbKind.RootExe);
+                        item.Codes.Add("root-decoy-exe");
+                    }
+                    else
+                    {
+                        result.Warnings.Add(f.Name);
+                        rootExes.Add(f);
+                    }
                 }
 
                 // Detector 2.0 chỉ chạy khi các luật 1.0 chưa kết luận, để không
@@ -347,7 +360,9 @@ namespace ShieldGate
                         di.Codes.Add(fd.Code + (string.IsNullOrEmpty(fd.Detail) ? "" : "=" + fd.Detail));
                         di.Score = fd.Score;
                         di.FlagOnly = fd.FlagOnly;
-                        di.High = false;
+                        // Thư mục giả có payload (thùng rác giả) đủ mạnh để bảo vệ
+                        // nền xử lý: ApplyLocked chỉ cách ly payload bên trong.
+                        di.High = fd.Strong && !fd.FlagOnly && fd.Score >= rules.ScoreThreshold;
                         try { di.Size = new FileInfo(path).Length; } catch { }
                         result.Items.Add(di);
                         result.Other++;
@@ -436,6 +451,7 @@ namespace ShieldGate
                 if (r.StartsWith("args-relative-exe=", StringComparison.OrdinalIgnoreCase)) return true;
                 if (r.StartsWith("args-drive-exe=", StringComparison.OrdinalIgnoreCase)) return true;
                 if (r == "shadows-hidden-folder") return true;
+                if (r.StartsWith("shadows-hidden-document=", StringComparison.OrdinalIgnoreCase)) return true;
                 if (r == "target-in-hidden-folder") return true;
                 if (r == "target-in-fake-folder") return true;
             }
@@ -512,6 +528,16 @@ namespace ShieldGate
                 if (it.Kind == UsbKind.HiddenFolder)
                 {
                     folders.Add(it.FolderName);
+                    if (progress != null) progress(i + 1);
+                    continue;
+                }
+                // Detector theo thu muc (thung rac gia...) tra ve duong dan thu muc:
+                // cach ly payload ben trong, giu tai lieu nguoi dung tai cho.
+                if (it.Kind == UsbKind.Other && WinPath.IsDir(WinPath.Ext(it.Path)))
+                {
+                    int keptHere = 0;
+                    done += QuarantineTree(it.Path, scan.Root, batch, ref failed, ref keptHere);
+                    kept += keptHere;
                     if (progress != null) progress(i + 1);
                     continue;
                 }

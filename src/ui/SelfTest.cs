@@ -36,7 +36,7 @@ namespace ShieldGate
             Policy.PauseAllowed = false;
 
             int passed = 0;
-            int total = 83;
+            int total = 86;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -251,6 +251,102 @@ namespace ShieldGate
             catch (Exception e)
             {
                 check(S.Selftest.PcFixWorks, false);
+                Console.WriteLine("  " + e.Message);
+            }
+
+            // 9f. Rule 3.2: tài liệu bị ẩn cùng tên shortcut, và tên shortcut
+            //     giả làm ổ đĩa.
+            try
+            {
+                string usb4 = Path.Combine(root, "usb4");
+                Directory.CreateDirectory(usb4);
+                string doc = Path.Combine(usb4, "Bao cao.docx");
+                File.WriteAllText(doc, "noi dung", new UTF8Encoding(false));
+                File.SetAttributes(doc, FileAttributes.Hidden);
+                string shadow = Path.Combine(usb4, "Bao cao.lnk");
+                string driveName = Path.Combine(usb4, "Removable Disk (F).lnk");
+                string notepad = Path.Combine(Environment.SystemDirectory, "notepad.exe");
+                bool made = MakeShortcut(shadow, notepad, "")
+                            && MakeShortcut(driveName, notepad, "");
+
+                bool sawShadow = false, sawDriveName = false;
+                UsbScanResult s4 = UsbScan.Detect(usb4, null, null);
+                foreach (UsbItem it in s4.Items)
+                {
+                    if (string.Equals(it.Path, shadow, StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (string c in it.Codes)
+                            if (c.StartsWith("shadows-hidden-document=", StringComparison.Ordinal)
+                                && c.Contains("Bao cao.docx")) sawShadow = true;
+                        sawShadow = sawShadow && it.High;
+                    }
+                    if (string.Equals(it.Path, driveName, StringComparison.OrdinalIgnoreCase)
+                        && it.Codes.Contains("drive-shortcut-name")) sawDriveName = true;
+                }
+                check(S.Selftest.NewRuleShadowDoc, made && sawShadow && sawDriveName);
+            }
+            catch (Exception e)
+            {
+                check(S.Selftest.NewRuleShadowDoc, false);
+                Console.WriteLine("  " + e.Message);
+            }
+
+            // 9g. Rule 3.2: PE đổi đuôi .dat và autorun shellexecute/USEAUTOPLAY.
+            try
+            {
+                string usb5 = Path.Combine(root, "usb5");
+                Directory.CreateDirectory(usb5);
+                byte[] pe = new byte[512];
+                pe[0] = (byte)'M'; pe[1] = (byte)'Z';
+                BitConverter.GetBytes(0x80).CopyTo(pe, 0x3C);
+                pe[0x80] = (byte)'P'; pe[0x81] = (byte)'E';
+                pe[0x82] = 0; pe[0x83] = 0;
+                string dat = Path.Combine(usb5, "payload.dat");
+                File.WriteAllBytes(dat, pe);
+                File.WriteAllText(Path.Combine(usb5, "autorun.inf"),
+                    "[autorun]\r\nshellexecute=payload.dat\r\nuseautoplay=1\r\n",
+                    new UTF8Encoding(true));
+
+                bool sawPe = false, sawHardened = false;
+                UsbScanResult s5 = UsbScan.Detect(usb5, null, null);
+                foreach (UsbItem it in s5.Items)
+                {
+                    if (string.Equals(it.Path, dat, StringComparison.OrdinalIgnoreCase)
+                        && it.Codes.Contains("pe-as-data=payload.dat")) sawPe = it.High;
+                    if (it.Kind == UsbKind.Autorun && it.Codes.Contains("autorun-hardened")
+                        && !it.High) sawHardened = true;
+                }
+                check(S.Selftest.NewRulePeData, sawPe && sawHardened);
+            }
+            catch (Exception e)
+            {
+                check(S.Selftest.NewRulePeData, false);
+                Console.WriteLine("  " + e.Message);
+            }
+
+            // 9h. Rule 3.2: thư mục giả thùng rác có payload bị bắt.
+            try
+            {
+                string usb6 = Path.Combine(root, "usb6");
+                string fakeBin = Path.Combine(usb6, "RECYCLER.BIN");
+                Directory.CreateDirectory(fakeBin);
+                File.WriteAllBytes(Path.Combine(fakeBin, "1.exe"), new byte[2048]);
+                bool sawBin = false, highBin = false;
+                UsbScanResult s6 = UsbScan.Detect(usb6, null, null);
+                foreach (UsbItem it in s6.Items)
+                {
+                    if (string.Equals(it.Path, fakeBin, StringComparison.OrdinalIgnoreCase)
+                        && it.Codes.Contains("fake-recycle-bin=RECYCLER.BIN"))
+                    {
+                        sawBin = true;
+                        highBin = it.High;
+                    }
+                }
+                check(S.Selftest.NewRuleFakeRecycle, sawBin && highBin);
+            }
+            catch (Exception e)
+            {
+                check(S.Selftest.NewRuleFakeRecycle, false);
                 Console.WriteLine("  " + e.Message);
             }
 
@@ -2310,7 +2406,7 @@ namespace ShieldGate
                     new UTF8Encoding(false));
                 Rules.Reload();
                 RulesData d = Rules.Current;
-                badUsbCfg = d.Version == 6 && d.BadUsbEnabled
+                badUsbCfg = d.Version == RulesData.CurrentVersion && d.BadUsbEnabled
                          && d.BadUsbNewDeviceSeconds == 3600
                          && d.BadUsbMinEvents == 5
                          && d.BadUsbEventsPerSecond == 10000

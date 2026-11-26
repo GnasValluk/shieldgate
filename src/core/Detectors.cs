@@ -58,12 +58,14 @@ namespace ShieldGate
             new NtlmLeakDetector(),
             new DesktopIniDetector(),
             new AdsDetector(),
-            new OfficeMacroDetector()
+            new OfficeMacroDetector(),
+            new PeAsDataDetector()
         };
 
         private static readonly IDirectoryDetector[] PerDirectory =
         {
-            new SideloadDirectoryDetector()
+            new SideloadDirectoryDetector(),
+            new FakeRecycleDirectoryDetector()
         };
 
         public static List<Finding> InspectFile(ScanContext context, TreeItem file)
@@ -323,6 +325,108 @@ namespace ShieldGate
                 output.Add(x);
                 break;
             }
+        }
+    }
+
+    // Tep duoi "du lieu" (.dat, .ini, .db...) nhung ben trong la PE. Virus
+    // PlugX/SnakeDisk doi ten DLL/payload thanh .dat de qua mat nguoi dung.
+    // Chi xet o goc o, tep/thu muc an, hoac thu muc gia: tranh quet ca o.
+    internal sealed class PeAsDataDetector : IDetector
+    {
+        public string Name { get { return "pe-as-data"; } }
+
+        public void Inspect(ScanContext c, TreeItem f, List<Finding> output)
+        {
+            if (f.IsDir || f.Size < 0x40) return;
+            if (!c.Rules.IsPeDataExt(Path.GetExtension(f.Name))) return;
+            if (!InScope(c.Rules, f)) return;
+            if (!FileMagic.LooksPe(f.Path)) return;
+
+            Finding x = new Finding("pe-as-data", f.Name, c.Rules.Weight("pe-as-data"));
+            x.Strong = true;
+            output.Add(x);
+        }
+
+        private static bool InScope(RulesData rules, TreeItem f)
+        {
+            if (f.Depth == 0) return true;
+            if ((f.Attrs & (FileAttributes.Hidden | FileAttributes.System)) != 0) return true;
+            try
+            {
+                string dir = Path.GetDirectoryName(f.Path);
+                if (string.IsNullOrEmpty(dir)) return false;
+                if ((File.GetAttributes(dir) & (FileAttributes.Hidden | FileAttributes.System)) != 0)
+                    return true;
+                string name = Path.GetFileName(dir);
+                if (rules.IsFakeRecycleName(name)) return true;
+                return UsbRestore.IsMisspelledFolder(name);
+            }
+            catch { return false; }
+        }
+    }
+
+    // Thu muc gia dang thung rac cua Windows (PlugX dung "RECYCLER.BIN")
+    // va ben trong co payload. Khong dung ten "$RECYCLE.BIN" that.
+    internal sealed class FakeRecycleDirectoryDetector : IDirectoryDetector
+    {
+        public string Name { get { return "fake-recycle-bin"; } }
+
+        public void Inspect(ScanContext c, string directory, List<Finding> output)
+        {
+            string name = Path.GetFileName(directory.TrimEnd('\\'));
+            if (!c.Rules.IsFakeRecycleName(name)) return;
+            if (!HasPayload(directory)) return;
+
+            Finding x = new Finding("fake-recycle-bin", name,
+                                    c.Rules.Weight("fake-recycle-bin"));
+            x.Path = directory;
+            x.Strong = true;
+            output.Add(x);
+        }
+
+        private static bool HasPayload(string dir)
+        {
+            int seen = 0;
+            try
+            {
+                foreach (TreeItem t in Tree.Walk(dir, null, 400, 4))
+                {
+                    if (t.IsDir) continue;
+                    if (++seen > 400) return true;
+                    if (UsbRestore.IsPayloadFile(t.Name)) return true;
+                    // Tai lieu bi doi ten Base64 trong thung rac gia: cung la dau hieu.
+                    if (UsbRestore.DecodeName(t.Name) != null) return true;
+                    if (FileMagic.LooksPe(t.Path)) return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+    }
+
+    // Doc dau tep de biet co phai PE that (MZ + e_lfanew -> "PE\0\0").
+    internal static class FileMagic
+    {
+        public static bool LooksPe(string path)
+        {
+            try
+            {
+                using (FileStream fs = WinPath.OpenRead(WinPath.Ext(path)))
+                {
+                    if (fs.Length < 0x40) return false;
+                    byte[] head = new byte[0x40];
+                    if (fs.Read(head, 0, head.Length) < head.Length) return false;
+                    if (head[0] != (byte)'M' || head[1] != (byte)'Z') return false;
+                    int lfanew = BitConverter.ToInt32(head, 0x3C);
+                    if (lfanew < 0x40 || lfanew > fs.Length - 4) return false;
+                    fs.Seek(lfanew, SeekOrigin.Begin);
+                    byte[] sig = new byte[4];
+                    if (fs.Read(sig, 0, sig.Length) < sig.Length) return false;
+                    return sig[0] == (byte)'P' && sig[1] == (byte)'E'
+                           && sig[2] == 0 && sig[3] == 0;
+                }
+            }
+            catch { return false; }
         }
     }
 

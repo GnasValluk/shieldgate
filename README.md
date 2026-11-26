@@ -46,6 +46,24 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
 | <img src="docs/screenshots/devices.png" alt="Peripheral devices and event timeline"> | <img src="docs/screenshots/drive-repair.png" alt="Drive repair with icon toolbar"> |
 | Inventory with VID/PID/serial, trust marks, event timeline | Diagnose, preview, back up, check the file system; icons name themselves on hover |
 
+## What is new in 3.2
+
+- **Stronger shortcut rules.** A shortcut that hides a same-name document but
+  does not open it is now treated as a strong sign. Shortcut names that imitate
+  a drive (`Removable Disk (F:)`, `Copy of 2`, `… (16 GB)`) and arguments padded
+  to hide the real command are matched from `rules.json`.
+- **`autorun.inf` is read by structure, not only by payload extension.**
+  `shellexecute`, `shell\…\command`, `USEAUTOPLAY=1` and the
+  `action=Open` + `icon=shell32.dll,4` pair add score even when the payload is
+  renamed; a real payload is still the only case marked strong.
+- **Disguised payloads.** A `.dat`, `.ini`, `.db` (and similar data extension)
+  file whose header is a real PE is detected at the drive root, in hidden
+  folders and in fake folders. A fake `RECYCLER.BIN`/`RECYCLE.BIN` folder holding
+  a payload is detected as a directory and only its payload is quarantined.
+- **A generic root executable** such as `usb.exe` or `update.exe` is listed as a
+  suspicious item instead of a plain warning. `rules.json` is now version 7 and
+  older files are merged with the new keys.
+
 ## What is new in 3.1
 
 - **A fake folder can be finished, not just reported.** When the worm's
@@ -222,7 +240,8 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
 On removable drives:
 
 - Shortcuts, scripts and `autorun.inf` pointing at hidden folders, drive roots
-  or odd payloads.
+  or odd payloads. A same-name hidden document, a drive-named shortcut and a
+  structured `autorun.inf` are separate signals.
 - Nameless or hidden folders used to stash data, and hidden executables at
   drive roots.
 - Fake folder executables, `Documents`/`Docusment` lookalike folders with a
@@ -230,6 +249,8 @@ On removable drives:
   `opera_elf.dll`, `adback.dat`, `link.dat`, `icudtl.dat`). `1.exe` is a validly
   signed Opera binary used as a decoy, so a good signature alone does not clear
   it.
+- Payloads renamed to a data extension but carrying a PE header, fake
+  `RECYCLER.BIN` folders, and generic root executables such as `usb.exe`.
 - Double extensions, RLO spoofed names, root scripts, NTLM leaks, alternate data
   streams, sideload-prone DLL names and Office macro files. Macros are
   **flagged only** and never auto-quarantined.

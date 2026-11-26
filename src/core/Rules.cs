@@ -10,7 +10,7 @@ namespace ShieldGate
 {
     internal sealed class RulesData
     {
-        public const int CurrentVersion = 6;
+        public const int CurrentVersion = 7;
 
         public int Version = CurrentVersion;
         public int ScoreThreshold = 3;
@@ -53,6 +53,21 @@ namespace ShieldGate
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public readonly HashSet<string> AdsSkipStreams =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Tep duoi "du lieu" nhung thuc chat la PE (MZ/PE): virus hay doi ten
+        // DLL/payload thanh .dat, .ini, .db de qua mat nguoi dung.
+        public readonly HashSet<string> PeDataExts =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Ten thu muc gia dang thung rac cua Windows (RECYCLER.BIN, ...).
+        public readonly HashSet<string> FakeRecycleNames =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Tep chay moi o goc o voi ten chung chung (USB.exe, Update.exe).
+        public readonly HashSet<string> RootDecoyExes =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Mau ten shortcut gia dang o dia: "Removable Disk (F:)", "Copy of 3"...
+        public readonly List<string[]> DriveNamePatterns = new List<string[]>();
+        // Cau truc autorun.inf ma virus dung (shellexecute, shell\...\command).
+        public readonly List<string[]> AutorunPatterns = new List<string[]>();
 
         // Ten tep va mau nhan dien (AGENTS điều 8): nằm trong rules.json, không
         // rải hằng số trong Detect.cs. Người dùng thêm mẫu mới mà không build lại.
@@ -158,6 +173,31 @@ namespace ShieldGate
         public bool IsAdsSkipped(string stream)
         {
             return !string.IsNullOrEmpty(stream) && AdsSkipStreams.Contains(stream);
+        }
+
+        public bool IsPeDataExt(string ext)
+        {
+            return !string.IsNullOrEmpty(ext) && PeDataExts.Contains(ext);
+        }
+
+        // Ten thu muc thung rac gia: bo khoang trang/dau cham cuoi ten (Windows
+        // tu cat) roi so khop chinh xac. $RECYCLE.BIN that khong nam trong danh sach.
+        public bool IsFakeRecycleName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            string raw = name.Trim();
+            string trimmed = raw.TrimEnd('.');
+            // Ten that "$RECYCLE.BIN" khong bi coi la gia; nhung "$RECYCLE.BIN."
+            // (co dau cham cuoi, Windows hien thi nhu ten that) thi co.
+            if (raw.Length != trimmed.Length
+                && string.Equals(trimmed, "$RECYCLE.BIN", StringComparison.OrdinalIgnoreCase))
+                return true;
+            return FakeRecycleNames.Contains(trimmed);
+        }
+
+        public bool IsRootDecoyExe(string name)
+        {
+            return !string.IsNullOrEmpty(name) && RootDecoyExes.Contains(name);
         }
 
         public bool IsDangerExe(string name)
@@ -359,6 +399,11 @@ namespace ShieldGate
                 MergeSet(data.NtlmExts, Json.StringList(root, "ntlmExts"));
                 MergeSet(data.SideloadDlls, Json.StringList(root, "sideloadDlls"));
                 MergeSet(data.AdsSkipStreams, Json.StringList(root, "adsSkipStreams"));
+                MergeSet(data.PeDataExts, Json.StringList(root, "peDataExts"));
+                MergeNames(data.FakeRecycleNames, Json.StringList(root, "fakeRecycleNames"));
+                MergeNames(data.RootDecoyExes, Json.StringList(root, "rootDecoyExes"));
+                MergePatterns(data.DriveNamePatterns, Json.AsArray(Json.Get(root, "driveNamePatterns")));
+                MergePatterns(data.AutorunPatterns, Json.AsArray(Json.Get(root, "autorunPatterns")));
                 MergeNames(data.DangerExes, Json.StringList(root, "dangerExes"));
                 MergeNames(data.SystemNames, Json.StringList(root, "systemNames"));
                 MergeNames(data.PayloadNames, Json.StringList(root, "payloadNames"));
@@ -508,6 +553,28 @@ namespace ShieldGate
                                "sspicli.dll", "winsta.dll", "d3d9.dll", "d3dx9_43.dll" }));
             MergeSet(d.AdsSkipStreams, new List<string>(
                 new string[] { "Zone.Identifier", "SmartScreen", "SummaryInformation", "{4c8cc155-6c1e-11d1-8e41-00c04fb9386d}" }));
+            // .cpl co header PE la binh thuong nen khong nam trong danh sach.
+            MergeSet(d.PeDataExts, new List<string>(
+                new string[] { ".dat", ".ini", ".db", ".tmp", ".ico", ".log", ".cfg" }));
+            // $RECYCLE.BIN that cua Windows khong nam trong danh sach; bien the co
+            // dau cham cuoi duoc IsFakeRecycleName nhan rieng.
+            MergeNames(d.FakeRecycleNames, new List<string>(
+                new string[] { "RECYCLER.BIN", "RECYCLE.BIN", "$RECYCLER.BIN" }));
+            MergeNames(d.RootDecoyExes, new List<string>(
+                new string[] { "usb.exe", "update.exe" }));
+            d.DriveNamePatterns.AddRange(new string[][]
+            {
+                new string[] { @"^(removable disk|usb drive|usb disk|new volume)( \([a-z]\))?$", "drive-shortcut-name" },
+                new string[] { @"^copy of \d+$", "drive-shortcut-name" },
+                new string[] { @"^.+ \(\d+([.,]\d+)?\s?(kb|mb|gb|tb|bytes?)\)$", "drive-shortcut-name" },
+                new string[] { @"^\d+([.,]\d+)?\s?(kb|mb|gb|tb)$", "drive-shortcut-name" }
+            });
+            d.AutorunPatterns.AddRange(new string[][]
+            {
+                new string[] { @"(?im)^\s*shellexecute\s*=", "autorun-hardened" },
+                new string[] { @"(?im)^\s*shell\\(explore|autoplay|open)\\[^\]\r\n]*command\s*=", "autorun-hardened" },
+                new string[] { @"(?im)^\s*useautoplay\s*=\s*1\b", "autorun-hardened" }
+            });
 
             MergeNames(d.DangerExes, new List<string>(
                 new string[] { "wscript.exe", "cscript.exe", "mshta.exe", "cmd.exe",
@@ -567,7 +634,12 @@ namespace ShieldGate
                 { "double-extension", 5 }, { "rlo-name", 5 }, { "root-script", 2 },
                 { "hidden-root-script", 4 }, { "ntlm-leak", 5 },
                 { "alternate-data-stream", 2 }, { "hidden-ads", 4 },
-                { "sideload-dll", 2 }, { "office-macro", 1 }, { "root-desktop-ini", 3 }
+                { "sideload-dll", 2 }, { "office-macro", 1 }, { "root-desktop-ini", 3 },
+                // 3.2 - nang cap bo luat ngoai vi (tai lieu 26/11)
+                { "shadows-hidden-document", 5 }, { "padded-args", 3 },
+                { "drive-shortcut-name", 3 }, { "autorun-hardened", 4 },
+                { "autorun-icon", 3 }, { "pe-as-data", 5 },
+                { "fake-recycle-bin", 5 }, { "root-decoy-exe", 3 }
             });
             return d;
         }
@@ -575,7 +647,7 @@ namespace ShieldGate
         // Tệp mẫu: người dùng có thể sửa trực tiếp. Giữ đồng bộ với Defaults().
         public const string DefaultJson =
 @"{
-  ""version"": 6,
+  ""version"": 7,
   ""scoreThreshold"": 3,
   ""limits"": { ""maxFiles"": 150000, ""maxSeconds"": 300 },
   ""behavior"": { ""lnkBurst"": 15, ""writeBurst"": 400, ""windowSeconds"": 10, ""alertSeconds"": 600 },
@@ -589,6 +661,11 @@ namespace ShieldGate
   ""ntlmExts"": [""url"", ""scf"", ""lnk""],
   ""sideloadDlls"": [""version.dll"", ""winmm.dll"", ""dbghelp.dll"", ""uxtheme.dll"", ""profapi.dll"", ""wlbsctrl.dll"", ""cryptbase.dll"", ""dwmapi.dll"", ""msimg32.dll"", ""ole32.dll"", ""secur32.dll"", ""userenv.dll"", ""wtsapi32.dll"", ""netapi32.dll"", ""ntmarta.dll"", ""samcli.dll"", ""sspicli.dll"", ""winsta.dll"", ""d3d9.dll"", ""d3dx9_43.dll""],
   ""adsSkipStreams"": [""Zone.Identifier"", ""SmartScreen"", ""SummaryInformation"", ""{4c8cc155-6c1e-11d1-8e41-00c04fb9386d}""],
+  ""peDataExts"": [""dat"", ""ini"", ""db"", ""tmp"", ""ico"", ""log"", ""cfg""],
+  ""fakeRecycleNames"": [""RECYCLER.BIN"", ""RECYCLE.BIN"", ""$RECYCLER.BIN""],
+  ""rootDecoyExes"": [""usb.exe"", ""update.exe""],
+  ""driveNamePatterns"": [[""^(removable disk|usb drive|usb disk|new volume)( \\([a-z]\\))?$"", ""drive-shortcut-name""], [""^copy of \\d+$"", ""drive-shortcut-name""], [""^.+ \\(\\d+([.,]\\d+)?\\s?(kb|mb|gb|tb|bytes?)\\)$"", ""drive-shortcut-name""], [""^\\d+([.,]\\d+)?\\s?(kb|mb|gb|tb)$"", ""drive-shortcut-name""]],
+  ""autorunPatterns"": [[""(?im)^\\s*shellexecute\\s*="", ""autorun-hardened""], [""(?im)^\\s*shell\\\\(explore|autoplay|open)\\\\[^\\]\\r\\n]*command\\s*="", ""autorun-hardened""], [""(?im)^\\s*useautoplay\\s*=\\s*1\\b"", ""autorun-hardened""]],
   ""dangerExes"": [""wscript.exe"", ""cscript.exe"", ""mshta.exe"", ""cmd.exe"", ""powershell.exe"", ""pwsh.exe"", ""rundll32.exe"", ""regsvr32.exe"", ""schtasks.exe"", ""bitsadmin.exe"", ""certutil.exe"", ""msiexec.exe"", ""wmic.exe""],
   ""systemNames"": [""svchost.exe"", ""csrss.exe"", ""lsass.exe"", ""services.exe"", ""smss.exe"", ""winlogon.exe"", ""wininit.exe"", ""explorer.exe"", ""spoolsv.exe"", ""taskhost.exe"", ""taskhostw.exe"", ""conhost.exe"", ""dwm.exe"", ""ctfmon.exe"", ""lsm.exe"", ""userinit.exe"", ""taskmgr.exe""],
   ""payloadNames"": [""adback.dat"", ""link.dat"", ""opera_elf.dll""],
@@ -608,7 +685,10 @@ namespace ShieldGate
     ""desktop-ini-clsid"": 1, ""lookalike-folder"": 1,
     ""double-extension"": 5, ""rlo-name"": 5, ""root-script"": 2, ""hidden-root-script"": 4,
     ""ntlm-leak"": 5, ""alternate-data-stream"": 2, ""hidden-ads"": 4,
-    ""sideload-dll"": 2, ""office-macro"": 1, ""root-desktop-ini"": 3
+    ""sideload-dll"": 2, ""office-macro"": 1, ""root-desktop-ini"": 3,
+    ""shadows-hidden-document"": 5, ""padded-args"": 3, ""drive-shortcut-name"": 3,
+    ""autorun-hardened"": 4, ""autorun-icon"": 3, ""pe-as-data"": 5,
+    ""fake-recycle-bin"": 5, ""root-decoy-exe"": 3
   }
 }
 ";

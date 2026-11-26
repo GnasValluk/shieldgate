@@ -451,6 +451,7 @@ namespace ShieldGate
                                       out List<string> reasons)
         {
             reasons = new List<string>();
+            string baseName = Path.GetFileNameWithoutExtension(path);
             LnkInfo info = ReadLnk(path);
             if (info != null)
             {
@@ -479,6 +480,10 @@ namespace ShieldGate
                         reasons.Add("args-drive-exe=" + Shorten(payload));
                 }
 
+                // B3: tham so dai > 260 ky tu hoac dem ca tram khoang trang /
+                // ky tu vo hinh de che lenh that. Khong du mot minh de ket luan.
+                if (PaddedArgs(args)) reasons.Add("padded-args");
+
                 if (Regex.IsMatch(leaf, @"^\d{1,3}\.(exe|scr|com|pif)$"))
                     reasons.Add("target-odd-name");
 
@@ -497,6 +502,15 @@ namespace ShieldGate
                     }
                 }
                 catch { }
+
+                // A2: ten shortcut theo mau o dia: "Removable Disk (F:)",
+                // "Copy of 2", "<nhan> (16 GB)". Mau nam trong rules.json.
+                foreach (string[] p in Rules.Current.DriveNamePatterns)
+                    if (Regex.IsMatch(baseName, p[0], RegexOptions.IgnoreCase))
+                    {
+                        reasons.Add(p[1]);
+                        break;
+                    }
 
                 if (target.Length > 0 && IsUnder(target, root))
                 {
@@ -524,13 +538,16 @@ namespace ShieldGate
                     if (!File.Exists(expanded) && !Directory.Exists(expanded))
                         reasons.Add("target-missing");
                 }
+
+                // A1: tai lieu bi an cung ten, shortcut tro di noi khac. Virus
+                // shortcut giau tai lieu that roi dat .lnk cung ten de moi bam.
+                HiddenDocumentShadow(path, baseName, target, reasons);
             }
             else if ((attrs & (FileAttributes.Hidden | FileAttributes.System)) != 0)
             {
                 reasons.Add("unreadable-hidden");
             }
 
-            string baseName = Path.GetFileNameWithoutExtension(path);
             string sibling = Path.Combine(Path.GetDirectoryName(path), baseName);
             if (Directory.Exists(sibling))
             {
@@ -546,12 +563,78 @@ namespace ShieldGate
             foreach (string r in reasons)
             {
                 if (r.StartsWith("target=") || r.StartsWith("args=") || r == "shadows-hidden-folder"
+                    || r.StartsWith("shadows-hidden-document=")
                     || r.StartsWith("args-relative-exe=") || r.StartsWith("args-drive-exe=")
+                    || r == "drive-shortcut-name"
                     || r == "target-in-hidden-folder" || r == "target-in-fake-folder")
                     score += 3;
                 else score += 2;
             }
             return score >= 3;
+        }
+
+        // Tai lieu (.doc, .pdf...) bi an cung ten voi shortcut, trong khi shortcut
+        // khong tro ve chinh tai lieu do. Bo qua truong hop shortcut tro dung tai
+        // lieu (nguoi dung tu tao shortcut cho tai lieu cua minh).
+        private static void HiddenDocumentShadow(string lnkPath, string baseName, string target,
+                                                 List<string> reasons)
+        {
+            if (string.IsNullOrEmpty(baseName)) return;
+            try
+            {
+                string dir = Path.GetDirectoryName(lnkPath);
+                if (string.IsNullOrEmpty(dir)) return;
+                string[] matches = Directory.GetFiles(dir, baseName + ".*");
+                foreach (string m in matches)
+                {
+                    if (string.Equals(m, lnkPath, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!Rules.Current.IsDocumentExt(Path.GetExtension(m))) continue;
+                    FileAttributes a;
+                    try { a = File.GetAttributes(m); }
+                    catch { continue; }
+                    if ((a & (FileAttributes.Hidden | FileAttributes.System)) == 0) continue;
+
+                    bool pointsHere = false;
+                    if (!string.IsNullOrEmpty(target))
+                    {
+                        try
+                        {
+                            string t = Path.GetFullPath(Environment.ExpandEnvironmentVariables(target));
+                            string here = Path.GetFullPath(m);
+                            pointsHere = string.Equals(t.TrimEnd('\\'), here.TrimEnd('\\'),
+                                                       StringComparison.OrdinalIgnoreCase);
+                        }
+                        catch { }
+                    }
+                    if (pointsHere) continue;
+
+                    reasons.Add("shadows-hidden-document=" + Path.GetFileName(m));
+                    return;
+                }
+            }
+            catch { }
+        }
+
+        // Tham so shortcut dai bat thuong hoac bi dem bang khoang trang / ky tu
+        // vo hinh de che lenh that. Microsoft van co mau LNK ngan doc hai, nen
+        // day chi la mot dau hieu (trong so thap), khong tu no ket luan.
+        private static bool PaddedArgs(string args)
+        {
+            if (string.IsNullOrEmpty(args)) return false;
+            if (args.Length > 260) return true;
+            int run = 0, best = 0;
+            foreach (char ch in args)
+            {
+                bool blank = char.IsWhiteSpace(ch) || UsbRestore.IsInvisible(ch);
+                if (blank)
+                {
+                    run++;
+                    if (run > best) best = run;
+                }
+                else run = 0;
+                if (char.IsControl(ch) && ch != '\t' && ch != '\r' && ch != '\n') return true;
+            }
+            return best >= 32;
         }
 
         public static bool ScriptVerdict(string path, FileAttributes attrs, int depth,
@@ -590,10 +673,23 @@ namespace ShieldGate
             catch { return ""; }
         }
 
-        public static bool AutorunVerdict(string path)
+        public static bool AutorunVerdict(string path, out List<string> reasons)
         {
+            reasons = new List<string>();
             string text = Snippet(path);
-            return AutorunRe.IsMatch(text) && AutorunPayloadRe.IsMatch(text);
+            if (!AutorunRe.IsMatch(text)) return false;
+
+            // D1: cau truc autorun.inf cua virus - ke ca khi khong co payload
+            // duoi dang .exe: shellexecute, shell\...\command, USEAUTOPLAY=1.
+            if (AutorunPayloadRe.IsMatch(text)) reasons.Add("autorun-payload");
+            foreach (string[] p in Rules.Current.AutorunPatterns)
+                if (Regex.IsMatch(text, p[0]) && !reasons.Contains(p[1]))
+                    reasons.Add(p[1]);
+            // action=Open + icon=shell32.dll,4: cap dau hieu Gamarue hay dung.
+            if (Regex.IsMatch(text, @"(?im)^\s*action\s*=\s*open\s*$")
+                && Regex.IsMatch(text, @"(?im)^\s*icon\s*=.*shell32\.dll\s*,\s*4\b"))
+                reasons.Add("autorun-icon");
+            return reasons.Count > 0;
         }
 
         public static CommandCheck CommandVerdict(string cmd)
