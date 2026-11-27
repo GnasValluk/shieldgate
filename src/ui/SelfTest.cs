@@ -36,7 +36,7 @@ namespace ShieldGate
             Policy.PauseAllowed = false;
 
             int passed = 0;
-            int total = 86;
+            int total = 88;
             string firstError = "";
 
             Action<string, bool> check = delegate(string what, bool ok)
@@ -496,6 +496,32 @@ namespace ShieldGate
             try { regScan = RegistryGuard.Detect() != null; }
             catch { }
             check(S.Selftest.RegistryScan, regScan);
+
+            // 16c. Cờ xem tệp: lần đầu lập ảnh chụp thì không báo thay đổi nào.
+            bool regView = false;
+            bool userSession = RegViewGuard.InUserSession();
+            string viewSnap = RegViewGuard.SnapshotPath();
+            try
+            {
+                RegViewGuard.EnsureBaseline();
+                bool anyView = false;
+                foreach (RegIssue i in RegistryGuard.Detect(true))
+                    if (i.Code != null && i.Code.StartsWith("view-", StringComparison.Ordinal)) anyView = true;
+                regView = !userSession || (!anyView && File.Exists(viewSnap));
+            }
+            catch { }
+            check(S.Selftest.RegViewBaseline, regView);
+
+            // 16d. Ảnh chụp hỏng: đổi tên thành .bad, lập baseline mới, không ném lỗi.
+            bool regViewBad = false;
+            try
+            {
+                File.WriteAllText(viewSnap, "not|a|snapshot\r\n", new UTF8Encoding(false));
+                RegViewGuard.EnsureBaseline();
+                regViewBad = !userSession || File.Exists(viewSnap + ".bad");
+            }
+            catch { }
+            check(S.Selftest.RegViewCorrupt, regViewBad);
 
             // 17. Tệp nằm ở đường dẫn dài hơn 260 ký tự: vẫn cách ly và khôi phục được.
             bool longOk = false;

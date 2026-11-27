@@ -16,7 +16,7 @@ namespace ShieldGate
     internal static class AppInfo
     {
         public const string Name = "ShieldGate";
-        public const string Version = "3.2.0";
+        public const string Version = "3.3.0";
         public const string TaskName = "ShieldGate USB Guard";
         public const string TrayTaskName = "ShieldGate Tray";
         // Giữ hậu tố _2 khi lên 3.0: bản 2.3 và 3.0 dùng chung một mutex để lúc
@@ -47,6 +47,7 @@ namespace ShieldGate
         public static string SystemDrive;
         public static string RulesFile;
         public static string DevicesFile;
+        public static string RegViewPrefix;
         public static string EventsFile;
         public static string RepairDir;
         public static string VtKeyFile;
@@ -105,6 +106,9 @@ namespace ShieldGate
             ClientPin = Path.Combine(BinDir, "client.pin");
             RulesFile = Path.Combine(Root, "rules.json");
             DevicesFile = Path.Combine(Root, "devices.json");
+            // Ảnh chụp cờ xem tệp của Explorer, tách theo SID người dùng. Chỉ ghi
+            // từ tiến trình trong phiên người dùng, không ghi từ SYSTEM.
+            RegViewPrefix = Path.Combine(Root, "regview.");
             EventsFile = Path.Combine(Root, "events.tsv");
             RepairDir = Path.Combine(Root, "repair");
             // Khoa VirusTotal luu bang DPAPI (CurrentUser); khong nam trong settings.txt.

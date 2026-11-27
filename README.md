@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/license-MIT-1f5e3d?style=flat-square" alt="MIT license">
   <img src="https://img.shields.io/badge/platform-Windows%207%2B-0078d4?style=flat-square" alt="Windows 7 or later">
   <img src="https://img.shields.io/badge/.NET%20Framework-4.0-5b6472?style=flat-square" alt=".NET Framework 4.0">
-  <img src="https://img.shields.io/badge/download-658%20KB-5b6472?style=flat-square" alt="About 658 KB">
+  <img src="https://img.shields.io/badge/download-692%20KB-5b6472?style=flat-square" alt="About 692 KB">
 </p>
 
 <p align="center">
@@ -45,6 +45,23 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
 |---|---|
 | <img src="docs/screenshots/devices.png" alt="Peripheral devices and event timeline"> | <img src="docs/screenshots/drive-repair.png" alt="Drive repair with icon toolbar"> |
 | Inventory with VID/PID/serial, trust marks, event timeline | Diagnose, preview, back up, check the file system; icons name themselves on hover |
+
+## What is new in 3.3
+
+- **Explorer view flags are compared with this PC, not with a fixed default.**
+  `Hidden`, `ShowSuperHidden` and `HideFileExt` are recorded per user on the
+  first scan. If they change later, the item shows the previous value and offers
+  one-click restore; ShieldGate never forces a "factory" setting on you.
+- **HKLM policy locks are checked too.** Task Manager, Registry Editor, Folder
+  Options and the right-click menu can be locked for the whole machine; the check
+  now sees both `HKCU` and `HKLM` and treats them as suggestions, not damage.
+- **The policy ShieldGate sets is protected.** When AutoRun blocking or Windows
+  Script Host blocking is on and another program flips the value back, it is
+  restored and logged once, with the value name, instead of silently returning.
+- **Writes are verified.** After a registry fix, the value is read back. A write
+  that does not stick (Group Policy, Tamper Protection, another security product)
+  is reported as failed instead of counted as repaired. The view snapshot is
+  removed on uninstall.
 
 ## What is new in 3.2
 

@@ -123,19 +123,59 @@ namespace ShieldGate
 
         // ---------------------------------------------------------- chính sách
 
+        // G1: giữ giá trị chính sách do ShieldGate đặt. Lần đầu trong tiến trình
+        // chỉ ghi; nếu giá trị đã ghi bị đổi ngược ở vòng sau thì đặt lại và ghi
+        // một dòng log. Không dùng cho nhánh tắt bảo vệ (đó là thay đổi có chủ ý).
+        private static readonly Dictionary<string, string> Enforced =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        private static bool Keep(RegistryHive hive, string path, string name,
+                                 object value, RegistryValueKind kind)
+        {
+            string key = hive + "|" + path + "|" + name;
+            bool known;
+            lock (Enforced) known = Enforced.ContainsKey(key);
+
+            object actual;
+            RegistryValueKind actualKind;
+            bool exists = Reg.Read(hive, path, name, out actual, out actualKind);
+            bool changed;
+            if (!exists) changed = true;
+            else if (kind == RegistryValueKind.DWord) changed = ToInt(actual) != ToInt(value);
+            else
+                changed = !string.Equals((Convert.ToString(actual) ?? "").Trim(),
+                                         (Convert.ToString(value) ?? "").Trim(),
+                                         StringComparison.OrdinalIgnoreCase);
+
+            if (!Reg.Write(hive, path, name, value, kind)) return false;
+            if (changed && known)
+            {
+                string label = name.Length == 0 ? "(Default)" : name;
+                Log.Write(S.Log.PolicyReverted(label), "WARN");
+            }
+            lock (Enforced) Enforced[key] = Convert.ToString(value) ?? "";
+            return true;
+        }
+
+        private static int ToInt(object value)
+        {
+            try { return Convert.ToInt32(value); }
+            catch { return 0; }
+        }
+
         public static bool ApplyMachinePolicy(bool? blockWsh)
         {
             bool ok = true;
-            ok &= Reg.Write(RegistryHive.LocalMachine, ExplorerHklm, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
-            ok &= Reg.Write(RegistryHive.LocalMachine, ExplorerHklm, "NoAutorun", 1, RegistryValueKind.DWord);
-            ok &= Reg.Write(RegistryHive.LocalMachine, AutoplayHklm, "DisableAutoplay", 1, RegistryValueKind.DWord);
-            ok &= Reg.Write(RegistryHive.LocalMachine, IniPath, "", "@SYS:DoesNotExist", RegistryValueKind.String);
-            ok &= Reg.Write(RegistryHive.CurrentUser, ExplorerHkcu, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
-            ok &= Reg.Write(RegistryHive.CurrentUser, AutoplayHkcu, "DisableAutoplay", 1, RegistryValueKind.DWord);
+            ok &= Keep(RegistryHive.LocalMachine, ExplorerHklm, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
+            ok &= Keep(RegistryHive.LocalMachine, ExplorerHklm, "NoAutorun", 1, RegistryValueKind.DWord);
+            ok &= Keep(RegistryHive.LocalMachine, AutoplayHklm, "DisableAutoplay", 1, RegistryValueKind.DWord);
+            ok &= Keep(RegistryHive.LocalMachine, IniPath, "", "@SYS:DoesNotExist", RegistryValueKind.String);
+            ok &= Keep(RegistryHive.CurrentUser, ExplorerHkcu, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
+            ok &= Keep(RegistryHive.CurrentUser, AutoplayHkcu, "DisableAutoplay", 1, RegistryValueKind.DWord);
             if (blockWsh == true)
             {
-                ok &= Reg.Write(RegistryHive.LocalMachine, WshPath, "Enabled", 0, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.LocalMachine, WshPath32, "Enabled", 0, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, WshPath, "Enabled", 0, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, WshPath32, "Enabled", 0, RegistryValueKind.DWord);
             }
             else if (blockWsh == false)
             {
@@ -264,21 +304,21 @@ namespace ShieldGate
             bool ok = true;
             if (c.Autorun)
             {
-                ok &= Reg.Write(RegistryHive.LocalMachine, ExplorerHklm, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.LocalMachine, ExplorerHklm, "NoAutorun", 1, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.LocalMachine, AutoplayHklm, "DisableAutoplay", 1, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.CurrentUser, ExplorerHkcu, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.CurrentUser, AutoplayHkcu, "DisableAutoplay", 1, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, ExplorerHklm, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, ExplorerHklm, "NoAutorun", 1, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, AutoplayHklm, "DisableAutoplay", 1, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.CurrentUser, ExplorerHkcu, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.CurrentUser, AutoplayHkcu, "DisableAutoplay", 1, RegistryValueKind.DWord);
             }
             if (c.Ini)
             {
-                ok &= Reg.Write(RegistryHive.LocalMachine, IniPath, "", "@SYS:DoesNotExist",
-                                RegistryValueKind.String);
+                ok &= Keep(RegistryHive.LocalMachine, IniPath, "", "@SYS:DoesNotExist",
+                           RegistryValueKind.String);
             }
             if (c.Wsh)
             {
-                ok &= Reg.Write(RegistryHive.LocalMachine, WshPath, "Enabled", 0, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.LocalMachine, WshPath32, "Enabled", 0, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, WshPath, "Enabled", 0, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, WshPath32, "Enabled", 0, RegistryValueKind.DWord);
             }
             if (c.Registry) ok &= RegistryGuard.Ensure(true);
             // Chặn ghi ổ USB là chính sách toàn máy: bật/tắt đều idempotent.
@@ -1370,25 +1410,25 @@ namespace ShieldGate
 
             if (autorun)
             {
-                ok &= Reg.Write(RegistryHive.LocalMachine, ExplorerHklm, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.LocalMachine, ExplorerHklm, "NoAutorun", 1, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.LocalMachine, AutoplayHklm, "DisableAutoplay", 1, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.CurrentUser, ExplorerHkcu, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.CurrentUser, AutoplayHkcu, "DisableAutoplay", 1, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, ExplorerHklm, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, ExplorerHklm, "NoAutorun", 1, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, AutoplayHklm, "DisableAutoplay", 1, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.CurrentUser, ExplorerHkcu, "NoDriveTypeAutoRun", 255, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.CurrentUser, AutoplayHkcu, "DisableAutoplay", 1, RegistryValueKind.DWord);
             }
             else ok &= RestoreGroup(0, 4);
 
             if (ini)
             {
-                ok &= Reg.Write(RegistryHive.LocalMachine, IniPath, "", "@SYS:DoesNotExist",
-                                RegistryValueKind.String);
+                ok &= Keep(RegistryHive.LocalMachine, IniPath, "", "@SYS:DoesNotExist",
+                           RegistryValueKind.String);
             }
             else ok &= RestoreGroup(5, 5);
 
             if (wsh)
             {
-                ok &= Reg.Write(RegistryHive.LocalMachine, WshPath, "Enabled", 0, RegistryValueKind.DWord);
-                ok &= Reg.Write(RegistryHive.LocalMachine, WshPath32, "Enabled", 0, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, WshPath, "Enabled", 0, RegistryValueKind.DWord);
+                ok &= Keep(RegistryHive.LocalMachine, WshPath32, "Enabled", 0, RegistryValueKind.DWord);
             }
             else ok &= RestoreGroup(6, 7);
 

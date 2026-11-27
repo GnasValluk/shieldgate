@@ -1774,7 +1774,10 @@ namespace ShieldGate
         // lựa chọn riêng trong danh sách kết quả, người dùng tự quyết định sửa.
         private static void ScanRegistry(List<PcItem> findings)
         {
-            foreach (RegIssue issue in RegistryGuard.Detect())
+            // Ghi ảnh chụp cờ xem tệp ở lần quét đầu, rồi chỉ báo khi giá trị đổi.
+            // Chạy dưới SYSTEM thì RegViewGuard tự bỏ qua vì HKCU ở đó là của SYSTEM.
+            RegViewGuard.EnsureBaseline();
+            foreach (RegIssue issue in RegistryGuard.Detect(true))
             {
                 PcItem i = New(PcKind.RegHealth, issue.High, issue.Title,
                                RegistryGuard.Detail(issue));

@@ -70,6 +70,15 @@ namespace ShieldGate
             Add(list, Paths.RulesFile + ".bak");
             Add(list, Paths.DevicesFile);
             Add(list, Paths.DevicesFile + ".tmp");
+            Add(list, Paths.RegViewPrefix + "default.snapshot");
+            Add(list, Paths.RegViewPrefix + "default.snapshot.bad");
+            // Mỗi người dùng có ảnh chụp riêng; gỡ cài đặt xoá tất cả.
+            try
+            {
+                foreach (string f in Directory.GetFiles(Paths.Root, "regview.*.snapshot*"))
+                    Add(list, f);
+            }
+            catch { }
             Add(list, Paths.EventsFile);
             Add(list, Paths.EventsFile + ".1");
             Add(list, Paths.EventsFile + ".id");

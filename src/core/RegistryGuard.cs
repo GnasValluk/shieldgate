@@ -3,6 +3,9 @@
 // Mọi lần sửa đều được reg.exe sao lưu trước (xem PcScan.BackupReg).
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Security.Principal;
+using System.Text;
 using Microsoft.Win32;
 
 namespace ShieldGate
@@ -114,6 +117,19 @@ namespace ShieldGate
             list.Add(C(RegistryHive.CurrentUser, sys, "DisableRegistryTools", 0,
                        RegistryValueKind.DWord, false, true, false, "no-regedit"));
 
+            // Virus chạy bằng quyền quản trị ghi cùng policy ở HKLM. Máy công ty
+            // cũng đặt các khoá này có chủ ý, nên chỉ báo và để người dùng quyết định.
+            string polMachine = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer";
+            list.Add(C(RegistryHive.LocalMachine, polMachine, "NoFolderOptions", 0,
+                       RegistryValueKind.DWord, false, true, false, "no-folder-options"));
+            list.Add(C(RegistryHive.LocalMachine, polMachine, "NoViewContextMenu", 0,
+                       RegistryValueKind.DWord, false, true, false, "no-context-menu"));
+            string sysMachine = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+            list.Add(C(RegistryHive.LocalMachine, sysMachine, "DisableTaskMgr", 0,
+                       RegistryValueKind.DWord, false, true, false, "no-taskmgr"));
+            list.Add(C(RegistryHive.LocalMachine, sysMachine, "DisableRegistryTools", 0,
+                       RegistryValueKind.DWord, false, true, false, "no-regedit"));
+
             // Khoá HKCU\Software\Classes ghi đè HKLM. Nếu virus để lại bản ghi đè hỏng,
             // sửa HKLM thôi không đủ: phải sửa/xoá cả bản của người dùng.
             int count = list.Count;
@@ -134,6 +150,13 @@ namespace ShieldGate
         }
 
         public static List<RegIssue> Detect()
+        {
+            return Detect(false);
+        }
+
+        // includeView: chỉ đặt true khi chạy trong phiên người dùng. Tiến trình nền
+        // chạy dưới SYSTEM có HKCU riêng, nên đọc cờ xem tệp ở đó là vô nghĩa.
+        public static List<RegIssue> Detect(bool includeView)
         {
             List<RegIssue> found = new List<RegIssue>();
             bool win10 = IsWin10OrLater();
@@ -157,6 +180,7 @@ namespace ShieldGate
                 }
                 if (!Matches(c, value)) found.Add(Make(c, Convert.ToString(value)));
             }
+            if (includeView) found.AddRange(RegViewGuard.Detect());
             return found;
         }
 
@@ -232,8 +256,24 @@ namespace ShieldGate
         {
             try
             {
-                if (i.Remove) return Reg.DeleteValue(i.Hive, i.Path, i.Name);
-                return Reg.Write(i.Hive, i.Path, i.Name, i.Expected, i.Kind);
+                if (i.Remove)
+                {
+                    if (!Reg.DeleteValue(i.Hive, i.Path, i.Name)) return false;
+                    object gone;
+                    RegistryValueKind goneKind;
+                    return !Reg.Read(i.Hive, i.Path, i.Name, out gone, out goneKind);
+                }
+                if (!Reg.Write(i.Hive, i.Path, i.Name, i.Expected, i.Kind)) return false;
+                // Đọc lại sau khi ghi: SetValue có thể thành công nhưng bị policy
+                // hoặc phần mềm bảo mật khác ghi đè ngay sau đó.
+                object actual;
+                RegistryValueKind kind;
+                if (!Reg.Read(i.Hive, i.Path, i.Name, out actual, out kind)) return false;
+                if (kind != i.Kind) return false;
+                if (i.Kind == RegistryValueKind.DWord) return ToInt(actual) == ToInt(i.Expected);
+                return string.Equals((Convert.ToString(actual) ?? "").Trim(),
+                                     (Convert.ToString(i.Expected) ?? "").Trim(),
+                                     StringComparison.OrdinalIgnoreCase);
             }
             catch { return false; }
         }
@@ -251,6 +291,9 @@ namespace ShieldGate
                 case "no-context-menu": return S.Registry.NoContextMenu;
                 case "no-taskmgr": return S.Registry.NoTaskMgr;
                 case "no-regedit": return S.Registry.NoRegistryTools;
+                case "view-hidden": return S.Registry.ViewHidden;
+                case "view-superhidden": return S.Registry.ViewSuperHidden;
+                case "view-fileext": return S.Registry.ViewFileExt;
                 default: return code;
             }
         }
@@ -262,6 +305,206 @@ namespace ShieldGate
             if (i.Remove) return path + " = " + i.Actual;
             string actual = i.Actual.Length == 0 ? S.Registry.Missing : i.Actual;
             return path + " = " + actual + "  ->  " + Convert.ToString(i.Expected);
+        }
+    }
+
+    // Cờ xem tệp của Explorer là lựa chọn của người dùng, không phải giá trị cố
+    // định. Chỉ báo khi giá trị đổi so với ảnh chụp của chính máy này, và đề xuất
+    // trả về giá trị trước đó; không bao giờ tự sửa.
+    internal static class RegViewGuard
+    {
+        private const string ViewPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+
+        private static readonly string[] Names =
+        {
+            "Hidden", "ShowSuperHidden", "HideFileExt"
+        };
+
+        private sealed class ViewValue
+        {
+            public bool Exists;
+            public RegistryValueKind Kind;
+            public string Text;
+        }
+
+        private static string CodeOf(string name)
+        {
+            if (name == "Hidden") return "view-hidden";
+            if (name == "ShowSuperHidden") return "view-superhidden";
+            return "view-fileext";
+        }
+
+        // Chỉ ghi ảnh chụp từ phiên người dùng: SYSTEM có HKCU riêng nên baseline
+        // tạo từ đó sẽ sai ngay khi người dùng đăng nhập.
+        internal static bool InUserSession()
+        {
+            try
+            {
+                WindowsIdentity id = WindowsIdentity.GetCurrent();
+                return id == null || id.User == null
+                    || !id.User.IsWellKnown(WellKnownSidType.LocalSystemSid);
+            }
+            catch { return true; }
+        }
+
+        // Mỗi SID một tệp: cờ Explorer là lựa chọn của từng người dùng, dùng
+        // chung một ảnh chụp sẽ báo nhầm ngay khi máy có từ hai tài khoản.
+        internal static string SnapshotPath()
+        {
+            string sid = "";
+            try
+            {
+                WindowsIdentity id = WindowsIdentity.GetCurrent();
+                if (id != null && id.User != null) sid = id.User.Value;
+            }
+            catch { }
+            if (string.IsNullOrEmpty(sid)) sid = "default";
+            return Paths.RegViewPrefix + sid + ".snapshot";
+        }
+
+        public static void EnsureBaseline()
+        {
+            if (!InUserSession()) return;
+            try
+            {
+                if (Load() != null) return;
+                Save(Current());
+            }
+            catch { }
+        }
+
+        public static List<RegIssue> Detect()
+        {
+            List<RegIssue> found = new List<RegIssue>();
+            if (!InUserSession()) return found;
+            try
+            {
+                Dictionary<string, ViewValue> saved = Load();
+                Dictionary<string, ViewValue> now = Current();
+                if (saved == null)
+                {
+                    Save(now);
+                    return found;
+                }
+
+                bool expanded = false;
+                foreach (string name in Names)
+                {
+                    ViewValue old;
+                    if (!saved.TryGetValue(name, out old))
+                    {
+                        saved[name] = now[name];
+                        expanded = true;
+                        continue;
+                    }
+                    if (!Same(old, now[name])) found.Add(Make(name, old, now[name]));
+                }
+                if (expanded) Save(saved);
+            }
+            catch { }
+            return found;
+        }
+
+        private static RegIssue Make(string name, ViewValue old, ViewValue now)
+        {
+            RegIssue i = new RegIssue();
+            i.Hive = RegistryHive.CurrentUser;
+            i.Path = ViewPath;
+            i.Name = name;
+            i.Remove = !old.Exists;
+            i.Kind = old.Kind;
+            i.High = false;
+            i.Code = CodeOf(name);
+            i.Actual = now.Exists ? now.Text : "";
+            if (!old.Exists) i.Expected = "";
+            else if (old.Kind == RegistryValueKind.DWord)
+            {
+                int n;
+                i.Expected = int.TryParse(old.Text, out n) ? (object)n : (object)old.Text;
+            }
+            else i.Expected = old.Text;
+            return i;
+        }
+
+        private static bool Same(ViewValue a, ViewValue b)
+        {
+            if (a == null || b == null) return false;
+            if (a.Exists != b.Exists) return false;
+            if (!a.Exists) return true;
+            if (a.Kind != b.Kind) return false;
+            if (a.Kind == RegistryValueKind.DWord)
+            {
+                int x, y;
+                if (int.TryParse(a.Text, out x) && int.TryParse(b.Text, out y)) return x == y;
+            }
+            return string.Equals(a.Text ?? "", b.Text ?? "", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static Dictionary<string, ViewValue> Current()
+        {
+            Dictionary<string, ViewValue> map =
+                new Dictionary<string, ViewValue>(StringComparer.OrdinalIgnoreCase);
+            foreach (string name in Names)
+            {
+                ViewValue v = new ViewValue();
+                object value;
+                RegistryValueKind kind;
+                v.Exists = Reg.Read(RegistryHive.CurrentUser, ViewPath, name, out value, out kind);
+                v.Kind = kind;
+                v.Text = v.Exists ? (Convert.ToString(value) ?? "") : "";
+                map[name] = v;
+            }
+            return map;
+        }
+
+        private static Dictionary<string, ViewValue> Load()
+        {
+            string path = SnapshotPath();
+            if (!File.Exists(path)) return null;
+            try
+            {
+                Dictionary<string, ViewValue> map =
+                    new Dictionary<string, ViewValue>(StringComparer.OrdinalIgnoreCase);
+                foreach (string raw in File.ReadAllLines(path))
+                {
+                    if (string.IsNullOrWhiteSpace(raw)) continue;
+                    string[] p = raw.Split('|');
+                    if (p.Length < 4) throw new FormatException("regview snapshot");
+                    string name = p[0].Trim();
+                    if (Array.IndexOf(Names, name) < 0) continue;
+                    ViewValue v = new ViewValue();
+                    v.Exists = p[1] == "1";
+                    v.Kind = (RegistryValueKind)int.Parse(p[2]);
+                    v.Text = Encoding.UTF8.GetString(Convert.FromBase64String(p[3]));
+                    map[name] = v;
+                }
+                return map;
+            }
+            catch
+            {
+                // Tệp hỏng: đổi tên rồi lập baseline mới, không làm hỏng lượt quét.
+                try { File.Move(path, path + ".bad"); }
+                catch { }
+                return null;
+            }
+        }
+
+        private static void Save(Dictionary<string, ViewValue> map)
+        {
+            if (map == null) return;
+            StringBuilder sb = new StringBuilder();
+            foreach (string name in Names)
+            {
+                ViewValue v;
+                if (!map.TryGetValue(name, out v)) continue;
+                sb.Append(name).Append('|')
+                  .Append(v.Exists ? "1" : "0").Append('|')
+                  .Append((int)v.Kind).Append('|')
+                  .Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(v.Text ?? "")))
+                  .Append("\r\n");
+            }
+            Paths.EnsureDirs();
+            File.WriteAllText(SnapshotPath(), sb.ToString(), new UTF8Encoding(true));
         }
     }
 }

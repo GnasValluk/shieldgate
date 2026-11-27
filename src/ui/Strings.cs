@@ -1007,6 +1007,9 @@ namespace ShieldGate
             public static string NoContextMenu { get { return T("Menu chuột phải bị khoá", "The right-click menu is locked"); } }
             public static string NoTaskMgr { get { return T("Task Manager bị khoá", "Task Manager is locked"); } }
             public static string NoRegistryTools { get { return T("Registry Editor (regedit) bị khoá", "Registry Editor (regedit) is locked"); } }
+            public static string ViewHidden { get { return T("Cờ hiện tệp ẩn của Explorer bị đổi", "Explorer's show-hidden-files setting changed"); } }
+            public static string ViewSuperHidden { get { return T("Cờ hiện tệp hệ thống của Explorer bị đổi", "Explorer's show-protected-system-files setting changed"); } }
+            public static string ViewFileExt { get { return T("Cờ hiện đuôi tệp của Explorer bị đổi", "Explorer's show-file-extensions setting changed"); } }
             public static string Missing { get { return T("(không có)", "(missing)"); } }
         }
 
@@ -1250,6 +1253,11 @@ namespace ShieldGate
             {
                 return T("Không sửa được khoá Registry: " + what,
                          "Could not repair the registry key: " + what);
+            }
+            public static string PolicyReverted(string name)
+            {
+                return T("Cấu hình bảo vệ bị đổi ngược (" + name + "); đã đặt lại.",
+                         "A protection setting was changed back (" + name + "); it was restored.");
             }
             public static string ProcessStopped(int pid, string root)
             {
@@ -2099,6 +2107,8 @@ namespace ShieldGate
             public static string LogLanguage { get { return T("nhật ký đổi theo ngôn ngữ", "log text follows the chosen language"); } }
             public static string RegDeleteMissing { get { return T("xoá khoá đăng ký chưa tồn tại không báo lỗi", "deleting a registry key that never existed does not fail"); } }
             public static string RegistryScan { get { return T("quét Registry File Explorer không gây lỗi", "the File Explorer registry check runs without errors"); } }
+            public static string RegViewBaseline { get { return T("cờ xem tệp: lập ảnh chụp lần đầu và không báo oan", "view flags: the first snapshot is recorded and nothing is reported"); } }
+            public static string RegViewCorrupt { get { return T("cờ xem tệp: ảnh chụp hỏng được đổi tên và lập lại", "view flags: a corrupt snapshot is renamed and rebuilt"); } }
             public static string LongPathQuarantine { get { return T("cách ly và khôi phục tệp có đường dẫn dài hơn 260 ký tự", "quarantine and restore a file whose path is longer than 260 characters"); } }
             public static string JsonRoundTrip { get { return T("đọc và ghi lại JSON có chú thích, mảng và ký tự thoát", "parse and re-serialise JSON with comments, arrays and escapes"); } }
             public static string JsonReject { get { return T("từ chối JSON hỏng thay vì đọc sai", "reject broken JSON instead of misreading it"); } }

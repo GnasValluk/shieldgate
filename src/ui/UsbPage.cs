@@ -104,7 +104,6 @@ namespace ShieldGate
             _tips.SetToolTip(_refresh, S.Usb.Refresh);
             _tips.SetToolTip(_scanFolder, S.Usb.ChooseFolderHint);
             _tips.SetToolTip(_rename, S.Usb.RenameBase64Hint);
-            _tips.SetToolTip(_recoverFake, S.Usb.RecoverFakeHint);
 
             _notice = new Notice();
             Controls.Add(_notice);
@@ -166,6 +165,8 @@ namespace ShieldGate
             _recoverFake = MakeButton(S.Usb.RecoverFake(0), ButtonKind.Secondary);
             _recoverFake.Click += delegate { DoRecoverFake(); };
             Controls.Add(_recoverFake);
+            // Phải đặt sau khi tạo nút: ToolTip không nhận control null.
+            _tips.SetToolTip(_recoverFake, S.Usb.RecoverFakeHint);
 
             _undo = MakeLink(S.Usb.Undo, "undo");
             _undo.IconSize = 13;

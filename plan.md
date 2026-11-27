@@ -243,7 +243,7 @@ chấp nhận được, và có thêm khoá mới vào `rules.json` hay không.
 
 Trong lúc chờ: chỉ sửa lỗi và tài liệu; không thêm tính năng lớn.
 
-### 6.2 Bản làm giàu luật 3.2 (đang làm, 2026-11-26)
+### 6.2 Bản làm giàu luật 3.2 (đã xong, 2026-11-26)
 
 Bắt đầu từ hai tài liệu nháp của chủ dự án (bộ rule ngoại vi và bảo vệ
 Registry). Hai tài liệu chưa đầy đủ và chưa đối chiếu mã, nên chỉ triển khai
@@ -279,6 +279,52 @@ với tài liệu Registry: chỉ báo thay đổi so với ảnh chụp, không
 hàng đợi Defender exclusion; cờ file-infector; YARA; mọi thay đổi cần quyền
 quản trị. Các mục B1/B2 (LOLBin trong LNK) và F1 để đợt sau vì dễ báo nhầm
 shortcut hợp lệ.
+
+### 6.3 Bản nâng cấp Registry 3.3 (đã xong, 2026-11-27)
+
+Bắt đầu từ tài liệu *Nâng cấp cơ chế bảo vệ Registry* (bản nháp v0.1, mục 4–5;
+các mục 6–11 chưa có). Nguyên tắc: ba tầng (tự bảo vệ / theo dõi và đề xuất /
+chỉ báo cáo), không ép lựa chọn người dùng, mọi lần ghi đều có sao lưu và đọc
+lại.
+
+Đã làm trong đợt 1:
+
+- **W4 — cờ xem tệp của Explorer** (`Hidden`, `ShowSuperHidden`, `HideFileExt`):
+  `RegViewGuard` lưu ảnh chụp theo từng người dùng vào `regview.snapshot`; lần
+  quét đầu chỉ ghi, lần sau chỉ báo khi giá trị *đổi*. Đề xuất trả về giá trị
+  trước đó; không dùng giá trị "mặc định" và không tự sửa.
+- **W5 — policy khoá công cụ:** thêm nhánh HKLM cho `NoFolderOptions`,
+  `NoViewContextMenu`, `DisableTaskMgr`, `DisableRegistryTools` (trước chỉ có
+  HKCU). Tất cả là tầng 2: hiện trong kết quả, người dùng bấm mới sửa.
+- **G1 — tự bảo vệ cấu hình ShieldGate:** `Guard.Keep` ghi lại giá trị chính
+  sách AutoRun/ini/WSH mà ShieldGate đặt; nếu vòng sau thấy bị đổi ngược thì
+  đặt lại và ghi một dòng `PolicyReverted` kèm tên giá trị. Nhánh tắt bảo vệ
+  vẫn dùng `Reg.Write` để không báo nhầm khi người dùng chủ động tắt.
+- **Đọc lại sau khi ghi:** `RegistryGuard.Write` so lại giá trị/kiểu ngay sau
+  `SetValue`; nếu Group Policy, Tamper Protection hoặc AV ghi đè thì trả `false`
+  thay vì tính là đã sửa. `RegViewGuard` bỏ qua khi chạy dưới SYSTEM (HKCU của
+  SYSTEM không phải của người dùng); ảnh chụp hỏng được đổi tên `.bad` rồi lập
+  lại, không làm hỏng lượt quét.
+- **Dọn dẹp:** `regview.snapshot` và `.bad` nằm trong danh sách dữ liệu của
+  `Uninstaller`.
+
+Self-test **88** mục: thêm "lập ảnh chụp lần đầu không báo oan" và "ảnh chụp
+hỏng được đổi tên rồi lập lại". Không ghi vào HKCU thật.
+
+Cố ý **không** làm trong đợt này:
+
+- **Theo dõi theo sự kiện `RegNotifyChangeKeyValue`:** cần luồng tồn tại lâu,
+  đăng ký lại sau mỗi tín hiệu, xử lý khác biệt Windows 7 và câu hỏi HKCU của
+  phiên người dùng so với SYSTEM. Vòng lặp nền hiện có đã áp chính sách mỗi
+  giây và quét máy định kỳ, nên giữ làm lưới an toàn; chỉ thêm sự kiện khi có
+  thiết kế cho tray + SYSTEM.
+- **W1/W2/W3/W6 theo dõi *mọi* giá trị mới:** dễ báo nhầm phần mềm hợp pháp;
+  hiện vẫn chấm điểm theo đường dẫn/chữ ký như cũ.
+- **R1/R2 (Defender exclusion, tắt giám sát thời gian thực):** chỉ báo cáo,
+  nhưng cần xác nhận tên giá trị, `TPExclusions`, `HideExclusionsFromLocalAdmin`
+  và cách kiểm tra AV bên thứ ba; tài liệu chưa có mục 6–11 nên để bản sau.
+- **R3/R4/R5:** tường lửa/IFEO/COM cần danh mục giá trị chính xác và quyền đọc
+  bổ sung.
 
 ## 7. Nhật ký tiến độ
 
@@ -1702,3 +1748,32 @@ khi nối GUI.
 - Còn lại: kiểm chứng trên ổ thật `E:\DATA_VAZG4SVR`; đợt sau B1/B2 (LOLBin
   trong LNK), F1 (Defender exclusion), E1 (cờ file-infector) và phần Registry
   khi tài liệu đầy đủ.
+
+### 2026-11-27 — Bảo vệ Registry, đợt 1 (3.3.0)
+
+- Đối chiếu tài liệu *Nâng cấp cơ chế bảo vệ Registry* (mục 4–5; mục 6–11 chưa
+  có) với mã 3.2; chốt đợt 1 gồm W4, W5, G1 và phần đọc lại sau khi ghi (xem
+  **mục 6.3**). Không ép giá trị Explorer về "mặc định", chỉ báo thay đổi so với
+  ảnh chụp.
+- `src/core/RegistryGuard.cs`: `RegViewGuard` lưu ảnh chụp theo SID
+  (`regview.<SID>.snapshot`); bỏ qua SYSTEM; ảnh chụp hỏng đổi tên `.bad` rồi
+  lập lại; `RegistryGuard.Detect(true)` đọc thêm HKLM. `Write` đọc lại
+  giá trị/kiểu sau `SetValue` và trả `false` nếu không dính.
+- `src/core/Guard.cs`: `Keep()` đặt lại giá trị AutoRun/ini/WSH mà ShieldGate
+  đã đặt khi bị đổi ngược, ghi `PolicyReverted` một lần; nhánh tắt bảo vệ vẫn
+  dùng `Reg.Write` để không báo nhầm.
+- `src/core/Scan.cs`, `Core.cs`, `Uninstaller.cs`, `Strings.cs`: gọi
+  `EnsureBaseline` trước khi quét Registry; thêm `Paths.RegViewPrefix`; dọn
+  `regview.*.snapshot*` khi gỡ; chuỗi Việt/Anh mới.
+- `src/ui/SelfTest.cs`: 88 mục, thêm "lập ảnh chụp lần đầu không báo oan" và
+  "ảnh chụp hỏng được đổi tên rồi lập lại"; không ghi HKCU thật.
+- Sửa lỗi giao diện: `UsbPage` đặt tooltip cho `_recoverFake` trước khi tạo nút
+  → `ArgumentNullException`, mở tab "Xử lý USB" hiện "Đã xảy ra lỗi không mong
+  muốn.". Chuyển lệnh sau khi tạo nút.
+- Kiểm tra: `build.ps1` → `dist\ShieldGate.exe` 692 KB, SHA256
+  `8a897367ee72abcaf19e426abbf4e8f4f96df63cf3d4fdfbaab9fc4ffa54f26d`;
+  `test.ps1` → `Đạt 88/88 phép kiểm tra.`, exit 0. Mở tab "Xử lý USB" và quét
+  `G:\` trên bản dựng mới: không còn hộp thoại lỗi, quét xong 4 mục như cũ.
+- Còn lại: kiểm chứng trên ổ thật `E:\DATA_VAZG4SVR`; R1/R2 (Defender
+  exclusion, tắt giám sát thời gian thực), R3/R4/R5 (tường lửa/IFEO/COM),
+  W1/W2/W3/W6 và `RegNotifyChangeKeyValue` khi tài liệu có mục 6–11.
