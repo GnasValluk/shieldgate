@@ -478,7 +478,7 @@ namespace ShieldGate
             LayoutPage();
         }
 
-        private void LayoutPage()
+        protected override void LayoutPageCore()
         {
             if (ClientSize.Width <= 0) return;
 
@@ -556,7 +556,7 @@ namespace ShieldGate
             _quarText.Bounds = new Rectangle(pad, quarY + Ui.Px(34),
                 Math.Max(Ui.Px(120), _quarLink.Left - Ui.Px(12) - pad), Ui.Px(40));
 
-            AutoScrollMinSize = new Size(0, quarY + Ui.Px(90));
+            SetScrollHeight(quarY + Ui.Px(90));
         }
 
         private Color _protectDot = Theme.InkFaint;

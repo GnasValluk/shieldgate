@@ -326,7 +326,7 @@ namespace ShieldGate
             LayoutPage();
         }
 
-        private void LayoutPage()
+        protected override void LayoutPageCore()
         {
             if (ClientSize.Width <= 0) return;
 

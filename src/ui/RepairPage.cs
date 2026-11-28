@@ -701,7 +701,7 @@ namespace ShieldGate
             LayoutPage();
         }
 
-        private void LayoutPage()
+        protected override void LayoutPageCore()
         {
             if (ClientSize.Width <= 0) return;
             int pad = Pad;
@@ -711,11 +711,12 @@ namespace ShieldGate
             _title.Bounds = Ui.Rect(Theme.PagePad, 20, 280, 34);
             int refreshW = Ui.Measure(S.Repair.Refresh, Theme.Small).Width + Ui.Px(24);
             _refresh.Bounds = new Rectangle(right - refreshW, Ui.Px(28), refreshW, Ui.Px(22));
-            _intro.Bounds = new Rectangle(pad, Ui.Px(58), width, Ui.Px(34));
+            // Bản giới thiệu dài hai dòng; 34 px cắt mất dòng thứ hai.
+            _intro.Bounds = new Rectangle(pad, Ui.Px(58), width, Ui.Px(44));
 
-            int driveY = Ui.Px(100);
-            _driveCaption.Bounds = new Rectangle(pad, driveY + Ui.Px(4), Ui.Px(34), Ui.Px(22));
-            int driveX = pad + Ui.Px(40);
+            int driveY = Ui.Px(110);
+            _driveCaption.Bounds = new Rectangle(pad, driveY + Ui.Px(4), Ui.Px(40), Ui.Px(22));
+            int driveX = pad + Ui.Px(46);
             _drive.Bounds = new Rectangle(driveX, driveY,
                 Math.Min(Ui.Px(340), Math.Max(Ui.Px(150), right - driveX)), Ui.Px(30));
 
@@ -769,7 +770,7 @@ namespace ShieldGate
                 Math.Max(Ui.Px(60), _outputBox.Width - Ui.Px(24)),
                 Math.Max(Ui.Px(80), _outputBox.Height - Ui.Px(20)));
 
-            AutoScrollMinSize = new Size(0, top + h + Ui.Px(26));
+            SetScrollHeight(top + h + Ui.Px(26));
         }
 
         protected override void PaintPage(Graphics g)

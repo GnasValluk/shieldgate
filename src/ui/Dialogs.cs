@@ -179,7 +179,7 @@ namespace ShieldGate
 
     // ------------------------------------------------------- danh sách kết quả
 
-    internal sealed class FindingList : ScrollableControl
+    internal sealed class FindingList : SmoothListControl
     {
         private readonly List<PcItem> _items = new List<PcItem>();
 

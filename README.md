@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/license-MIT-1f5e3d?style=flat-square" alt="MIT license">
   <img src="https://img.shields.io/badge/platform-Windows%207%2B-0078d4?style=flat-square" alt="Windows 7 or later">
   <img src="https://img.shields.io/badge/.NET%20Framework-4.0-5b6472?style=flat-square" alt=".NET Framework 4.0">
-  <img src="https://img.shields.io/badge/download-692%20KB-5b6472?style=flat-square" alt="About 692 KB">
+  <img src="https://img.shields.io/badge/download-694%20KB-5b6472?style=flat-square" alt="About 694 KB">
 </p>
 
 <p align="center">
@@ -41,10 +41,29 @@ Vietnamese and English interface. See [PRIVACY.md](PRIVACY.md).
 
 ## A look inside
 
-| Devices | Drive repair |
-|---|---|
-| <img src="docs/screenshots/devices.png" alt="Peripheral devices and event timeline"> | <img src="docs/screenshots/drive-repair.png" alt="Drive repair with icon toolbar"> |
-| Inventory with VID/PID/serial, trust marks, event timeline | Diagnose, preview, back up, check the file system; icons name themselves on hover |
+| Protection | Devices | Drive repair |
+|---|---|---|
+| <img src="docs/screenshots/protect.png" alt="Protection switches"> | <img src="docs/screenshots/devices.png" alt="Peripheral devices and event timeline"> | <img src="docs/screenshots/drive-repair.png" alt="Drive repair with icon toolbar"> |
+| One switch per policy, with a plain-language note on what it blocks | Inventory with VID/PID/serial, trust marks, event timeline | Diagnose, preview, back up, check the file system; icons name themselves on hover |
+
+## What is new in 3.3.1
+
+- **Switching tabs no longer misaligns a scrolled page.** WinForms puts child
+  controls back at their design position when a page is hidden and shown again
+  while the scroll offset stays, so the content and the scrollbar disagreed and
+  the page had to be dragged back to the top to recover. Every page now lays
+  itself out at the top and restores the offset, and lays out again right after
+  it becomes visible. A layout pass also no longer scrolls the page to whichever
+  control has focus.
+- **Smoother wheel scrolling.** One wheel notch now moves about 54 px in small
+  steps instead of jumping 120 px, adds up when you keep scrolling, and stops
+  while the mouse button is down.
+- **Long descriptions are no longer cut off.** The Protection note, the Devices
+  intro and the Drive repair intro need two lines at the current font size and
+  were losing the second one; the blocks are taller now.
+- **The folder picker closes with one click.** A second click while the shell
+  dialog was still open could stack another dialog on top of it.
+- **Fresh screenshots** on this page show 3.3.1.
 
 ## What is new in 3.3
 

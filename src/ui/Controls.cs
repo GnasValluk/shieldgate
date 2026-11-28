@@ -260,7 +260,7 @@ namespace ShieldGate
 
     // ---------------------------------------------------- danh sách có hộp chọn
 
-    internal sealed class UsbListControl : ScrollableControl
+    internal sealed class UsbListControl : SmoothListControl
     {
         private sealed class Row
         {
@@ -1013,7 +1013,7 @@ namespace ShieldGate
 
     // ------------------------------------------------------- danh sách thiết bị
 
-    internal sealed class DeviceListControl : ScrollableControl
+    internal sealed class DeviceListControl : SmoothListControl
     {
         private readonly List<DeviceInfo> _rows = new List<DeviceInfo>();
         private int _focus = -1;
@@ -1260,7 +1260,7 @@ namespace ShieldGate
 
     // ------------------------------------------------------ dòng thời gian
 
-    internal sealed class EventListControl : ScrollableControl
+    internal sealed class EventListControl : SmoothListControl
     {
         private readonly List<EventEntry> _rows = new List<EventEntry>();
         private string _empty = "";

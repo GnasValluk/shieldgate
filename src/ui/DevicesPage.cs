@@ -292,7 +292,7 @@ namespace ShieldGate
             LayoutPage();
         }
 
-        private void LayoutPage()
+        protected override void LayoutPageCore()
         {
             if (ClientSize.Width <= 0) return;
             int pad = Pad;
@@ -304,18 +304,20 @@ namespace ShieldGate
             int refreshW = Ui.Measure(S.Devices.Refresh, Theme.Small).Width + Ui.Px(24);
             _refresh.Bounds = new Rectangle(right - refreshW, Ui.Px(28), refreshW, Ui.Px(22));
 
-            _intro.Bounds = new Rectangle(pad, Ui.Px(58), width, Ui.Px(38));
+            // Hai dòng ở cỡ chữ hiện tại cần 42 px; 38 px làm mất hẳn dòng thứ
+            // hai, nên nới ra và dời các mục bên dưới xuống 6 px.
+            _intro.Bounds = new Rectangle(pad, Ui.Px(58), width, Ui.Px(44));
 
-            _devicesTitle.Bounds = new Rectangle(pad, Ui.Px(100), Ui.Px(240), Ui.Px(20));
-            _count.Bounds = new Rectangle(pad + Ui.Px(248), Ui.Px(100), width - Ui.Px(248), Ui.Px(20));
-            _devicesLine = Ui.Px(122);
+            _devicesTitle.Bounds = new Rectangle(pad, Ui.Px(110), Ui.Px(240), Ui.Px(20));
+            _count.Bounds = new Rectangle(pad + Ui.Px(248), Ui.Px(110), width - Ui.Px(248), Ui.Px(20));
+            _devicesLine = Ui.Px(132);
 
-            _notice.Bounds = new Rectangle(pad, Ui.Px(128), width, Ui.Px(38));
+            _notice.Bounds = new Rectangle(pad, Ui.Px(138), width, Ui.Px(38));
 
             int listH = Ui.Px(240);
-            _devices.Bounds = new Rectangle(pad, Ui.Px(172), width, listH);
+            _devices.Bounds = new Rectangle(pad, Ui.Px(182), width, listH);
 
-            int by = Ui.Px(172) + listH + Ui.Px(10);
+            int by = Ui.Px(182) + listH + Ui.Px(10);
             int bw = Ui.Px(126);
             _trust.Bounds = new Rectangle(pad, by, bw, Ui.Px(Theme.ControlHeight));
             _unknown.Bounds = new Rectangle(pad + bw + Ui.Px(8), by, bw, Ui.Px(Theme.ControlHeight));
@@ -343,7 +345,7 @@ namespace ShieldGate
             int h = Math.Max(Ui.Px(190), ClientSize.Height - top - Ui.Px(26));
             _events.Bounds = new Rectangle(pad, top, width, h);
 
-            AutoScrollMinSize = new Size(0, top + h + Ui.Px(26));
+            SetScrollHeight(top + h + Ui.Px(26));
         }
 
         protected override void PaintPage(Graphics g)

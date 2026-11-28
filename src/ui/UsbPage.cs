@@ -38,6 +38,10 @@ namespace ShieldGate
         // Thời điểm hộp thoại chọn thư mục vừa đóng, để bỏ qua cú nhả chuột bị
         // phát lại và không mở hộp thoại lần hai.
         private DateTime _folderClosedUtc = DateTime.MinValue;
+        // Hộp thoại shell chạy vòng lặp thông điệp lồng nhau, nên cú bấm thứ
+        // hai có thể gọi lại ChooseFolder trong lúc hộp thoại đầu còn mở. Cờ
+        // này chặn tái nhập, tránh mở hai hộp thoại chồng lên nhau.
+        private bool _folderOpen;
         private volatile bool _cancelFlag;
         private volatile int _progressFiles;
         private volatile string _progressPath = "";
@@ -969,20 +973,29 @@ namespace ShieldGate
         private void ChooseFolder()
         {
             if (IsDisposed || Disposing || _scanning || _applying || _unhiding) return;
+            // Đang mở hộp thoại thì bỏ qua mọi lần gọi lồng bên trong nó.
+            if (_folderOpen) return;
             // Chặn lần gọi thứ hai đến sát ngay sau khi hộp thoại vừa đóng: người
             // dùng chỉ bấm X một lần mà hộp thoại không được mở lại.
             if ((DateTime.UtcNow - _folderClosedUtc).TotalMilliseconds < 400) return;
 
-            string root;
-            using (FolderBrowserDialog dlg = new FolderBrowserDialog())
+            string root = null;
+            _folderOpen = true;
+            try
             {
-                dlg.Description = S.Usb.ChooseFolderHint;
-                dlg.ShowNewFolderButton = false;
-                DialogResult picked = dlg.ShowDialog(FindForm());
-                _folderClosedUtc = DateTime.UtcNow;
-                if (picked != DialogResult.OK) return;
-                root = dlg.SelectedPath;
+                using (FolderBrowserDialog dlg = new FolderBrowserDialog())
+                {
+                    dlg.Description = S.Usb.ChooseFolderHint;
+                    dlg.ShowNewFolderButton = false;
+                    if (dlg.ShowDialog(FindForm()) == DialogResult.OK) root = dlg.SelectedPath;
+                }
             }
+            finally
+            {
+                _folderClosedUtc = DateTime.UtcNow;
+                _folderOpen = false;
+            }
+
             if (string.IsNullOrEmpty(root) || root.Length < 3) return;
             string sys = Path.GetPathRoot(Environment.SystemDirectory) ?? "";
             if (sys.Length > 0 && root.StartsWith(sys, StringComparison.OrdinalIgnoreCase))
@@ -1120,7 +1133,7 @@ namespace ShieldGate
             LayoutPage();
         }
 
-        private void LayoutPage()
+        protected override void LayoutPageCore()
         {
             if (ClientSize.Width <= 0) return;
 

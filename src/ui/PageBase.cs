@@ -7,6 +7,8 @@ namespace ShieldGate
 {
     internal abstract class PageBase : UserControl
     {
+        private readonly SmoothScroll _smooth;
+
         protected PageBase()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
@@ -15,10 +17,12 @@ namespace ShieldGate
             Font = Theme.Body;
             AutoScaleMode = AutoScaleMode.None;
             AutoScroll = true;
+            _smooth = new SmoothScroll(this);
         }
 
         protected int Pad { get { return Ui.Px(Theme.PagePad); } }
         protected int ContentWidth { get { return Math.Max(Ui.Px(320), ClientSize.Width - Pad * 2); } }
+        protected int ScrollOffset { get { return -AutoScrollPosition.Y; } }
 
         public event Action<PageId> NavigateRequested;
         public event Action<string> UsbRequested;
@@ -44,6 +48,85 @@ namespace ShieldGate
         {
             if (Control.MouseButtons != MouseButtons.None) return AutoScrollPosition;
             return base.ScrollToControl(activeControl);
+        }
+
+        // Cuộn bằng timer thay vì nhảy 120 px mỗi nấc của WinForms.
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            // ContainerControl tự cuộn tới control đang focus sau mỗi lần bố
+            // cục. Đánh dấu "người dùng đã cuộn" để bước đó không kéo trang
+            // khỏi chỗ đang xem (lỗi hay gặp khi chuyển tab rồi quay lại).
+            SetScrollState(ScrollStateUserHasScrolled, true);
+            if (_smooth != null && _smooth.Wheel(e)) return;
+            base.OnMouseWheel(e);
+        }
+
+        // Trang tự vẽ: cú cuộn của WinForms chỉ chép lại pixel, nên vẽ lại toàn
+        // trang để không còn vệt của vị trí cũ ở rìa.
+        protected override void OnScroll(ScrollEventArgs se)
+        {
+            base.OnScroll(se);
+            Invalidate();
+        }
+
+        // Đặt chiều cao nội dung. Vị trí cuộn do LayoutPage giữ, nên ở đây chỉ
+        // cập nhật dải cuộn; không tự cuộn lại để tránh dời control con.
+        protected void SetScrollHeight(int height)
+        {
+            Size size = new Size(0, Math.Max(0, height));
+            if (AutoScrollMinSize != size) AutoScrollMinSize = size;
+        }
+
+        // Bố cục lại trang. WinForms luôn đặt control con theo toạ độ thiết kế
+        // (bỏ qua vị trí cuộn), nên phải đưa trang về đỉnh, đặt toạ độ, rồi
+        // cuộn lại; nếu không nội dung nhảy mỗi lần đổi kích thước, đổi trạng
+        // thái, hoặc khi quay lại tab đang cuộn dở.
+        protected void LayoutPage()
+        {
+            int offset = ScrollOffset;
+            // Chặn ContainerControl tự cuộn tới control đang focus trong lúc
+            // bố cục (xem OnMouseWheel).
+            SetScrollState(ScrollStateUserHasScrolled, true);
+
+            if (offset != 0) AutoScrollPosition = new Point(0, 0);
+            LayoutPageCore();
+            if (offset != 0)
+            {
+                // Bố cục có thể đã tự cuộn; đưa về đỉnh lần nữa để chắc chắn
+                // control con đang ở toạ độ thiết kế trước khi cuộn lại.
+                AutoScrollPosition = new Point(0, 0);
+                AutoScrollPosition = new Point(0, offset);
+            }
+            else
+            {
+                AutoScrollPosition = new Point(0, 0);
+            }
+        }
+
+        // Phần bố cục riêng của từng trang, đặt control theo toạ độ thiết kế.
+        protected virtual void LayoutPageCore() { }
+
+        // WinForms dời control con về toạ độ thiết kế khi trang bị ẩn rồi hiện
+        // lại, trong khi vị trí cuộn vẫn giữ nguyên; bố cục lại sau khi hiện để
+        // căn control con đúng với vị trí cuộn.
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (!Visible || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    if (!IsDisposed && IsHandleCreated && Visible) LayoutPage();
+                });
+            }
+            catch { }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _smooth != null) _smooth.Dispose();
+            base.Dispose(disposing);
         }
 
         protected override void OnPaint(PaintEventArgs e)

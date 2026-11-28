@@ -6,6 +6,6 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyDescription("Block and clean USB shortcut viruses.")]
 [assembly: AssemblyProduct("ShieldGate")]
 [assembly: AssemblyCopyright("MIT License")]
-[assembly: AssemblyVersion("3.3.0.0")]
-[assembly: AssemblyFileVersion("3.3.0.0")]
+[assembly: AssemblyVersion("3.3.1.0")]
+[assembly: AssemblyFileVersion("3.3.1.0")]
 [assembly: ComVisible(false)]

@@ -214,7 +214,7 @@ namespace ShieldGate
             LayoutPage();
         }
 
-        private void LayoutPage()
+        protected override void LayoutPageCore()
         {
             if (ClientSize.Width <= 0) return;
 
@@ -253,7 +253,7 @@ namespace ShieldGate
             _remove.Bounds = new Rectangle(pad, y + Ui.Px(102),
                 TextWidth(S.About.RemoveAction, Theme.BodyStrong), Ui.Px(Theme.ControlHeight));
 
-            AutoScrollMinSize = new Size(0, y + Ui.Px(164));
+            SetScrollHeight(y + Ui.Px(164));
         }
 
         protected override void PaintPage(Graphics g)

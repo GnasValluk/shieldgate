@@ -1777,3 +1777,94 @@ khi nối GUI.
 - Còn lại: kiểm chứng trên ổ thật `E:\DATA_VAZG4SVR`; R1/R2 (Defender
   exclusion, tắt giám sát thời gian thực), R3/R4/R5 (tường lửa/IFEO/COM),
   W1/W2/W3/W6 và `RegNotifyChangeKeyValue` khi tài liệu có mục 6–11.
+
+### 2026-11-28 — Cuộn mượt trang dài, sửa hộp thoại chọn thư mục mở chồng
+
+- **Lỗi 1 — cuộn giật:** đo trên bản 3.3.0, một nấc chuột cuộn đúng **120 px**
+  (ba "dòng" của hệ thống) trong khi trang Bảo vệ chỉ có 553 px tầm cuộn, nên
+  năm nấc là hết trang. WinForms còn cuộn bằng cách chép pixel nên trang tự vẽ
+  dễ sót vệt của vị trí cũ ở rìa.
+- **Lỗi 2 — nội dung nhảy khi bố cục lại:** đo được khi đang cuộn 360 px rồi gọi
+  `LayoutPage` (bấm "Chi tiết kỹ thuật") thì vị trí nhảy về 140 px, vì gán lại
+  `AutoScrollMinSize` làm WinForms tính lại dải cuộn.
+- **Sửa cuộn:** thêm `src/ui/SmoothScroll.cs`. Mỗi nấc chia thành nhiều bước
+  15 ms trong 150 ms, giảm tốc ở cuối, cộng dồn khi lăn liên tiếp, dừng khi
+  chuột đang nhấn; bước = `MouseWheelScrollLines × 18 px` thiết kế (mặc định
+  54 px, khoảng 1/10 trang) thay cho 120 px. `PageBase` và bốn danh sách tự vẽ
+  (`UsbListControl`, `DeviceListControl`, `EventListControl`, `FindingList`)
+  dùng chung lớp `SmoothListControl`.
+- `PageBase.OnScroll` vẽ lại toàn trang để không còn vệt cũ; thêm
+  `PageBase.SetScrollHeight` giữ nguyên vị trí cuộn khi đổi chiều cao nội dung,
+  dùng ở năm trang `About`, `Devices`, `Overview`, `Protect`, `Repair`.
+- **Lỗi 3 — hộp thoại chọn thư mục phải đóng hai lần:** hộp thoại shell chạy
+  vòng lặp thông điệp lồng nhau, nên lần gọi `ChooseFolder` thứ hai (bấm đúp,
+  hoặc bấm lại khi hộp thoại còn mở) mở hộp thoại mới **chồng lên** hộp thoại
+  đầu; đóng cái trên thì thấy cái dưới. `UsbPage` thêm cờ `_folderOpen` đặt
+  trước `ShowDialog` và xoá trong `finally`, giữ nguyên mốc 400 ms sau khi đóng.
+- **Bằng chứng:** dựng bản HEAD cũ và bản mới rồi gửi cú bấm vào liên kết khi
+  hộp thoại đang mở — bản cũ **1 → 2 → 3** hộp thoại, bản mới **1 → 1 → 1**,
+  đóng bằng Cancel còn **0**. Đo cuộn: bản cũ một nấc 120 px; bản mới lấy mẫu
+  20 ms được `0 → 33 → 59 → 66` px rồi dừng; cuộn khi trỏ lên nhãn con vẫn tới
+  trang (66 → 132); `LayoutPage` khi đang cuộn giữ nguyên 132 px.
+- **Kiểm tra:** `build.ps1` → `dist\ShieldGate.exe` 693 KB, SHA256
+  `741d90aa15c7fddbc45b0d8d6838fae1f6699c45dd119742b774e802ba7e1727`;
+  `test.ps1` → `Đạt 88/88 phép kiểm tra.`, exit 0.
+- **Còn lại:** nhờ người dùng bấm thử "Quét thư mục…" trên máy thật (một lần
+  bấm, bấm đúp, và bấm X) để xác nhận; lượt này không đổi số phiên bản.
+
+### 2026-11-28 — Sửa cuộn lệch khi chuyển tab (trang Bảo vệ)
+
+- **Lỗi:** tab Bảo vệ lệch nội dung ngay khi vào; phải kéo về đỉnh rồi chuyển
+  tab qua lại mới hết; đang cuộn giữa chừng mà đổi tab thì lỗi lại.
+- **Nguyên nhân 1 — ẩn/hiện đặt lại toạ độ control con:** khi trang bị ẩn rồi
+  hiện, `Control.SetVisibleCore` gán lại `Bounds` của từng control con về toạ
+  độ thiết kế, nhưng `ScrollableControl` vẫn giữ `_displayRect` (vị trí cuộn).
+  Đo trên `MainForm` thật: cuộn 200 px rồi đổi tab và quay lại thì
+  `AutoScrollPosition` vẫn `-200` nhưng control đầu về `Top=20` thay vì `-180`
+  — cả **21/21** control lệch đúng 200 px so với thanh cuộn. Kéo về đỉnh
+  (offset 0) thì hai bên khớp lại, đúng như mô tả của người dùng.
+- **Nguyên nhân 2 — bố cục kéo trang về control đang focus:**
+  `ContainerControl.AdjustFormScrollbars` gọi `ScrollActiveControlIntoView`
+  khi cờ `ScrollStateUserHasScrolled` chưa bật, nên mỗi lần bố cục lại (đổi
+  kích thước, mở "Chi tiết kỹ thuật", cập nhật trạng thái) lại kéo trang về
+  control đang focus; đo được 360 → 140 px. Cùng cơ chế này làm offset lớn bị
+  kẹp về 112 px.
+- **Sửa:** `PageBase` thêm `LayoutPage()` bao ngoài: lưu offset hiện tại, bật cờ
+  user-scrolled, đưa trang về đỉnh, gọi `LayoutPageCore()` (phần bố cục riêng,
+  đổi tên từ `LayoutPage` ở bảy trang `About`, `Devices`, `Log`, `Overview`,
+  `Protect`, `Repair`, `Usb`), rồi cuộn lại đúng offset. `OnVisibleChanged` bố
+  cục lại sau khi hiện bằng `BeginInvoke` (thông điệp posted chạy trước
+  `WM_PAINT` nên không nháy hình). `SetScrollHeight` chỉ cập nhật dải cuộn,
+  không tự cuộn nữa; `OnMouseWheel` bật cờ user-scrolled.
+- **Bằng chứng (probe 16/17, chạy trên `MainForm` thật):** 21/21 control khớp
+  ở mọi mốc — cuộn 200 px, đổi tab đi/về (200), gọi `LayoutPage`, `PerformLayout`,
+  `ApplyStatus`; ở đỉnh (0) và đáy (442); trang Devices cuộn 88 px rồi đổi tab
+  vẫn khớp. Trước khi sửa, cùng phép đo cho 21 control lệch 200 px.
+- **Kiểm tra:** `build.ps1` → `dist\ShieldGate.exe` 694 KB (hash đổi mỗi lần
+  dựng vì `csc` v4.0 nhúng timestamp vào PE; lần cuối
+  `5bb4e60f6f1c2151cedb399972591e5357f84c587d4be37b82ab39760e998080`);
+  `test.ps1` → `Đạt 88/88 phép kiểm tra.`, exit 0.
+
+### 2026-11-28 — Bản 3.3.1: ảnh giao diện mới, sửa chữ bị cắt, phát hành
+
+- **Số phiên bản:** 3.3.0 → 3.3.1 (`AppInfo.Version`, `AssemblyVersion`,
+  `AssemblyFileVersion`). Lượt này gồm cả ba thay đổi chưa phát hành: cuộn lệch
+  khi đổi tab, cuộn mượt, hộp thoại chọn thư mục đóng một lần.
+- **Ảnh mới:** chụp lại ở 1000×680, tỉ lệ 100%, tiếng Anh, bằng một harness
+  dựng `MainForm` thật (không qua hộp thiết lập, `SHIELDGATE_HOME` trỏ thư mục
+  tạm) rồi chụp vùng client. Ảnh cũ từ bản 2.0 còn ghi "ShieldGate 2.0" ở chân
+  trang. Thay `overview.png`, `devices.png`, `drive-repair.png`; thêm
+  `protect.png`. Timeline trong ảnh Devices có ba mục do chính `Events.Add`
+  ghi vào thư mục tạm, không phải dữ liệu của máy.
+- **Chữ bị cắt (lỗi có từ trước):** ở cỡ chữ hiện tại, một dòng cao ~21 px nên
+  khối hai dòng cần 42 px. `_adminNote` của trang Bảo vệ cao 22 px (mất hẳn
+  dòng "background protection"), phần giới thiệu trang Devices 38 px và trang
+  Drive repair 34 px (mất dòng thứ hai). Nới lên 40/44/44 px; trang Devices dời
+  các mục bên dưới xuống 10 px, trang Drive repair dời `driveY` 100 → 110; nhãn
+  "Drive" rộng 34 → 40 px để không còn hiện "Driv".
+- **Kiểm tra:** `build.ps1` exit 0; `test.ps1` → `Đạt 88/88`, exit 0. Ảnh kiểm
+  tra lại bằng mắt: đủ hai dòng, không đè lên mục kế tiếp, chân trang ghi
+  "ShieldGate 3.3.1".
+- **Phát hành:** tag `v3.3.1`, release kèm `dist\ShieldGate.exe`; workflow
+  `build.yml` chỉ ký khi biến `SIGNPATH_PROJECT_SLUG` có giá trị, nên bản này
+  vẫn là bản chưa ký như 3.3.0.

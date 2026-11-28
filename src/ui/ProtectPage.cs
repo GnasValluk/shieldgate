@@ -420,7 +420,7 @@ namespace ShieldGate
             LayoutPage();
         }
 
-        private void LayoutPage()
+        protected override void LayoutPageCore()
         {
             if (ClientSize.Width <= 0) return;
 
@@ -435,7 +435,9 @@ namespace ShieldGate
 
             _intro.Bounds = new Rectangle(pad, Ui.Px(62), width - toggleW - Ui.Px(28), Ui.Px(44));
 
-            _adminNote.Bounds = new Rectangle(pad, Ui.Px(112), Ui.Px(320), Ui.Px(22));
+            // Câu nhắc dài hai dòng ở cỡ chữ hiện tại; để 22 px thì dòng thứ
+            // hai bị cắt mất, nên chừa đủ chỗ tới sát hàng công tắc đầu tiên.
+            _adminNote.Bounds = new Rectangle(pad, Ui.Px(112), Ui.Px(320), Ui.Px(40));
             _reload.Bounds = new Rectangle(pad + Ui.Px(330), Ui.Px(112),
                 Ui.Measure(S.Protect.Reload, Theme.Small).Width + Ui.Px(24), Ui.Px(22));
 
@@ -476,7 +478,7 @@ namespace ShieldGate
             int backupY = _techOpen ? techY + Ui.Px(150) : techY + Ui.Px(10);
             _backup.Bounds = new Rectangle(pad, backupY, width, Ui.Px(40));
 
-            AutoScrollMinSize = new Size(0, backupY + Ui.Px(70));
+            SetScrollHeight(backupY + Ui.Px(70));
         }
     }
 }
