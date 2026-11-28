@@ -17,6 +17,8 @@ namespace ShieldGate
     {
         public const string Name = "ShieldGate";
         public const string Version = "3.3.1";
+        // Địa chỉ công khai của kho mã nguồn; nút GitHub ở trang Giới thiệu dùng.
+        public const string ProjectUrl = "https://github.com/GnasValluk/shieldgate";
         public const string TaskName = "ShieldGate USB Guard";
         public const string TrayTaskName = "ShieldGate Tray";
         // Giữ hậu tố _2 khi lên 3.0: bản 2.3 và 3.0 dùng chung một mutex để lúc

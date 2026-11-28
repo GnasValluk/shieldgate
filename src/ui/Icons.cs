@@ -237,6 +237,22 @@ namespace ShieldGate
                                 new PointF(ox + 7.2f * s, oy + 8.4f * s)
                             });
                             break;
+
+                        case "github":
+                            // Ba mắt nhánh nối nhau: đọc ra kho mã nguồn (git branch).
+                            g.DrawEllipse(pen, ox + 3.4f * s, oy + 3.2f * s, 4.4f * s, 4.4f * s);
+                            g.DrawEllipse(pen, ox + 3.4f * s, oy + 12.4f * s, 4.4f * s, 4.4f * s);
+                            g.DrawEllipse(pen, ox + 12.2f * s, oy + 7.6f * s, 4.4f * s, 4.4f * s);
+                            g.DrawLine(pen, ox + 5.6f * s, oy + 7.6f * s, ox + 5.6f * s, oy + 12.4f * s);
+                            using (GraphicsPath branch = new GraphicsPath())
+                            {
+                                branch.AddBezier(ox + 7.4f * s, oy + 9.8f * s,
+                                                 ox + 9.2f * s, oy + 9.8f * s,
+                                                 ox + 10.4f * s, oy + 9.8f * s,
+                                                 ox + 12.2f * s, oy + 9.8f * s);
+                                g.DrawPath(pen, branch);
+                            }
+                            break;
                     }
                 }
             }

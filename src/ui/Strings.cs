@@ -1708,6 +1708,7 @@ namespace ShieldGate
             public static string Data { get { return T("Dữ liệu", "Data"); } }
             public static string Hash { get { return T("SHA256 của tệp đang chạy", "SHA256 of the running file"); } }
             public static string SourceSoon { get { return T("Mã nguồn đầy đủ đi kèm bản phát hành này.", "The full source code ships with this release."); } }
+            public static string GitHub { get { return T("Mở dự án trên GitHub", "Open the project on GitHub"); } }
             public static string OpenFolder { get { return T("Mở thư mục", "Open folder"); } }
 
             // Gỡ cài đặt

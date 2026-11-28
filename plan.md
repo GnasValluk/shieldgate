@@ -1868,3 +1868,18 @@ khi nối GUI.
 - **Phát hành:** tag `v3.3.1`, release kèm `dist\ShieldGate.exe`; workflow
   `build.yml` chỉ ký khi biến `SIGNPATH_PROJECT_SLUG` có giá trị, nên bản này
   vẫn là bản chưa ký như 3.3.0.
+
+### 2026-11-28 — Nút GitHub ở trang Giới thiệu (cập nhật lại release 3.3.1)
+
+- **Thêm nút:** mục "Mã nguồn" của trang Giới thiệu có thêm liên kết
+  `Mở dự án trên GitHub` / `Open the project on GitHub`, kèm biểu tượng
+  `github` mới trong `Icons.cs` (ba mắt nhánh nối nhau). Bấm vào mở
+  `https://github.com/GnasValluk/shieldgate` bằng trình duyệt mặc định.
+- **Địa chỉ:** hằng `AppInfo.ProjectUrl` trong `src/core/Core.cs`, không rải
+  URL khắp UI. Chuỗi đi qua `S.About.GitHub`; mục "Mã nguồn" cao thêm 24 px
+  để liên kết không đè lên mục "Dữ liệu".
+- **Giữ nguyên số phiên bản 3.3.1:** chỉ thay tệp đính kèm của release
+  `v3.3.1`, không sửa mô tả release và không lên 3.3.2.
+- **Kiểm tra:** `build.ps1` → `dist\ShieldGate.exe` 694 KB
+  (`196be2d774349a520a2bf4c4a3017205edcbd6ae7ac72a817a69e75d1730e3aa`);
+  `test.ps1` → `Đạt 88/88 phép kiểm tra.`, exit 0.

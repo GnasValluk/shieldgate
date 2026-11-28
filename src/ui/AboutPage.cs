@@ -15,6 +15,7 @@ namespace ShieldGate
         private readonly LinkText _openData;
         private readonly Label _sourceLabel, _dataLabel;
         private readonly Label _sourceNote, _dataPath, _hashLabel;
+        private readonly LinkText _sourceLink;
         private readonly TextBox _hash;
         private readonly Panel _hashBox;
         private readonly Label _removeLabel, _removeNote;
@@ -46,6 +47,11 @@ namespace ShieldGate
 
             _sourceNote = MakeLabel(S.About.SourceSoon, Theme.Body, Theme.InkMuted);
             Controls.Add(_sourceNote);
+
+            _sourceLink = MakeLink(S.About.GitHub, "github");
+            _sourceLink.IconSize = 13;
+            _sourceLink.Click += delegate { OpenProject(); };
+            Controls.Add(_sourceLink);
 
             _dataLabel = MakeLabel(S.About.Data, Theme.Section, Theme.Ink);
             Controls.Add(_dataLabel);
@@ -134,6 +140,13 @@ namespace ShieldGate
                 Paths.EnsureDirs();
                 Process.Start(Native.ShellExe("explorer.exe"), "\"" + Paths.Root + "\"");
             }
+            catch { }
+        }
+
+        // Mở kho mã nguồn bằng trình duyệt mặc định; lỗi mở được thì bỏ qua.
+        private void OpenProject()
+        {
+            try { Process.Start(AppInfo.ProjectUrl); }
             catch { }
         }
 
@@ -233,8 +246,10 @@ namespace ShieldGate
             int y = Ui.Px(184);
             _sourceLabel.Bounds = new Rectangle(pad, y, Ui.Px(280), Ui.Px(20));
             _sourceNote.Bounds = new Rectangle(pad, y + Ui.Px(26), width, Ui.Px(22));
+            _sourceLink.Bounds = new Rectangle(pad, y + Ui.Px(52),
+                Ui.Measure(S.About.GitHub, Theme.Small).Width + Ui.Px(26), Ui.Px(22));
 
-            y += Ui.Px(72);
+            y += Ui.Px(96);
             _dataLabel.Bounds = new Rectangle(pad, y, Ui.Px(280), Ui.Px(20));
             _dataPath.Bounds = new Rectangle(pad, y + Ui.Px(26), width, Ui.Px(24));
             _openData.Bounds = new Rectangle(pad, y + Ui.Px(56),
